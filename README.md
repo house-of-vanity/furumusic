@@ -126,7 +126,13 @@ Helpers in `api/mod.rs`:
 |-------|--------|-------------|
 | `/api/me` | GET | Current user (id, name, role) or 401 |
 
-To add a new API endpoint: write an async handler returning `cot::Result<cot::response::Response>`, use `json_ok`/`json_error`, add a `Route` in `ApiApp::router()`.
+**Swagger UI** is available at `/swagger/` when `FURU_SWAGGER_ENABLED=true`. The OpenAPI spec is auto-generated from handler types.
+
+To add a new API endpoint:
+1. Define request/response structs with `#[derive(Serialize, JsonSchema)]`
+2. Write an async handler, return `Json(response).into_response()`
+3. Add a `Route::with_api_handler_and_name(…, api_get(handler), …)` in `ApiApp::router()`
+4. The endpoint appears automatically in Swagger UI
 
 ### Admin panel (`src/admin/`)
 
@@ -191,3 +197,4 @@ All prefixed with `FURU_`. Priority: env var > DB override > compiled default.
 | `FURU_OIDC_CLIENT_SECRET` | OIDC client secret | *(empty)* |
 | `FURU_OIDC_BUTTON_TEXT` | SSO button label | `Sign in with SSO` |
 | `FURU_OIDC_ADMIN_GROUPS` | Comma-separated OIDC groups that grant admin | *(empty)* |
+| `FURU_SWAGGER_ENABLED` | Serve Swagger UI at `/swagger/` | `false` |

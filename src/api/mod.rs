@@ -1,22 +1,18 @@
 use cot::db::Database;
-use cot::router::method::get;
+use cot::json::Json;
+use cot::response::IntoResponse;
+use cot::router::method::openapi::api_get;
 use cot::router::{Route, Router};
 use cot::session::Session;
 use cot::{App, Body};
+use schemars::JsonSchema;
+use serde::Serialize;
 
 use crate::auth;
 
 // ---------------------------------------------------------------------------
-// JSON response helpers
+// JSON error helper
 // ---------------------------------------------------------------------------
-
-fn json_ok(value: &serde_json::Value) -> cot::response::Response {
-    cot::http::Response::builder()
-        .status(cot::http::StatusCode::OK)
-        .header(cot::http::header::CONTENT_TYPE, "application/json")
-        .body(Body::fixed(value.to_string()))
-        .expect("valid response")
-}
 
 fn json_error(status: cot::http::StatusCode, message: &str) -> cot::response::Response {
     let body = serde_json::json!({ "error": message });
@@ -31,6 +27,13 @@ fn json_error(status: cot::http::StatusCode, message: &str) -> cot::response::Re
 // GET /api/me
 // ---------------------------------------------------------------------------
 
+#[derive(Debug, Serialize, JsonSchema)]
+struct MeResponse {
+    id: i64,
+    name: String,
+    role: String,
+}
+
 async fn me_handler(
     session: Session,
     db: Database,
@@ -42,11 +45,12 @@ async fn me_handler(
         ));
     };
 
-    Ok(json_ok(&serde_json::json!({
-        "id": user.id,
-        "name": user.name,
-        "role": user.role.code(),
-    })))
+    Json(MeResponse {
+        id: user.id,
+        name: user.name,
+        role: user.role.code().to_owned(),
+    })
+    .into_response()
 }
 
 // ---------------------------------------------------------------------------
@@ -62,7 +66,7 @@ impl App for ApiApp {
 
     fn router(&self) -> Router {
         Router::with_urls([
-            Route::with_handler_and_name("/me", get(me_handler), "api_me"),
+            Route::with_api_handler_and_name("/me", api_get(me_handler), "api_me"),
         ])
     }
 }

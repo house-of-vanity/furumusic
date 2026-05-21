@@ -86,6 +86,7 @@ fn config_display_entries(config: &AppConfig, sources: &ConfigSources) -> Vec<Co
         entry!(auth_sso_enabled, config.auth_sso_enabled.to_string(), defaults.auth_sso_enabled.to_string()),
         entry!(oidc_button_text, config.oidc_button_text.clone(), defaults.oidc_button_text.clone()),
         entry!(oidc_admin_groups, config.oidc_admin_groups.clone(), defaults.oidc_admin_groups.clone()),
+        entry!(swagger_enabled, config.swagger_enabled.to_string(), defaults.swagger_enabled.to_string()),
     ]
 }
 
@@ -155,6 +156,8 @@ struct SettingsTemplate {
     oidc_client_secret_source: &'static str,
     oidc_admin_groups: String,
     oidc_admin_groups_source: &'static str,
+    swagger_enabled: bool,
+    swagger_enabled_source: &'static str,
 }
 
 pub async fn settings_handler(
@@ -185,6 +188,8 @@ pub async fn settings_handler(
         oidc_client_secret_source: sources.oidc_client_secret.code(),
         oidc_admin_groups: config.oidc_admin_groups,
         oidc_admin_groups_source: sources.oidc_admin_groups.code(),
+        swagger_enabled: config.swagger_enabled,
+        swagger_enabled_source: sources.swagger_enabled.code(),
     };
     Ok(Html::new(template.render()?))
 }
@@ -198,6 +203,7 @@ pub struct OidcSettingsForm {
     oidc_client_id: String,
     oidc_client_secret: String,
     oidc_admin_groups: String,
+    swagger_enabled: Option<String>,
 }
 
 pub async fn settings_submit(
@@ -212,7 +218,8 @@ pub async fn settings_submit(
         FormResult::Ok(data) => {
             let pw_enabled = if data.auth_password_enabled.is_some() { "true" } else { "false" };
             let sso_enabled = if data.auth_sso_enabled.is_some() { "true" } else { "false" };
-            let fields: [(&str, &str); 7] = [
+            let swagger = if data.swagger_enabled.is_some() { "true" } else { "false" };
+            let fields: [(&str, &str); 8] = [
                 ("auth_password_enabled", pw_enabled),
                 ("auth_sso_enabled", sso_enabled),
                 ("oidc_button_text", &data.oidc_button_text),
@@ -220,6 +227,7 @@ pub async fn settings_submit(
                 ("oidc_client_id", &data.oidc_client_id),
                 ("oidc_client_secret", &data.oidc_client_secret),
                 ("oidc_admin_groups", &data.oidc_admin_groups),
+                ("swagger_enabled", swagger),
             ];
             for (key, value) in fields {
                 let mut entry = ConfigEntry::new(key.to_owned(), value.to_owned());

@@ -89,6 +89,11 @@ translations! {
     users_password_hint:      "Leave blank to keep current" , "Оставьте пустым, чтобы не менять";
     users_saved:              "User saved."                 , "Пользователь сохранён.";
 
+    // API settings
+    settings_api:             "API"                           , "API";
+    settings_swagger:         "Swagger UI"                    , "Swagger UI";
+    settings_swagger_help:    "Serves interactive API docs at /swagger/ (requires restart)" , "Интерактивная документация API на /swagger/ (требуется перезапуск)";
+
     // OIDC login errors
     login_oidc_error:         "SSO login failed. Please try again." , "Ошибка входа через SSO. Попробуйте ещё раз.";
     login_sso_disabled:       "SSO login is not configured." , "Вход через SSO не настроен.";

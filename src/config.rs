@@ -127,6 +127,7 @@ pub struct ConfigSources {
     pub auth_sso_enabled: ConfigSource,
     pub oidc_button_text: ConfigSource,
     pub oidc_admin_groups: ConfigSource,
+    pub swagger_enabled: ConfigSource,
 }
 
 impl Default for ConfigSources {
@@ -141,6 +142,7 @@ impl Default for ConfigSources {
             auth_sso_enabled: ConfigSource::Default,
             oidc_button_text: ConfigSource::Default,
             oidc_admin_groups: ConfigSource::Default,
+            swagger_enabled: ConfigSource::Default,
         }
     }
 }
@@ -223,6 +225,8 @@ pub struct AppConfig {
     pub oidc_button_text: String,
     /// Comma-separated list of OIDC group names that grant admin role.
     pub oidc_admin_groups: String,
+    /// Whether the Swagger UI is served at /swagger/.
+    pub swagger_enabled: bool,
 }
 
 impl Default for AppConfig {
@@ -237,6 +241,7 @@ impl Default for AppConfig {
             auth_sso_enabled: false,
             oidc_button_text: "Sign in with SSO".into(),
             oidc_admin_groups: String::new(),
+            swagger_enabled: false,
         }
     }
 }
@@ -252,6 +257,7 @@ impl_env_overrides!(
     auth_sso_enabled,
     oidc_button_text,
     oidc_admin_groups,
+    swagger_enabled,
 );
 
 impl AppConfig {
@@ -317,6 +323,7 @@ impl AppConfig {
         apply_db_field!(auth_sso_enabled);
         apply_db_field!(oidc_button_text);
         apply_db_field!(oidc_admin_groups);
+        apply_db_field!(swagger_enabled);
     }
 }
 

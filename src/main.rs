@@ -19,6 +19,7 @@ use cot::db::Database;
 use cot::form::{Form, FormResult};
 use cot::html::Html;
 use cot::middleware::SessionMiddleware;
+use cot::static_files::StaticFilesMiddleware;
 use cot::project::RegisterAppsContext;
 use cot::request::extractors::{RequestForm, UrlQuery};
 use cot::response::IntoResponse;
@@ -148,6 +149,11 @@ impl App for FuruApp {
                 get(|| async { Ok::<_, cot::Error>(auth::redirect("/admin/")) }),
                 "admin_redirect",
             ),
+            Route::with_handler_and_name(
+                "/swagger",
+                get(|| async { Ok::<_, cot::Error>(auth::redirect("/swagger/")) }),
+                "swagger_redirect",
+            ),
             Route::with_handler_and_name("/", index, "index"),
             Route::with_handler_and_name(
                 "/login",
@@ -258,6 +264,9 @@ impl Project for FuruProject {
                 "    FURU_OIDC_BUTTON_TEXT        SSO button label (default: Sign in with SSO)\n",
                 "    FURU_OIDC_ADMIN_GROUPS       OIDC groups that grant admin role\n",
                 "\n",
+                "  API:\n",
+                "    FURU_SWAGGER_ENABLED   Enable Swagger UI at /swagger/ (default: false)\n",
+                "\n",
                 "QUICK START\n",
                 "  export FURU_DATABASE_URL=postgres://user:pass@localhost/furumusic\n",
                 "  furumusic run",
@@ -300,6 +309,7 @@ impl Project for FuruProject {
         context: &cot::project::MiddlewareContext,
     ) -> cot::project::RootHandler {
         handler
+            .middleware(StaticFilesMiddleware::from_context(context))
             .middleware(
                 SessionMiddleware::from_context(context)
                     .same_site(cot::config::SameSite::Lax),
@@ -320,6 +330,12 @@ impl Project for FuruProject {
             "/admin",
         );
         apps.register_with_views(api::ApiApp, "/api");
+        if self.app_config.swagger_enabled {
+            apps.register_with_views(
+                cot::openapi::swagger_ui::SwaggerUi::new(),
+                "/swagger",
+            );
+        }
     }
 }
 

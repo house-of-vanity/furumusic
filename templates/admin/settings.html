@@ -68,6 +68,20 @@
     <td><span class="badge badge-{{ oidc_admin_groups_source }}">{{ oidc_admin_groups_source }}</span></td>
   </tr>
 </table>
+<h2>{{ t.settings_api }}</h2>
+<table>
+  <tr>
+    <th>{{ t.debug_field }}</th>
+    <th>{{ t.debug_value }}</th>
+    <th>{{ t.debug_source }}</th>
+  </tr>
+  <tr>
+    <td><label for="swagger_enabled">{{ t.settings_swagger }}</label><br><span style="font-size:.75rem;color:#999;">{{ t.settings_swagger_help }}</span></td>
+    <td><input type="checkbox" name="swagger_enabled" id="swagger_enabled" value="on"{% if swagger_enabled %} checked{% endif %}></td>
+    <td><span class="badge badge-{{ swagger_enabled_source }}">{{ swagger_enabled_source }}</span></td>
+  </tr>
+</table>
+
   <button type="submit" style="margin-top: 1rem; padding: .5rem 1.5rem;">{{ t.settings_save }}</button>
 </form>
 {% endblock content %}
