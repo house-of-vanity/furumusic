@@ -20,8 +20,8 @@ pub struct ScheduledJob {
     pub description: String,
     pub cron_expression: LimitedString<100>,
     pub enabled: bool,
-    pub last_run_at: Option<LimitedString<32>>,
-    pub next_run_at: Option<LimitedString<32>>,
+    pub last_run_at: Option<String>,
+    pub next_run_at: Option<String>,
     pub created_at: LimitedString<32>,
     pub updated_at: LimitedString<32>,
 }
@@ -51,8 +51,7 @@ impl ScheduledJob {
                     "Updating cron expression"
                 );
                 existing.cron_expression = LimitedString::new(cron_expression).unwrap();
-                existing.next_run_at = compute_next_run(cron_expression)
-                    .map(|s| LimitedString::new(&s).unwrap());
+                existing.next_run_at = compute_next_run(cron_expression);
                 changed = true;
             }
             if existing.description != description {
@@ -73,7 +72,7 @@ impl ScheduledJob {
             cron_expression: LimitedString::new(cron_expression).unwrap(),
             enabled: true,
             last_run_at: None,
-            next_run_at: next.map(|s| LimitedString::new(&s).unwrap()),
+            next_run_at: next,
             created_at: now.clone(),
             updated_at: now,
         };
@@ -98,11 +97,11 @@ impl ScheduledJob {
     }
 
     pub fn last_run_at_str(&self) -> &str {
-        self.last_run_at.as_ref().map_or("", |v| v.as_str())
+        self.last_run_at.as_deref().unwrap_or("")
     }
 
     pub fn next_run_at_str(&self) -> &str {
-        self.next_run_at.as_ref().map_or("", |v| v.as_str())
+        self.next_run_at.as_deref().unwrap_or("")
     }
 
     pub async fn delete_by_name(db: &Database, name: &str) -> cot::db::Result<()> {
@@ -127,7 +126,7 @@ pub struct JobRun {
     pub job_name: LimitedString<100>,
     pub status: LimitedString<32>,
     pub started_at: LimitedString<32>,
-    pub finished_at: Option<LimitedString<32>>,
+    pub finished_at: Option<String>,
     pub duration_ms: Option<i64>,
     pub log_output: Option<String>,
     pub error_message: Option<String>,
@@ -154,7 +153,7 @@ impl JobRun {
 
     pub async fn set_completed(&mut self, db: &Database, duration_ms: i64, log: &str) -> cot::db::Result<()> {
         self.status = LimitedString::new("completed").unwrap();
-        self.finished_at = Some(now_iso());
+        self.finished_at = Some(now_iso().to_string());
         self.duration_ms = Some(duration_ms);
         self.log_output = Some(log.to_owned());
         self.save(db).await
@@ -162,7 +161,7 @@ impl JobRun {
 
     pub async fn set_failed(&mut self, db: &Database, duration_ms: i64, log: &str, error: &str) -> cot::db::Result<()> {
         self.status = LimitedString::new("failed").unwrap();
-        self.finished_at = Some(now_iso());
+        self.finished_at = Some(now_iso().to_string());
         self.duration_ms = Some(duration_ms);
         self.log_output = Some(log.to_owned());
         self.error_message = Some(error.to_owned());
@@ -224,7 +223,7 @@ impl JobRun {
     }
 
     pub fn finished_at_str(&self) -> &str {
-        self.finished_at.as_ref().map_or("", |v| v.as_str())
+        self.finished_at.as_deref().unwrap_or("")
     }
 
     pub fn duration_display(&self) -> String {
@@ -277,7 +276,7 @@ impl JobRunRow {
             job_name: LimitedString::new(&self.job_name).unwrap(),
             status: LimitedString::new(&self.status).unwrap(),
             started_at: LimitedString::new(&self.started_at).unwrap(),
-            finished_at: self.finished_at.map(|s| LimitedString::new(&s).unwrap()),
+            finished_at: self.finished_at,
             duration_ms: self.duration_ms,
             log_output: self.log_output,
             error_message: self.error_message,
@@ -968,7 +967,7 @@ impl SchedulerHandle {
         }
 
         if let Ok(Some(mut sched_job)) = ScheduledJob::get_by_name(db, job_name).await {
-            sched_job.last_run_at = Some(now_iso());
+            sched_job.last_run_at = Some(now_iso().to_string());
             sched_job.updated_at = now_iso();
             let _ = sched_job.save(db).await;
         }
@@ -993,8 +992,7 @@ impl SchedulerHandle {
         // Update DB
         if let Ok(Some(mut sched_job)) = ScheduledJob::get_by_name(&self.shared_db, job_name).await {
             sched_job.cron_expression = LimitedString::new(new_cron).unwrap();
-            sched_job.next_run_at = compute_next_run(new_cron)
-                .map(|s| LimitedString::new(&s).unwrap());
+            sched_job.next_run_at = compute_next_run(new_cron);
             sched_job.updated_at = now_iso();
             let _ = sched_job.save(&self.shared_db).await;
         }
@@ -1024,8 +1022,7 @@ impl SchedulerHandle {
 
         sched_job.enabled = enabled;
         if enabled {
-            sched_job.next_run_at = compute_next_run(sched_job.cron_expression_str())
-                .map(|s| LimitedString::new(&s).unwrap());
+            sched_job.next_run_at = compute_next_run(sched_job.cron_expression_str());
         }
         sched_job.updated_at = now_iso();
         let _ = sched_job.save(&self.shared_db).await;
@@ -1312,7 +1309,7 @@ pub async fn trigger_job_now(
     }
 
     if let Ok(Some(mut sched_job)) = ScheduledJob::get_by_name(db, job_name).await {
-        sched_job.last_run_at = Some(now_iso());
+        sched_job.last_run_at = Some(now_iso().to_string());
         sched_job.updated_at = now_iso();
         let _ = sched_job.save(db).await;
     }

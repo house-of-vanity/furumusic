@@ -30,7 +30,7 @@ pub struct MediaFile {
     pub sha256_hash: LimitedString<64>,
     // Audio-specific fields (NULL for non-audio files)
     /// e.g. "mp3", "flac", "ogg", "wav"
-    pub audio_format: Option<LimitedString<32>>,
+    pub audio_format: Option<String>,
     /// Bitrate in kbps
     pub audio_bitrate: Option<i32>,
     /// Sample rate in Hz
@@ -57,7 +57,7 @@ pub struct Artist {
     pub image_file_id: Option<i64>,
     pub is_hidden: bool,
     /// NULL = human-created, non-NULL = LLM model that created it
-    pub model_name: Option<LimitedString<128>>,
+    pub model_name: Option<String>,
     pub created_at: LimitedString<32>,
     pub updated_at: LimitedString<32>,
 }
@@ -91,7 +91,7 @@ impl Artist {
             name_sort: LimitedString::new(&normalize_name(name)).unwrap(),
             image_file_id: None,
             is_hidden: false,
-            model_name: model_name.map(|s| LimitedString::new(s).unwrap()),
+            model_name: model_name.map(str::to_owned),
             created_at: now.clone(),
             updated_at: now,
         };
@@ -173,7 +173,7 @@ pub struct Release {
     pub total_discs: Option<i32>,
     pub is_hidden: bool,
     /// NULL = human-created, non-NULL = LLM model that created it
-    pub model_name: Option<LimitedString<128>>,
+    pub model_name: Option<String>,
     pub created_at: LimitedString<32>,
     pub updated_at: LimitedString<32>,
 }
@@ -206,7 +206,7 @@ impl Release {
             total_tracks: None,
             total_discs: None,
             is_hidden: false,
-            model_name: model_name.map(|s| LimitedString::new(s).unwrap()),
+            model_name: model_name.map(str::to_owned),
             created_at: now.clone(),
             updated_at: now,
         };
@@ -355,7 +355,7 @@ pub struct Track {
     pub year: Option<i32>,
     pub is_hidden: bool,
     /// NULL = human-created, non-NULL = LLM model that created it
-    pub model_name: Option<LimitedString<128>>,
+    pub model_name: Option<String>,
     pub created_at: LimitedString<32>,
     pub updated_at: LimitedString<32>,
 }
@@ -585,7 +585,7 @@ impl Track {
             cover_file_id: None,
             year,
             is_hidden: false,
-            model_name: model_name.map(|s| LimitedString::new(s).unwrap()),
+            model_name: model_name.map(str::to_owned),
             created_at: now.clone(),
             updated_at: now,
         };
@@ -622,7 +622,7 @@ impl MediaFile {
             mime_type: LimitedString::new(mime_type).unwrap(),
             file_size_bytes,
             sha256_hash: LimitedString::new(sha256_hash).unwrap(),
-            audio_format: audio_format.map(|s| LimitedString::new(s).unwrap()),
+            audio_format: audio_format.map(str::to_owned),
             audio_bitrate,
             audio_sample_rate,
             audio_bit_depth,
@@ -674,7 +674,7 @@ impl MediaFile {
     }
 
     pub fn audio_format_str(&self) -> &str {
-        self.audio_format.as_ref().map_or("", |s| s.as_str())
+        self.audio_format.as_deref().unwrap_or("")
     }
 
     pub fn created_at_str(&self) -> &str {

@@ -13,9 +13,9 @@ pub struct User {
     id: Auto<i64>,
     #[model(unique)]
     username: LimitedString<255>,
-    password: Option<PasswordHash>,
-    email: Option<LimitedString<255>>,
-    display_name: Option<LimitedString<255>>,
+    password: Option<String>,
+    email: Option<String>,
+    display_name: Option<String>,
     avatar_url: Option<String>,
     role: LimitedString<32>,
     is_active: bool,
@@ -49,9 +49,9 @@ impl User {
         let mut user = Self {
             id: Auto::auto(),
             username: LimitedString::new(username).unwrap(),
-            password: Some(hash),
-            email: email.map(|e| LimitedString::new(e).unwrap()),
-            display_name: display_name.map(|d| LimitedString::new(d).unwrap()),
+            password: Some(hash.into_string()),
+            email: email.map(str::to_owned),
+            display_name: display_name.map(str::to_owned),
             avatar_url: None,
             role: LimitedString::new(role).unwrap(),
             is_active: true,
@@ -72,10 +72,10 @@ impl User {
         role: &str,
     ) -> cot::db::Result<()> {
         self.username = LimitedString::new(username).unwrap();
-        self.email = email.map(|e| LimitedString::new(e).unwrap());
-        self.display_name = display_name.map(|d| LimitedString::new(d).unwrap());
+        self.email = email.map(str::to_owned);
+        self.display_name = display_name.map(str::to_owned);
         if let Some(pw) = new_password {
-            self.password = Some(PasswordHash::from_password(&Password::new(pw)));
+            self.password = Some(PasswordHash::from_password(&Password::new(pw)).into_string());
         }
         self.role = LimitedString::new(role).unwrap();
         self.save(db).await
@@ -95,8 +95,10 @@ impl User {
     }
 
     /// Return a reference to the password hash, if set.
-    pub fn password_ref(&self) -> Option<&PasswordHash> {
-        self.password.as_ref()
+    pub fn password_ref(&self) -> Option<PasswordHash> {
+        self.password
+            .as_ref()
+            .and_then(|hash| PasswordHash::new(hash.clone()).ok())
     }
 
     /// Parse the stored role code into a `Role`, defaulting to `User`.
@@ -142,8 +144,8 @@ impl User {
             id: Auto::auto(),
             username: LimitedString::new(username).unwrap(),
             password: None,
-            email: email.map(|e| LimitedString::new(e).unwrap()),
-            display_name: display_name.map(|d| LimitedString::new(d).unwrap()),
+            email: email.map(str::to_owned),
+            display_name: display_name.map(str::to_owned),
             avatar_url: None,
             role: LimitedString::new(role).unwrap(),
             is_active: true,
@@ -160,10 +162,7 @@ impl User {
 
     /// Find a user by email address.
     pub async fn get_by_email(db: &Database, email: &str) -> cot::db::Result<Option<Self>> {
-        let Ok(email) = LimitedString::<255>::new(email) else {
-            return Ok(None);
-        };
-        cot::db::query!(User, $email == Some(email)).get(db).await
+        cot::db::query!(User, $email == Some(email.to_owned())).get(db).await
     }
 }
 
@@ -179,8 +178,8 @@ pub struct OidcLink {
     user_id: i64,
     issuer: LimitedString<255>,
     sub: LimitedString<255>,
-    email: Option<LimitedString<255>>,
-    name: Option<LimitedString<255>>,
+    email: Option<String>,
+    name: Option<String>,
     avatar_url: Option<String>,
 }
 
@@ -220,8 +219,8 @@ impl OidcLink {
             user_id,
             issuer: LimitedString::new(issuer).unwrap(),
             sub: LimitedString::new(sub).unwrap(),
-            email: email.map(|e| LimitedString::new(e).unwrap()),
-            name: name.map(|n| LimitedString::new(n).unwrap()),
+            email: email.map(str::to_owned),
+            name: name.map(str::to_owned),
             avatar_url: None,
         };
         link.insert(db).await?;
@@ -235,8 +234,8 @@ impl OidcLink {
         email: Option<&str>,
         name: Option<&str>,
     ) -> cot::db::Result<()> {
-        self.email = email.map(|e| LimitedString::new(e).unwrap());
-        self.name = name.map(|n| LimitedString::new(n).unwrap());
+        self.email = email.map(str::to_owned);
+        self.name = name.map(str::to_owned);
         self.save(db).await
     }
 
