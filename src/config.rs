@@ -128,6 +128,15 @@ pub struct ConfigSources {
     pub oidc_button_text: ConfigSource,
     pub oidc_admin_groups: ConfigSource,
     pub swagger_enabled: ConfigSource,
+    pub agent_enabled: ConfigSource,
+    pub agent_inbox_dir: ConfigSource,
+    pub agent_storage_dir: ConfigSource,
+    pub agent_llm_url: ConfigSource,
+    pub agent_llm_model: ConfigSource,
+    pub agent_llm_auth: ConfigSource,
+    pub agent_confidence_threshold: ConfigSource,
+    pub agent_context_limit: ConfigSource,
+    pub agent_concurrency: ConfigSource,
 }
 
 impl Default for ConfigSources {
@@ -143,6 +152,15 @@ impl Default for ConfigSources {
             oidc_button_text: ConfigSource::Default,
             oidc_admin_groups: ConfigSource::Default,
             swagger_enabled: ConfigSource::Default,
+            agent_enabled: ConfigSource::Default,
+            agent_inbox_dir: ConfigSource::Default,
+            agent_storage_dir: ConfigSource::Default,
+            agent_llm_url: ConfigSource::Default,
+            agent_llm_model: ConfigSource::Default,
+            agent_llm_auth: ConfigSource::Default,
+            agent_confidence_threshold: ConfigSource::Default,
+            agent_context_limit: ConfigSource::Default,
+            agent_concurrency: ConfigSource::Default,
         }
     }
 }
@@ -227,6 +245,24 @@ pub struct AppConfig {
     pub oidc_admin_groups: String,
     /// Whether the Swagger UI is served at /swagger/.
     pub swagger_enabled: bool,
+    /// Whether the AI agent background loop is enabled.
+    pub agent_enabled: bool,
+    /// Directory to scan for incoming audio files.
+    pub agent_inbox_dir: String,
+    /// Directory for organized permanent storage.
+    pub agent_storage_dir: String,
+    /// LLM API URL (OpenAI-compatible).
+    pub agent_llm_url: String,
+    /// LLM model name.
+    pub agent_llm_model: String,
+    /// LLM Authorization header value (e.g. "Bearer sk-...").
+    pub agent_llm_auth: String,
+    /// Confidence threshold for auto-approval (0.0–1.0).
+    pub agent_confidence_threshold: f64,
+    /// LLM context window size in tokens. Chat history resets when approaching this limit.
+    pub agent_context_limit: u64,
+    /// Number of files to process in parallel via the LLM.
+    pub agent_concurrency: u64,
 }
 
 impl Default for AppConfig {
@@ -242,6 +278,15 @@ impl Default for AppConfig {
             oidc_button_text: "Sign in with SSO".into(),
             oidc_admin_groups: String::new(),
             swagger_enabled: false,
+            agent_enabled: false,
+            agent_inbox_dir: String::new(),
+            agent_storage_dir: String::new(),
+            agent_llm_url: "http://localhost:8080".into(),
+            agent_llm_model: "default".into(),
+            agent_llm_auth: String::new(),
+            agent_confidence_threshold: 0.85,
+            agent_context_limit: 8192,
+            agent_concurrency: 2,
         }
     }
 }
@@ -258,6 +303,15 @@ impl_env_overrides!(
     oidc_button_text,
     oidc_admin_groups,
     swagger_enabled,
+    agent_enabled,
+    agent_inbox_dir,
+    agent_storage_dir,
+    agent_llm_url,
+    agent_llm_model,
+    agent_llm_auth,
+    agent_confidence_threshold,
+    agent_context_limit,
+    agent_concurrency,
 );
 
 impl AppConfig {
@@ -324,6 +378,15 @@ impl AppConfig {
         apply_db_field!(oidc_button_text);
         apply_db_field!(oidc_admin_groups);
         apply_db_field!(swagger_enabled);
+        apply_db_field!(agent_enabled);
+        apply_db_field!(agent_inbox_dir);
+        apply_db_field!(agent_storage_dir);
+        apply_db_field!(agent_llm_url);
+        apply_db_field!(agent_llm_model);
+        apply_db_field!(agent_llm_auth);
+        apply_db_field!(agent_confidence_threshold);
+        apply_db_field!(agent_context_limit);
+        apply_db_field!(agent_concurrency);
     }
 }
 

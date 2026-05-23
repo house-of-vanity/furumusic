@@ -3,6 +3,7 @@
 {% block title %}{% block admin_title %}{{ t.nav_admin }}{% endblock admin_title %} | {{ t.site_name }}{% endblock title %}
 
 {% block head_extra %}
+<script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" crossorigin="anonymous"></script>
 <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: system-ui, -apple-system, sans-serif; display: flex; min-height: 100vh; background: #f5f5f5; color: #333; }
@@ -37,6 +38,11 @@
 <nav class="sidebar">
     <h2>{{ t.site_name }} {{ t.nav_admin }}</h2>
     <a href="/admin/">{{ t.nav_dashboard }}</a>
+    <a href="/admin/artists">{{ t.nav_artists }}</a>
+    <a href="/admin/releases">{{ t.nav_releases }}</a>
+    <a href="/admin/media-files">{{ t.nav_media_files }}</a>
+    <a href="/admin/jobs">{{ t.nav_jobs }}</a>
+    <a href="/admin/reviews">{{ t.nav_reviews }}</a>
     <a href="/admin/users">{{ t.nav_users }}</a>
     <a href="/admin/settings">{{ t.nav_settings }}</a>
     <a href="/admin/debug">{{ t.nav_debug }}</a>

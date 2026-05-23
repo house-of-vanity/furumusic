@@ -40,6 +40,7 @@ impl Lang {
 macro_rules! translations {
     ( $( $key:ident : $en:expr , $ru:expr );* $(;)? ) => {
         #[derive(Debug)]
+        #[allow(dead_code)]
         pub struct Translations {
             pub lang: $crate::i18n::Lang,
             $( pub $key: &'static str, )*
@@ -149,6 +150,7 @@ fn resolve_lang(headers: &cot::http::HeaderMap) -> Lang {
 // I18n extractor
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 pub struct I18n {
     pub lang: Lang,
     pub t: &'static Translations,

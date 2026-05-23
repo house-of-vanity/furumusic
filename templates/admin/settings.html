@@ -82,6 +82,70 @@
   </tr>
 </table>
 
+<h2>{{ t.settings_agent }}</h2>
+<p style="font-size:.85rem;color:#666;margin-bottom:.5rem;">{{ t.settings_agent_help }}</p>
+<table>
+  <tr>
+    <th>{{ t.debug_field }}</th>
+    <th>{{ t.debug_value }}</th>
+    <th>{{ t.debug_source }}</th>
+  </tr>
+  <tr>
+    <td><label for="agent_enabled">{{ t.settings_agent_enabled }}</label></td>
+    <td><input type="checkbox" name="agent_enabled" id="agent_enabled" value="on"{% if agent_enabled %} checked{% endif %}></td>
+    <td><span class="badge badge-{{ agent_enabled_source }}">{{ agent_enabled_source }}</span></td>
+  </tr>
+  <tr>
+    <td><label for="agent_inbox_dir">{{ t.settings_agent_inbox }}</label></td>
+    <td><input name="agent_inbox_dir" id="agent_inbox_dir" value="{{ agent_inbox_dir }}" style="width:100%"></td>
+    <td><span class="badge badge-{{ agent_inbox_dir_source }}">{{ agent_inbox_dir_source }}</span></td>
+  </tr>
+  <tr>
+    <td><label for="agent_storage_dir">{{ t.settings_agent_storage }}</label></td>
+    <td><input name="agent_storage_dir" id="agent_storage_dir" value="{{ agent_storage_dir }}" style="width:100%"></td>
+    <td><span class="badge badge-{{ agent_storage_dir_source }}">{{ agent_storage_dir_source }}</span></td>
+  </tr>
+  <tr>
+    <td><label for="agent_llm_url">{{ t.settings_agent_llm_url }}</label></td>
+    <td><input name="agent_llm_url" id="agent_llm_url" value="{{ agent_llm_url }}" style="width:100%"></td>
+    <td><span class="badge badge-{{ agent_llm_url_source }}">{{ agent_llm_url_source }}</span></td>
+  </tr>
+  <tr>
+    <td><label for="agent_llm_model">{{ t.settings_agent_llm_model }}</label></td>
+    <td><input name="agent_llm_model" id="agent_llm_model" value="{{ agent_llm_model }}" style="width:100%"></td>
+    <td><span class="badge badge-{{ agent_llm_model_source }}">{{ agent_llm_model_source }}</span></td>
+  </tr>
+  <tr>
+    <td><label for="agent_llm_auth">{{ t.settings_agent_llm_auth }}</label></td>
+    <td><input name="agent_llm_auth" id="agent_llm_auth" type="password" value="{{ agent_llm_auth }}" style="width:100%"></td>
+    <td><span class="badge badge-{{ agent_llm_auth_source }}">{{ agent_llm_auth_source }}</span></td>
+  </tr>
+  <tr>
+    <td><label for="agent_confidence_threshold">{{ t.settings_agent_threshold }}</label></td>
+    <td><input name="agent_confidence_threshold" id="agent_confidence_threshold" value="{{ agent_confidence_threshold }}" style="width:6em"></td>
+    <td><span class="badge badge-{{ agent_confidence_threshold_source }}">{{ agent_confidence_threshold_source }}</span></td>
+  </tr>
+  <tr>
+    <td><label for="agent_context_limit">{{ t.settings_agent_context }}</label></td>
+    <td><input name="agent_context_limit" id="agent_context_limit" value="{{ agent_context_limit }}" style="width:6em"></td>
+    <td><span class="badge badge-{{ agent_context_limit_source }}">{{ agent_context_limit_source }}</span></td>
+  </tr>
+  <tr>
+    <td><label for="agent_concurrency">{{ t.settings_agent_concurrency }}</label></td>
+    <td><input name="agent_concurrency" id="agent_concurrency" value="{{ agent_concurrency }}" type="number" min="1" max="32" style="width:6em"></td>
+    <td><span class="badge badge-{{ agent_concurrency_source }}">{{ agent_concurrency_source }}</span></td>
+  </tr>
+</table>
+
+<h2>{{ t.settings_agent_status }}</h2>
+<div hx-get="/admin/settings/probe" hx-trigger="load" hx-swap="innerHTML">
+  <p style="color:#999;">
+    <span class="htmx-indicator" style="display:inline;">
+      &#9696; {{ t.settings_agent_status_loading }}...
+    </span>
+  </p>
+</div>
+
   <button type="submit" style="margin-top: 1rem; padding: .5rem 1.5rem;">{{ t.settings_save }}</button>
 </form>
 {% endblock content %}

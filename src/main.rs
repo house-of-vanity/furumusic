@@ -1,9 +1,14 @@
 mod admin;
+mod agent;
 mod api;
 mod auth;
 mod config;
 mod i18n;
+mod jobs;
+mod music;
 mod oidc;
+mod player;
+mod scheduler;
 mod user;
 
 use std::sync::Arc;
@@ -12,8 +17,8 @@ use cot::auth::PasswordVerificationResult;
 use cot::cli::CliMetadata;
 use cot::common_types::Password;
 use cot::config::{
-    DatabaseConfig, MiddlewareConfig, ProjectConfig, SessionMiddlewareConfig, SessionStoreConfig,
-    SessionStoreTypeConfig,
+    DatabaseConfig, MiddlewareConfig, ProjectConfig, SameSite, SessionMiddlewareConfig,
+    SessionStoreConfig, SessionStoreTypeConfig,
 };
 use cot::db::Database;
 use cot::form::{Form, FormResult};
@@ -31,7 +36,23 @@ use serde::Deserialize;
 
 use crate::config::AppConfig;
 use crate::i18n::{I18n, Translations};
+use crate::scheduler::{JobRegistry, SchedulerHandle};
 use crate::user::User;
+
+// ---------------------------------------------------------------------------
+// Build the job registry
+// ---------------------------------------------------------------------------
+
+fn build_registry() -> Arc<JobRegistry> {
+    let mut registry = JobRegistry::new();
+    registry.register(jobs::inbox_discover::InboxDiscoverJob);
+    registry.register(jobs::inbox_process::InboxProcessJob);
+    registry.register(jobs::inbox_process::FileProcessJob);
+    registry.register(jobs::cover_backfill::CoverBackfillJob);
+    registry.register(jobs::artist_image_backfill::ArtistImageBackfillJob);
+    registry.register(jobs::artist_track_image_backfill::ArtistTrackImageBackfillJob);
+    Arc::new(registry)
+}
 
 // ---------------------------------------------------------------------------
 // Handlers
@@ -42,23 +63,12 @@ async fn index(
     db: Database,
     i18n: I18n,
 ) -> cot::Result<cot::response::Response> {
-    let user = match auth::get_session_user(&session, &db).await {
+    let _user = match auth::get_session_user(&session, &db).await {
         Some(u) => u,
         None => return Ok(auth::redirect("/login")),
     };
-    let role_label = match user.role {
-        auth::Role::Admin => format!(
-            r#"{} | <a href="/admin/">{}</a>"#,
-            user.role.code(),
-            i18n.t.nav_admin
-        ),
-        _ => user.role.code().to_owned(),
-    };
-    Html::new(format!(
-        "<h1>{}</h1><p>{}</p><p>{}: {}</p>",
-        i18n.t.index_heading, i18n.t.index_status, user.name, role_label
-    ))
-    .into_response()
+    let template = player::PlayerPageTemplate { t: i18n.t };
+    Html::new(template.render()?).into_response()
 }
 
 #[derive(Deserialize)]
@@ -154,7 +164,12 @@ impl App for FuruApp {
                 get(|| async { Ok::<_, cot::Error>(auth::redirect("/swagger/")) }),
                 "swagger_redirect",
             ),
-            Route::with_handler_and_name("/", index, "index"),
+            Route::with_handler_and_name("/",
+                |session: Session, db: Database, i18n: I18n| async move {
+                    index(session, db, i18n).await
+                },
+                "index",
+            ),
             Route::with_handler_and_name(
                 "/login",
                 get({
@@ -236,6 +251,8 @@ impl App for FuruApp {
 
 struct FuruProject {
     app_config: Arc<AppConfig>,
+    registry: Arc<JobRegistry>,
+    scheduler_handle: Arc<tokio::sync::OnceCell<Arc<SchedulerHandle>>>,
 }
 
 impl Project for FuruProject {
@@ -289,6 +306,8 @@ impl Project for FuruProject {
                 MiddlewareConfig::builder()
                     .session(
                         SessionMiddlewareConfig::builder()
+                            .secure(false)
+                            .same_site(SameSite::Lax)
                             .store(
                                 SessionStoreConfig::builder()
                                     .store_type(SessionStoreTypeConfig::Database)
@@ -310,14 +329,30 @@ impl Project for FuruProject {
     ) -> cot::project::RootHandler {
         handler
             .middleware(StaticFilesMiddleware::from_context(context))
-            .middleware(
-                SessionMiddleware::from_context(context)
-                    .same_site(cot::config::SameSite::Lax),
-            )
+            .middleware(SessionMiddleware::from_context(context))
             .build()
     }
 
     fn register_apps(&self, apps: &mut AppBuilder, _context: &RegisterAppsContext) {
+        // Spawn the scheduler in background — it runs independently of HTTP
+        // requests.  The OnceCell ensures it starts exactly once.
+        let sched_cell = Arc::clone(&self.scheduler_handle);
+        let sched_config = Arc::clone(&self.app_config);
+        let sched_registry = Arc::clone(&self.registry);
+        tokio::spawn(async move {
+            let _ = sched_cell
+                .get_or_init(|| async {
+                    match scheduler::start_scheduler(&sched_config, sched_registry).await {
+                        Ok(handle) => handle,
+                        Err(e) => {
+                            tracing::error!("Failed to start scheduler: {e:#}");
+                            panic!("scheduler failed to start: {e}");
+                        }
+                    }
+                })
+                .await;
+        });
+
         apps.register(cot::session::db::SessionApp::new());
         apps.register_with_views(
             FuruApp {
@@ -326,10 +361,18 @@ impl Project for FuruProject {
             "",
         );
         apps.register_with_views(
-            admin::AdminApp::new(Arc::clone(&self.app_config)),
+            admin::AdminApp::new(
+                Arc::clone(&self.app_config),
+                Arc::clone(&self.registry),
+                Arc::clone(&self.scheduler_handle),
+            ),
             "/admin",
         );
         apps.register_with_views(api::ApiApp, "/api");
+        apps.register_with_views(
+            player::PlayerApp::new(Arc::clone(&self.app_config)),
+            "/api/player",
+        );
         if self.app_config.swagger_enabled {
             apps.register_with_views(
                 cot::openapi::swagger_ui::SwaggerUi::new(),
@@ -362,5 +405,11 @@ fn main() -> impl Project {
 
     tracing::info!("loaded config: {:?}", app_config);
 
-    FuruProject { app_config }
+    let registry = build_registry();
+
+    FuruProject {
+        app_config,
+        registry,
+        scheduler_handle: Arc::new(tokio::sync::OnceCell::new()),
+    }
 }

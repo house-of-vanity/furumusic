@@ -1,0 +1,73 @@
+{% extends "admin/layout.html" %}
+{% block admin_title %}{{ t.nav_reviews }}{% endblock admin_title %}
+
+{% block content %}
+<h1>{{ t.reviews_heading }}</h1>
+
+<div style="margin-bottom: 1rem; display: flex; gap: .5rem; align-items: center;">
+    <a href="/admin/reviews" style="padding: .3rem .8rem; border-radius: 4px; text-decoration: none; background:{% if status_filter == "" %} #333; color: #fff{% else %} #e9ecef; color: #333{% endif %};">{{ t.reviews_filter_all }}</a>
+    <a href="/admin/reviews?status=pending" style="padding: .3rem .8rem; border-radius: 4px; text-decoration: none; background:{% if status_filter == "pending" %} #ffc107; color: #000{% else %} #e9ecef; color: #333{% endif %};">{{ t.reviews_filter_pending }}</a>
+    <a href="/admin/reviews?status=approved" style="padding: .3rem .8rem; border-radius: 4px; text-decoration: none; background:{% if status_filter == "approved" %} #28a745; color: #fff{% else %} #e9ecef; color: #333{% endif %};">{{ t.reviews_filter_approved }}</a>
+    <a href="/admin/reviews?status=rejected" style="padding: .3rem .8rem; border-radius: 4px; text-decoration: none; background:{% if status_filter == "rejected" %} #dc3545; color: #fff{% else %} #e9ecef; color: #333{% endif %};">{{ t.reviews_filter_rejected }}</a>
+    <a href="/admin/reviews?status=queued" style="padding: .3rem .8rem; border-radius: 4px; text-decoration: none; background:{% if status_filter == "queued" %} #17a2b8; color: #fff{% else %} #e9ecef; color: #333{% endif %};">{{ t.reviews_filter_queued }}</a>
+    <a href="/admin/reviews?status=processing" style="padding: .3rem .8rem; border-radius: 4px; text-decoration: none; background:{% if status_filter == "processing" %} #007bff; color: #fff{% else %} #e9ecef; color: #333{% endif %};">{{ t.reviews_filter_processing }}</a>
+    <a href="/admin/reviews?status=auto_approved" style="padding: .3rem .8rem; border-radius: 4px; text-decoration: none; background:{% if status_filter == "auto_approved" %} #28a745; color: #fff{% else %} #e9ecef; color: #333{% endif %};">{{ t.reviews_filter_auto_approved }}</a>
+    <a href="/admin/reviews?status=failed" style="padding: .3rem .8rem; border-radius: 4px; text-decoration: none; background:{% if status_filter == "failed" %} #dc3545; color: #fff{% else %} #e9ecef; color: #333{% endif %};">{{ t.reviews_filter_failed }}</a>
+    {% if !reviews.is_empty() %}
+    <span style="flex:1;"></span>
+    <form method="post" action="/admin/reviews/clear{% if !status_filter.is_empty() %}?status={{ status_filter }}{% endif %}" style="margin:0;" onsubmit="return confirm('{{ t.reviews_clear_confirm }}');">
+        <button type="submit" style="padding:.3rem .8rem; border-radius:4px; border:1px solid #dc3545; background:#fff; color:#dc3545; cursor:pointer;">{% if status_filter.is_empty() %}{{ t.reviews_clear_all }}{% else %}{{ t.reviews_clear_filtered }}{% endif %}</button>
+    </form>
+    {% endif %}
+</div>
+
+{% if reviews.is_empty() %}
+<p>{{ t.reviews_empty }}</p>
+{% else %}
+<table>
+    <tr>
+        <th>ID</th>
+        <th>{{ t.reviews_status }}</th>
+        <th>{{ t.reviews_type }}</th>
+        <th>{{ t.reviews_input_path }}</th>
+        <th>{{ t.reviews_confidence }}</th>
+        <th>{{ t.reviews_model }}</th>
+        <th>{{ t.reviews_llm_duration }}</th>
+        <th>{{ t.reviews_tokens }}</th>
+        <th>{{ t.reviews_created }}</th>
+        <th>{{ t.jobs_actions }}</th>
+    </tr>
+    {% for review in reviews %}
+    <tr>
+        <td><a href="/admin/reviews/{{ review.id_val() }}">{{ review.id_val() }}</a></td>
+        <td><span class="badge {{ review.status_badge_class() }}">{{ review.status_str() }}</span></td>
+        <td>{{ review.review_type_str() }}</td>
+        <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ review.input_path_str() }}">{{ review.input_path_str() }}</td>
+        <td>{% match review.confidence() %}{% when Some with (c) %}{{ c }}{% when None %}-{% endmatch %}</td>
+        {% match stats_map.get(&review.id_val()) %}
+        {% when Some with (s) %}
+        <td>{{ s.model_name }}</td>
+        <td>{{ s.duration_display() }}</td>
+        <td>{{ s.tokens_display() }}</td>
+        {% when None %}
+        <td>-</td>
+        <td>-</td>
+        <td>-</td>
+        {% endmatch %}
+        <td>{{ review.created_at_str() }}</td>
+        <td>
+            <a href="/admin/reviews/{{ review.id_val() }}">{{ t.reviews_view }}</a>
+        </td>
+    </tr>
+    {% endfor %}
+</table>
+{% endif %}
+
+<style>
+    .badge-completed { background: #d4edda; color: #155724; }
+    .badge-failed { background: #f8d7da; color: #721c24; }
+    .badge-pending { background: #fff3cd; color: #856404; }
+    .badge-queued { background: #d1ecf1; color: #0c5460; }
+    .badge-processing { background: #cce5ff; color: #004085; }
+</style>
+{% endblock content %}

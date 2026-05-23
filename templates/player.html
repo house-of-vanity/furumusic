@@ -1,0 +1,2441 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t.site_name }}{% endblock title %}
+
+{% block head_extra %}
+<style>
+:root {
+    --bg-primary: #121212;
+    --bg-secondary: #181818;
+    --bg-elevated: #232323;
+    --bg-hover: #2a2a2a;
+    --bg-active: #333;
+    --text-primary: #fff;
+    --text-secondary: #b3b3b3;
+    --text-subdued: #6a6a6a;
+    --accent: #1db954;
+    --accent-hover: #1ed760;
+    --player-height: 80px;
+    --sidebar-width: 240px;
+    --queue-width: 300px;
+    --border-color: #282828;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body { height: 100%; overflow: hidden; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+/* Layout */
+.app-layout {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+.main-content {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+/* Left Sidebar */
+.sidebar-left {
+    width: var(--sidebar-width);
+    min-width: var(--sidebar-width);
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.sidebar-header {
+    padding: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.sidebar-header h2 {
+    font-size: 14px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+}
+
+.sidebar-nav {
+    padding: 8px;
+}
+
+.sidebar-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 14px;
+    font-weight: 500;
+    transition: background 0.15s, color 0.15s;
+}
+
+.sidebar-nav-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+.sidebar-nav-item.active { background: var(--bg-active); color: var(--text-primary); }
+
+.sidebar-nav-item svg { width: 20px; height: 20px; flex-shrink: 0; }
+
+.playlist-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+    border-top: 1px solid var(--border-color);
+}
+
+.playlist-item {
+    padding: 8px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: background 0.15s, color 0.15s;
+}
+
+.playlist-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+.playlist-count {
+    font-size: 11px;
+    color: var(--text-subdued);
+}
+
+.sidebar-bottom {
+    padding: 12px 16px;
+    border-top: 1px solid var(--border-color);
+}
+
+.sidebar-bottom a {
+    color: var(--text-subdued);
+    text-decoration: none;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.sidebar-bottom a:hover { color: var(--text-secondary); }
+
+/* Center Content */
+.center-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+    background: var(--bg-primary);
+}
+
+.center-content::-webkit-scrollbar { width: 8px; }
+.center-content::-webkit-scrollbar-track { background: transparent; }
+.center-content::-webkit-scrollbar-thumb { background: var(--bg-active); border-radius: 4px; }
+
+.section-title {
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 20px;
+}
+
+.breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    color: var(--text-subdued);
+}
+
+.breadcrumb a {
+    color: var(--text-secondary);
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.breadcrumb a:hover { color: var(--text-primary); text-decoration: underline; }
+
+/* Artist / Release Grid */
+.card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    gap: 20px;
+}
+
+.card {
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    padding: 14px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.card:hover { background: var(--bg-elevated); }
+
+.card-img {
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 6px;
+    background: var(--bg-elevated);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    margin-bottom: 12px;
+    position: relative;
+}
+
+.card-img img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.card-img .placeholder-icon {
+    color: var(--text-subdued);
+}
+
+.card-img .placeholder-icon svg { width: 48px; height: 48px; }
+
+.card-play-btn {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.2s, transform 0.2s;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+
+.card:hover .card-play-btn { opacity: 1; transform: translateY(0); }
+.card-play-btn:hover { background: var(--accent-hover); transform: scale(1.05); }
+.card-play-btn svg { width: 18px; height: 18px; fill: #000; }
+
+.card-title {
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 4px;
+}
+
+.card-subtitle {
+    font-size: 12px;
+    color: var(--text-subdued);
+}
+
+/* Artist detail header */
+.artist-header {
+    display: flex;
+    align-items: flex-end;
+    gap: 24px;
+    margin-bottom: 32px;
+}
+
+.artist-header .artist-img {
+    width: 200px;
+    height: 200px;
+    border-radius: 50%;
+    background: var(--bg-elevated);
+    overflow: hidden;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.artist-header .artist-img img { width: 100%; height: 100%; object-fit: cover; }
+.artist-header .artist-img svg { width: 80px; height: 80px; color: var(--text-subdued); }
+
+.artist-header .artist-name { font-size: 48px; font-weight: 900; line-height: 1.1; }
+
+/* Release detail header */
+.release-header {
+    display: flex;
+    align-items: flex-end;
+    gap: 24px;
+    margin-bottom: 24px;
+}
+
+.release-header .release-cover {
+    width: 200px;
+    height: 200px;
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    overflow: hidden;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+
+.release-header .release-cover img { width: 100%; height: 100%; object-fit: cover; }
+.release-header .release-cover svg { width: 80px; height: 80px; color: var(--text-subdued); }
+
+.release-meta .release-type { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); }
+.release-meta .release-title { font-size: 36px; font-weight: 900; line-height: 1.2; margin: 4px 0; }
+.release-meta .release-artists { font-size: 14px; color: var(--text-secondary); }
+.release-meta .release-year { font-size: 14px; color: var(--text-subdued); margin-top: 4px; }
+
+/* Track list table */
+.track-list { width: 100%; border-collapse: collapse; }
+
+.track-list-header {
+    display: grid;
+    grid-template-columns: 40px 1fr 1fr 120px 60px;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-subdued);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+}
+
+.track-row {
+    display: grid;
+    grid-template-columns: 40px 1fr 1fr 120px 60px;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: default;
+    align-items: center;
+    transition: background 0.15s;
+}
+
+.track-row:hover { background: var(--bg-hover); }
+.track-row.playing { color: var(--accent); }
+.track-row.playing .track-num { color: var(--accent); }
+
+.track-num {
+    font-size: 14px;
+    color: var(--text-subdued);
+    text-align: center;
+}
+
+.track-info .track-title { font-size: 14px; font-weight: 500; }
+.track-info .track-artists-inline {
+    font-size: 12px;
+    color: var(--text-subdued);
+    margin-top: 2px;
+}
+
+.track-album { font-size: 13px; color: var(--text-subdued); }
+.track-duration { font-size: 13px; color: var(--text-subdued); text-align: right; }
+
+/* Track action buttons */
+.track-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.track-row:hover .track-actions { opacity: 1; }
+
+.track-action-btn {
+    background: none;
+    border: none;
+    color: var(--text-subdued);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s, background 0.15s;
+}
+
+.track-action-btn:hover { color: var(--text-primary); background: var(--bg-active); }
+.track-action-btn.play-btn:hover { color: var(--accent); }
+.track-action-btn svg { width: 16px; height: 16px; }
+
+/* Card enqueue button (next to play button on release cards) */
+.card-enqueue-btn {
+    position: absolute;
+    bottom: 8px;
+    right: 56px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-color);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.2s, transform 0.2s;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+.card:hover .card-enqueue-btn { opacity: 1; transform: translateY(0); }
+.card-enqueue-btn:hover { background: var(--bg-hover); border-color: var(--text-subdued); }
+.card-enqueue-btn svg { width: 14px; height: 14px; color: var(--text-primary); }
+
+/* Release header action buttons */
+.release-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.release-action-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: 20px;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    transition: transform 0.1s, filter 0.15s;
+}
+
+.release-action-btn:hover { filter: brightness(1.1); }
+.release-action-btn:active { transform: scale(0.97); }
+.release-action-btn svg { width: 16px; height: 16px; }
+
+.release-action-btn.primary {
+    background: var(--accent);
+    color: #000;
+}
+
+.release-action-btn.secondary {
+    background: var(--bg-active);
+    color: var(--text-primary);
+}
+
+/* Queue Panel */
+.queue-panel {
+    width: var(--queue-width);
+    min-width: var(--queue-width);
+    background: var(--bg-secondary);
+    border-left: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.queue-panel.hidden { display: none; }
+
+.queue-header {
+    padding: 16px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.queue-header h3 { font-size: 14px; font-weight: 600; }
+
+.queue-clear-btn {
+    background: none;
+    border: none;
+    color: var(--text-subdued);
+    font-size: 12px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+
+.queue-clear-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
+
+.queue-tracks {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+}
+
+.queue-track {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.queue-track:hover { background: var(--bg-hover); }
+.queue-track.active { background: var(--bg-active); }
+
+.queue-track-cover {
+    width: 40px;
+    height: 40px;
+    border-radius: 4px;
+    background: var(--bg-elevated);
+    overflow: hidden;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.queue-track-cover img { width: 100%; height: 100%; object-fit: cover; }
+.queue-track-cover svg { width: 20px; height: 20px; color: var(--text-subdued); }
+
+.queue-track-info { overflow: hidden; flex: 1; }
+.queue-track-title {
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.queue-track.active .queue-track-title { color: var(--accent); }
+
+.queue-track-artist {
+    font-size: 11px;
+    color: var(--text-subdued);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.queue-track-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity 0.15s;
+    flex-shrink: 0;
+}
+
+.queue-track:hover .queue-track-actions { opacity: 1; }
+
+.queue-track-remove {
+    background: none;
+    border: none;
+    color: var(--text-subdued);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s, background 0.15s;
+}
+
+.queue-track-remove:hover { color: var(--text-primary); background: var(--bg-hover); }
+
+/* Drag handle */
+.queue-drag-handle {
+    cursor: grab;
+    color: var(--text-subdued);
+    padding: 4px 2px;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.queue-track:hover .queue-drag-handle { opacity: 1; }
+.queue-drag-handle:active { cursor: grabbing; }
+.queue-drag-handle svg { width: 14px; height: 14px; }
+
+/* Drag states */
+.queue-track.dragging { opacity: 0.4; }
+.queue-track.drag-over { border-top: 2px solid var(--accent); margin-top: -2px; }
+
+/* Player Bar */
+.player-bar {
+    height: var(--player-height);
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-color);
+    display: grid;
+    grid-template-columns: 1fr 2fr 1fr;
+    align-items: center;
+    padding: 0 16px;
+    z-index: 10;
+}
+
+.player-now-playing {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    overflow: hidden;
+}
+
+.player-cover {
+    width: 56px;
+    height: 56px;
+    border-radius: 4px;
+    background: var(--bg-elevated);
+    overflow: hidden;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.player-cover img { width: 100%; height: 100%; object-fit: cover; }
+.player-cover svg { width: 24px; height: 24px; color: var(--text-subdued); }
+
+.player-track-info { overflow: hidden; }
+.player-track-title {
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.player-track-artist {
+    font-size: 11px;
+    color: var(--text-subdued);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.player-controls {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+
+.player-buttons {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.player-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s, transform 0.1s;
+}
+
+.player-btn:hover { color: var(--text-primary); }
+.player-btn:active { transform: scale(0.95); }
+.player-btn svg { width: 18px; height: 18px; }
+
+.player-btn.active { color: var(--accent); }
+
+.player-btn-play {
+    width: 32px;
+    height: 32px;
+    background: var(--text-primary);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.player-btn-play svg { width: 16px; height: 16px; fill: #000; color: #000; }
+.player-btn-play:hover { transform: scale(1.06); background: #fff; }
+
+.player-timeline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    max-width: 600px;
+}
+
+.player-time { font-size: 11px; color: var(--text-subdued); min-width: 40px; text-align: center; }
+
+.progress-bar {
+    flex: 1;
+    height: 4px;
+    background: var(--bg-active);
+    border-radius: 2px;
+    cursor: pointer;
+    position: relative;
+}
+
+.progress-bar:hover { height: 6px; }
+
+.progress-bar-fill {
+    height: 100%;
+    background: var(--text-primary);
+    border-radius: 2px;
+    position: relative;
+    transition: width 0.1s linear;
+}
+
+.progress-bar:hover .progress-bar-fill { background: var(--accent); }
+
+.progress-bar-thumb {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--text-primary);
+    position: absolute;
+    right: -6px;
+    top: 50%;
+    transform: translateY(-50%);
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.progress-bar:hover .progress-bar-thumb { opacity: 1; }
+
+.player-right {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.volume-control {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.volume-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+}
+
+.volume-btn:hover { color: var(--text-primary); }
+.volume-btn svg { width: 18px; height: 18px; }
+
+.volume-slider {
+    width: 80px;
+    height: 4px;
+    background: var(--bg-active);
+    border-radius: 2px;
+    cursor: pointer;
+    position: relative;
+}
+
+.volume-slider-fill {
+    height: 100%;
+    background: var(--text-primary);
+    border-radius: 2px;
+}
+
+.volume-slider:hover .volume-slider-fill { background: var(--accent); }
+
+.queue-toggle-btn {
+    background: none;
+    border: none;
+    color: var(--text-subdued);
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+
+.queue-toggle-btn:hover { color: var(--text-primary); }
+.queue-toggle-btn.active { color: var(--accent); }
+.queue-toggle-btn svg { width: 18px; height: 18px; }
+
+/* Loading */
+.loading-spinner {
+    display: flex;
+    justify-content: center;
+    padding: 40px;
+}
+
+.spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid var(--bg-active);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Empty state */
+.empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-subdued);
+}
+
+.empty-state svg { width: 64px; height: 64px; margin-bottom: 16px; }
+.empty-state p { font-size: 14px; }
+
+/* Search bar */
+.search-bar {
+    position: relative;
+    margin-bottom: 20px;
+}
+
+.search-bar input {
+    width: 100%;
+    padding: 10px 40px 10px 40px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.15s, background 0.15s;
+}
+
+.search-bar input::placeholder { color: var(--text-subdued); }
+.search-bar input:focus { border-color: var(--text-secondary); background: var(--bg-hover); }
+
+.search-bar .search-icon {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-subdued);
+    pointer-events: none;
+}
+
+.search-bar .search-icon svg { width: 18px; height: 18px; }
+
+.search-bar .search-clear {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: var(--text-subdued);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+}
+
+.search-bar .search-clear:hover { color: var(--text-primary); background: var(--bg-hover); }
+.search-bar .search-clear svg { width: 16px; height: 16px; }
+
+.search-bar .search-shortcut {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-subdued);
+    font-size: 11px;
+    pointer-events: none;
+    background: var(--bg-active);
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+/* Search results */
+.search-section { margin-bottom: 24px; }
+.search-section-title {
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 12px;
+}
+
+.search-artists-row {
+    display: flex;
+    gap: 16px;
+    overflow-x: auto;
+    padding-bottom: 8px;
+}
+
+.search-artists-row::-webkit-scrollbar { height: 6px; }
+.search-artists-row::-webkit-scrollbar-track { background: transparent; }
+.search-artists-row::-webkit-scrollbar-thumb { background: var(--bg-active); border-radius: 3px; }
+
+.search-artist-card {
+    flex-shrink: 0;
+    width: 140px;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    padding: 12px;
+    cursor: pointer;
+    transition: background 0.2s;
+    text-align: center;
+}
+
+.search-artist-card:hover { background: var(--bg-elevated); }
+
+.search-artist-img {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: var(--bg-elevated);
+    margin: 0 auto 8px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.search-artist-img img { width: 100%; height: 100%; object-fit: cover; }
+.search-artist-img svg { width: 32px; height: 32px; color: var(--text-subdued); }
+
+.search-artist-name {
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.search-releases-row {
+    display: flex;
+    gap: 16px;
+    overflow-x: auto;
+    padding-bottom: 8px;
+}
+
+.search-releases-row::-webkit-scrollbar { height: 6px; }
+.search-releases-row::-webkit-scrollbar-track { background: transparent; }
+.search-releases-row::-webkit-scrollbar-thumb { background: var(--bg-active); border-radius: 3px; }
+
+.search-release-card {
+    flex-shrink: 0;
+    width: 150px;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    padding: 12px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.search-release-card:hover { background: var(--bg-elevated); }
+
+.search-release-cover {
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 6px;
+    background: var(--bg-elevated);
+    margin-bottom: 8px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.search-release-cover img { width: 100%; height: 100%; object-fit: cover; }
+.search-release-cover svg { width: 40px; height: 40px; color: var(--text-subdued); }
+
+/* Like button */
+.like-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s, transform 0.1s;
+    color: var(--text-subdued);
+}
+
+.like-btn:hover { color: var(--text-primary); }
+.like-btn:active { transform: scale(0.9); }
+.like-btn.liked { color: var(--accent); }
+.like-btn svg { width: 16px; height: 16px; }
+
+.like-btn-lg svg { width: 22px; height: 22px; }
+
+/* Playlist modal overlay */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-box {
+    background: var(--bg-elevated);
+    border-radius: 12px;
+    padding: 24px;
+    min-width: 320px;
+    max-width: 400px;
+    max-height: 70vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+}
+
+.modal-box h3 {
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 16px;
+}
+
+.modal-box input[type="text"] {
+    width: 100%;
+    padding: 10px 12px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 14px;
+    outline: none;
+    margin-bottom: 12px;
+}
+
+.modal-box input[type="text"]:focus { border-color: var(--accent); }
+
+.modal-playlist-list {
+    overflow-y: auto;
+    max-height: 40vh;
+    margin-bottom: 12px;
+}
+
+.modal-playlist-item {
+    padding: 10px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--text-secondary);
+    transition: background 0.15s, color 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.modal-playlist-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+.modal-playlist-item svg { width: 16px; height: 16px; flex-shrink: 0; }
+
+.modal-btn {
+    padding: 8px 16px;
+    border-radius: 20px;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    transition: filter 0.15s;
+}
+
+.modal-btn:hover { filter: brightness(1.1); }
+.modal-btn-primary { background: var(--accent); color: #000; }
+.modal-btn-ghost { background: transparent; color: var(--text-secondary); }
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+/* Sidebar playlist actions */
+.playlist-item-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.playlist-item-row .playlist-item { flex: 1; min-width: 0; }
+
+.playlist-item-actions {
+    display: flex;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity 0.15s;
+    flex-shrink: 0;
+}
+
+.playlist-item-row:hover .playlist-item-actions { opacity: 1; }
+
+.playlist-action-btn {
+    background: none;
+    border: none;
+    color: var(--text-subdued);
+    cursor: pointer;
+    padding: 3px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+}
+
+.playlist-action-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
+.playlist-action-btn svg { width: 14px; height: 14px; }
+
+.sidebar-create-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 12px;
+    background: none;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--text-subdued);
+    font-size: 13px;
+    transition: background 0.15s, color 0.15s;
+}
+
+.sidebar-create-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.sidebar-create-btn svg { width: 16px; height: 16px; }
+
+/* Responsive */
+@media (max-width: 900px) {
+    .sidebar-left { display: none; }
+    .queue-panel { display: none; }
+}
+
+/* Scrollbar for queue and sidebar */
+.queue-tracks::-webkit-scrollbar,
+.playlist-list::-webkit-scrollbar { width: 6px; }
+.queue-tracks::-webkit-scrollbar-track,
+.playlist-list::-webkit-scrollbar-track { background: transparent; }
+.queue-tracks::-webkit-scrollbar-thumb,
+.playlist-list::-webkit-scrollbar-thumb { background: var(--bg-active); border-radius: 3px; }
+</style>
+{% endblock head_extra %}
+
+{% block body %}
+<div class="app-layout"
+     x-data
+     @keydown.window.space="if (!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)) { $event.preventDefault(); $store.player.toggle(); }"
+     @keydown.window.arrow-left="if (!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)) { $event.preventDefault(); $store.player.seekRelative(-5); }"
+     @keydown.window.arrow-right="if (!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)) { $event.preventDefault(); $store.player.seekRelative(5); }"
+     @keydown.window="if ((e=$event).ctrlKey && e.key==='k') { e.preventDefault(); document.getElementById('search-input')?.focus(); } else if (e.key==='/' && !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)) { e.preventDefault(); document.getElementById('search-input')?.focus(); }"
+     >
+
+    <div class="main-content">
+        <!-- Left Sidebar -->
+        <div class="sidebar-left">
+            <div class="sidebar-header">
+                <h2>Library</h2>
+            </div>
+            <div class="sidebar-nav">
+                <div class="sidebar-nav-item"
+                     :class="{ active: $store.library.view === 'artists' }"
+                     @click="$store.library.goArtists()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 10-16 0"/></svg>
+                    Artists
+                </div>
+            </div>
+            <div class="playlist-list">
+                <template x-for="pl in $store.playlists.list" :key="pl.id">
+                    <div class="playlist-item-row">
+                        <div class="playlist-item" @click="$store.library.openPlaylist(pl.id)">
+                            <template x-if="pl.kind === 'likes'">
+                                <span style="display:flex;align-items:center;gap:6px">
+                                    <svg viewBox="0 0 24 24" fill="var(--accent)" stroke="none" width="14" height="14"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z"/></svg>
+                                    <span x-text="pl.title"></span>
+                                </span>
+                            </template>
+                            <template x-if="pl.kind !== 'likes'">
+                                <span x-text="pl.title"></span>
+                            </template>
+                            <span class="playlist-count" x-text="pl.track_count + ' tracks'"></span>
+                        </div>
+                        <template x-if="pl.is_own && pl.kind === 'user'">
+                            <div class="playlist-item-actions">
+                                <button class="playlist-action-btn" @click.stop="$store.playlists.startRename(pl)" title="Rename">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                </button>
+                                <button class="playlist-action-btn" @click.stop="$store.playlists.deletePlaylist(pl.id)" title="Delete">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                                </button>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+                <button class="sidebar-create-btn" @click="$store.playlists.showCreate()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    New Playlist
+                </button>
+            </div>
+            <div class="sidebar-bottom">
+                <a href="/admin/">Admin Panel</a>
+            </div>
+        </div>
+
+        <!-- Center Content -->
+        <div class="center-content" id="center-scroll">
+            <!-- Search Bar -->
+            <div class="search-bar">
+                <span class="search-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
+                <input id="search-input" type="text" placeholder="Search artists, releases, tracks..."
+                       x-model="$store.library.searchQuery"
+                       @input.debounce.300ms="$store.library.search($store.library.searchQuery)"
+                       @keydown.escape="$store.library.clearSearch(); $el.blur()">
+                <template x-if="$store.library.searchQuery">
+                    <button class="search-clear" @click="$store.library.clearSearch()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                </template>
+                <template x-if="!$store.library.searchQuery">
+                    <span class="search-shortcut">Ctrl+K</span>
+                </template>
+            </div>
+
+            <!-- Search Results -->
+            <template x-if="$store.library.view === 'search'">
+                <div>
+                    <template x-if="$store.library.searchLoading">
+                        <div class="loading-spinner"><div class="spinner"></div></div>
+                    </template>
+                    <template x-if="!$store.library.searchLoading && $store.library.searchResults">
+                        <div>
+                            <template x-if="$store.library.searchResults.artists.length === 0 && $store.library.searchResults.releases.length === 0 && $store.library.searchResults.tracks.length === 0">
+                                <div class="empty-state">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                    <p>No results found</p>
+                                </div>
+                            </template>
+                            <!-- Artists section -->
+                            <template x-if="$store.library.searchResults.artists.length > 0">
+                                <div class="search-section">
+                                    <h2 class="search-section-title">Artists</h2>
+                                    <div class="search-artists-row">
+                                        <template x-for="artist in $store.library.searchResults.artists" :key="artist.id">
+                                            <div class="search-artist-card" @click="$store.library.openArtist(artist.id)">
+                                                <div class="search-artist-img">
+                                                    <template x-if="artist.image_url">
+                                                        <img :src="artist.image_url" :alt="artist.name" loading="lazy">
+                                                    </template>
+                                                    <template x-if="!artist.image_url">
+                                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 10-16 0"/></svg>
+                                                    </template>
+                                                </div>
+                                                <div class="search-artist-name" x-text="artist.name"></div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </div>
+                            </template>
+                            <!-- Releases section -->
+                            <template x-if="$store.library.searchResults.releases.length > 0">
+                                <div class="search-section">
+                                    <h2 class="search-section-title">Releases</h2>
+                                    <div class="search-releases-row">
+                                        <template x-for="release in $store.library.searchResults.releases" :key="release.id">
+                                            <div class="search-release-card" @click="$store.library.openRelease(release.id)" style="position:relative">
+                                                <div class="search-release-cover" style="position:relative">
+                                                    <template x-if="release.cover_url">
+                                                        <img :src="release.cover_url" :alt="release.title" loading="lazy">
+                                                    </template>
+                                                    <template x-if="!release.cover_url">
+                                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="12" r="4"/></svg>
+                                                    </template>
+                                                </div>
+                                                <div class="card-title" x-text="release.title"></div>
+                                                <div class="card-subtitle">
+                                                    <span x-text="release.year || ''"></span>
+                                                    <span x-text="release.release_type"></span>
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </div>
+                            </template>
+                            <!-- Tracks section -->
+                            <template x-if="$store.library.searchResults.tracks.length > 0">
+                                <div class="search-section">
+                                    <h2 class="search-section-title">Tracks</h2>
+                                    <div class="track-list-header">
+                                        <span>#</span>
+                                        <span>Title</span>
+                                        <span></span>
+                                        <span></span>
+                                        <span style="text-align:right">Duration</span>
+                                    </div>
+                                    <template x-for="(track, idx) in $store.library.searchResults.tracks" :key="track.id">
+                                        <div class="track-row"
+                                             :class="{ playing: $store.player.currentTrack && $store.player.currentTrack.id === track.id }"
+                                             @dblclick="$store.library.playSearchTrack(idx)">
+                                            <span class="track-num" x-text="idx + 1"></span>
+                                            <div class="track-info">
+                                                <div class="track-title" x-text="track.title"></div>
+                                                <div class="track-artists-inline" x-text="[...track.artists, ...track.featured_artists.map(a => ({...a, name: 'ft. ' + a.name}))].map(a => a.name).join(', ')"></div>
+                                            </div>
+                                            <span></span>
+                                            <div class="track-actions">
+                                                <button class="track-action-btn play-btn" @click.stop="$store.library.playSearchTrack(idx)" title="Play">
+                                                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                                                </button>
+                                                <button class="like-btn" :class="{ liked: $store.likes.has(track.id) }" @click.stop="$store.likes.toggle(track.id)" title="Like">
+                                                    <svg viewBox="0 0 24 24" :fill="$store.likes.has(track.id) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z"/></svg>
+                                                </button>
+                                                <button class="track-action-btn" @click.stop="$store.queue.addNextInQueue([track])" title="Play next">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h8M5 18h14"/><path d="M17 10l4 3-4 3" fill="currentColor" stroke="none"/></svg>
+                                                </button>
+                                                <button class="track-action-btn" @click.stop="$store.queue.addToEnd([track])" title="Add to queue">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                                </button>
+                                                <button class="track-action-btn" @click.stop="$store.playlists.showPicker([track.id])" title="Add to playlist">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+                                                </button>
+                                            </div>
+                                            <span class="track-duration" x-text="formatTime(track.duration_seconds)"></span>
+                                        </div>
+                                    </template>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+                </div>
+            </template>
+
+            <!-- Artists Grid -->
+            <template x-if="$store.library.view === 'artists'">
+                <div>
+                    <h1 class="section-title">Artists</h1>
+                    <div class="card-grid">
+                        <template x-for="artist in $store.library.artists" :key="artist.id">
+                            <div class="card" @click="$store.library.openArtist(artist.id)">
+                                <div class="card-img">
+                                    <template x-if="artist.image_url">
+                                        <img :src="artist.image_url" :alt="artist.name" loading="lazy">
+                                    </template>
+                                    <template x-if="!artist.image_url">
+                                        <span class="placeholder-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 10-16 0"/></svg></span>
+                                    </template>
+                                </div>
+                                <div class="card-title" x-text="artist.name"></div>
+                                <div class="card-subtitle" x-text="artist.release_count + ' releases'"></div>
+                            </div>
+                        </template>
+                    </div>
+                    <template x-if="$store.library.loading">
+                        <div class="loading-spinner"><div class="spinner"></div></div>
+                    </template>
+                    <div id="artist-sentinel" style="height:1px"></div>
+                </div>
+            </template>
+
+            <!-- Artist Detail -->
+            <template x-if="$store.library.view === 'artist_detail' && $store.library.currentArtist">
+                <div>
+                    <div class="breadcrumb">
+                        <a @click="$store.library.goArtists()">Artists</a>
+                        <span>/</span>
+                        <span x-text="$store.library.currentArtist.name"></span>
+                    </div>
+                    <div class="artist-header">
+                        <div class="artist-img">
+                            <template x-if="$store.library.currentArtist.image_url">
+                                <img :src="$store.library.currentArtist.image_url" :alt="$store.library.currentArtist.name">
+                            </template>
+                            <template x-if="!$store.library.currentArtist.image_url">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 10-16 0"/></svg>
+                            </template>
+                        </div>
+                        <div>
+                            <div class="artist-header .artist-name" x-text="$store.library.currentArtist.name" style="font-size:48px;font-weight:900;line-height:1.1"></div>
+                            <div style="color:var(--text-subdued);margin-top:8px" x-text="$store.library.currentArtist.releases.length + ' releases'"></div>
+                        </div>
+                    </div>
+                    <h2 class="section-title" style="font-size:20px">Releases</h2>
+                    <div class="card-grid">
+                        <template x-for="release in $store.library.currentArtist.releases" :key="release.id">
+                            <div class="card" @click="$store.library.openRelease(release.id)">
+                                <div class="card-img">
+                                    <template x-if="release.cover_url">
+                                        <img :src="release.cover_url" :alt="release.title" loading="lazy">
+                                    </template>
+                                    <template x-if="!release.cover_url">
+                                        <span class="placeholder-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="12" r="4"/></svg></span>
+                                    </template>
+                                    <button class="card-enqueue-btn" @click.stop="$store.library.enqueueRelease(release.id)" title="Add to queue">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                    </button>
+                                    <button class="card-play-btn" @click.stop="$store.library.playRelease(release.id)">
+                                        <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                                    </button>
+                                </div>
+                                <div class="card-title" x-text="release.title"></div>
+                                <div class="card-subtitle">
+                                    <span x-text="release.year || ''"></span>
+                                    <span x-text="release.release_type"></span>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </template>
+
+            <!-- Release Detail -->
+            <template x-if="$store.library.view === 'release_detail' && $store.library.currentRelease">
+                <div>
+                    <div class="breadcrumb">
+                        <a @click="$store.library.goArtists()">Artists</a>
+                        <span>/</span>
+                        <template x-if="$store.library.currentRelease.artists.length > 0">
+                            <a @click="$store.library.openArtist($store.library.currentRelease.artists[0].id)" x-text="$store.library.currentRelease.artists[0].name"></a>
+                        </template>
+                        <span>/</span>
+                        <span x-text="$store.library.currentRelease.title"></span>
+                    </div>
+                    <div class="release-header">
+                        <div class="release-cover">
+                            <template x-if="$store.library.currentRelease.cover_url">
+                                <img :src="$store.library.currentRelease.cover_url" :alt="$store.library.currentRelease.title">
+                            </template>
+                            <template x-if="!$store.library.currentRelease.cover_url">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="12" r="4"/></svg>
+                            </template>
+                        </div>
+                        <div class="release-meta">
+                            <div class="release-type" x-text="$store.library.currentRelease.release_type"></div>
+                            <div class="release-title" x-text="$store.library.currentRelease.title"></div>
+                            <div class="release-artists" x-text="$store.library.currentRelease.artists.map(a => a.name).join(', ')"></div>
+                            <div class="release-year" x-text="$store.library.currentRelease.year || ''"></div>
+                            <div class="release-actions">
+                                <button class="release-action-btn primary" @click="$store.queue.playRelease($store.library.currentRelease.tracks, 0)">
+                                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                                    Play
+                                </button>
+                                <button class="like-btn like-btn-lg" style="margin-left:4px"
+                                        :class="{ liked: $store.likes.isReleaseLiked($store.library.currentRelease) }"
+                                        @click.stop="$store.likes.toggleRelease($store.library.currentRelease.id)"
+                                        title="Like">
+                                    <svg viewBox="0 0 24 24" :fill="$store.likes.isReleaseLiked($store.library.currentRelease) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z"/></svg>
+                                </button>
+                                <button class="release-action-btn secondary" @click="$store.queue.addToEnd($store.library.currentRelease.tracks)" title="Add to end of queue">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                    Queue
+                                </button>
+                                <button class="release-action-btn secondary" @click="$store.queue.addNextInQueue($store.library.currentRelease.tracks)" title="Play next">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h8M5 18h14"/><path d="M17 10l4 3-4 3" fill="currentColor" stroke="none"/></svg>
+                                    Next
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Track list -->
+                    <div class="track-list-header">
+                        <span>#</span>
+                        <span>Title</span>
+                        <span></span>
+                        <span></span>
+                        <span style="text-align:right">Duration</span>
+                    </div>
+                    <template x-for="(track, idx) in $store.library.currentRelease.tracks" :key="track.id">
+                        <div class="track-row"
+                             :class="{ playing: $store.player.currentTrack && $store.player.currentTrack.id === track.id }"
+                             @dblclick="$store.queue.playRelease($store.library.currentRelease.tracks, idx)">
+                            <span class="track-num" x-text="track.track_number || (idx + 1)"></span>
+                            <div class="track-info">
+                                <div class="track-title" x-text="track.title"></div>
+                                <div class="track-artists-inline" x-text="[...track.artists, ...track.featured_artists.map(a => ({...a, name: 'ft. ' + a.name}))].map(a => a.name).join(', ')"></div>
+                            </div>
+                            <span></span>
+                            <div class="track-actions">
+                                <button class="track-action-btn play-btn" @click.stop="$store.queue.playRelease($store.library.currentRelease.tracks, idx)" title="Play">
+                                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                                </button>
+                                <button class="like-btn" :class="{ liked: $store.likes.has(track.id) }" @click.stop="$store.likes.toggle(track.id)" title="Like">
+                                    <svg viewBox="0 0 24 24" :fill="$store.likes.has(track.id) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z"/></svg>
+                                </button>
+                                <button class="track-action-btn" @click.stop="$store.queue.addNextInQueue([track])" title="Play next">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h8M5 18h14"/><path d="M17 10l4 3-4 3" fill="currentColor" stroke="none"/></svg>
+                                </button>
+                                <button class="track-action-btn" @click.stop="$store.queue.addToEnd([track])" title="Add to queue">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                </button>
+                                <button class="track-action-btn" @click.stop="$store.playlists.showPicker([track.id])" title="Add to playlist">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+                                </button>
+                            </div>
+                            <span class="track-duration" x-text="formatTime(track.duration_seconds)"></span>
+                        </div>
+                    </template>
+                </div>
+            </template>
+
+            <!-- Playlist Detail -->
+            <template x-if="$store.library.view === 'playlist_detail' && $store.library.currentPlaylist">
+                <div>
+                    <div class="breadcrumb">
+                        <a @click="$store.library.goArtists()">Library</a>
+                        <span>/</span>
+                        <span x-text="$store.library.currentPlaylist.title"></span>
+                    </div>
+                    <h1 class="section-title" x-text="$store.library.currentPlaylist.title"></h1>
+                    <template x-if="$store.library.currentPlaylist.description">
+                        <p style="color:var(--text-subdued);margin-bottom:16px" x-text="$store.library.currentPlaylist.description"></p>
+                    </template>
+                    <div class="track-list-header">
+                        <span>#</span>
+                        <span>Title</span>
+                        <span></span>
+                        <span></span>
+                        <span style="text-align:right">Duration</span>
+                    </div>
+                    <template x-for="(track, idx) in $store.library.currentPlaylist.tracks" :key="track.id">
+                        <div class="track-row"
+                             :class="{ playing: $store.player.currentTrack && $store.player.currentTrack.id === track.id }"
+                             @dblclick="$store.queue.playRelease($store.library.currentPlaylist.tracks, idx)">
+                            <span class="track-num" x-text="idx + 1"></span>
+                            <div class="track-info">
+                                <div class="track-title" x-text="track.title"></div>
+                                <div class="track-artists-inline" x-text="[...track.artists, ...track.featured_artists.map(a => ({...a, name: 'ft. ' + a.name}))].map(a => a.name).join(', ')"></div>
+                            </div>
+                            <span></span>
+                            <div class="track-actions">
+                                <button class="track-action-btn play-btn" @click.stop="$store.queue.playRelease($store.library.currentPlaylist.tracks, idx)" title="Play">
+                                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                                </button>
+                                <button class="like-btn" :class="{ liked: $store.likes.has(track.id) }" @click.stop="$store.likes.toggle(track.id)" title="Like">
+                                    <svg viewBox="0 0 24 24" :fill="$store.likes.has(track.id) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z"/></svg>
+                                </button>
+                                <button class="track-action-btn" @click.stop="$store.queue.addNextInQueue([track])" title="Play next">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h8M5 18h14"/><path d="M17 10l4 3-4 3" fill="currentColor" stroke="none"/></svg>
+                                </button>
+                                <button class="track-action-btn" @click.stop="$store.queue.addToEnd([track])" title="Add to queue">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                </button>
+                                <button class="track-action-btn" @click.stop="$store.playlists.showPicker([track.id])" title="Add to playlist">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+                                </button>
+                            </div>
+                            <span class="track-duration" x-text="formatTime(track.duration_seconds)"></span>
+                        </div>
+                    </template>
+                </div>
+            </template>
+        </div>
+
+        <!-- Queue Panel -->
+        <div class="queue-panel" :class="{ hidden: !$store.queue.visible }">
+            <div class="queue-header">
+                <h3>Queue</h3>
+                <button class="queue-clear-btn" @click="$store.queue.clear()">Clear</button>
+            </div>
+            <div class="queue-tracks">
+                <template x-if="$store.queue.tracks.length === 0">
+                    <div class="empty-state">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                        <p>Queue is empty</p>
+                    </div>
+                </template>
+                <template x-for="(track, idx) in $store.queue.tracks" :key="idx + '-' + track.id">
+                    <div class="queue-track"
+                         :class="{ active: idx === $store.queue.currentIndex, dragging: $store.queue._dragIdx === idx }"
+                         @click="$store.queue.playFromIndex(idx)"
+                         draggable="true"
+                         @dragstart="$store.queue._dragIdx = idx; $event.dataTransfer.effectAllowed = 'move'"
+                         @dragend="$store.queue._dragIdx = null; document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'))"
+                         @dragover.prevent="$event.dataTransfer.dropEffect = 'move'; $event.currentTarget.classList.add('drag-over')"
+                         @dragleave="$event.currentTarget.classList.remove('drag-over')"
+                         @drop.prevent="$event.currentTarget.classList.remove('drag-over'); if ($store.queue._dragIdx !== null) { $store.queue.moveTrack($store.queue._dragIdx, idx); $store.queue._dragIdx = null; }">
+                        <div class="queue-drag-handle" @mousedown.stop>
+                            <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>
+                        </div>
+                        <div class="queue-track-cover">
+                            <template x-if="track.cover_url">
+                                <img :src="track.cover_url" :alt="track.title" loading="lazy">
+                            </template>
+                            <template x-if="!track.cover_url">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                            </template>
+                        </div>
+                        <div class="queue-track-info">
+                            <div class="queue-track-title" x-text="track.title"></div>
+                            <div class="queue-track-artist" x-text="track.artists.map(a => a.name).join(', ')"></div>
+                        </div>
+                        <div class="queue-track-actions">
+                            <button class="queue-track-remove" @click.stop="$store.queue.remove(idx)" title="Remove">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </div>
+
+    <!-- Player Bar -->
+    <div class="player-bar">
+        <div class="player-now-playing">
+            <template x-if="$store.player.currentTrack">
+                <div style="display:flex;align-items:center;gap:12px;overflow:hidden">
+                    <div class="player-cover">
+                        <template x-if="$store.player.currentTrack.cover_url">
+                            <img :src="$store.player.currentTrack.cover_url" :alt="$store.player.currentTrack.title">
+                        </template>
+                        <template x-if="!$store.player.currentTrack.cover_url">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                        </template>
+                    </div>
+                    <div class="player-track-info">
+                        <div class="player-track-title" x-text="$store.player.currentTrack.title"></div>
+                        <div class="player-track-artist" x-text="$store.player.currentTrack.artists.map(a => a.name).join(', ')"></div>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        <div class="player-controls">
+            <div class="player-buttons">
+                <button class="player-btn" :class="{ active: $store.player.shuffle }" @click="$store.player.toggleShuffle()" title="Shuffle">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
+                </button>
+                <button class="player-btn" @click="$store.player.prev()" title="Previous">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+                </button>
+                <button class="player-btn player-btn-play" @click="$store.player.toggle()">
+                    <template x-if="!$store.player.isPlaying">
+                        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                    </template>
+                    <template x-if="$store.player.isPlaying">
+                        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>
+                    </template>
+                </button>
+                <button class="player-btn" @click="$store.player.next()" title="Next">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+                </button>
+                <button class="player-btn" :class="{ active: $store.player.repeatMode !== 'off' }" @click="$store.player.cycleRepeat()" title="Repeat">
+                    <template x-if="$store.player.repeatMode !== 'one'">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>
+                    </template>
+                    <template x-if="$store.player.repeatMode === 'one'">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/><text x="12" y="14" font-size="8" fill="currentColor" text-anchor="middle" font-weight="bold">1</text></svg>
+                    </template>
+                </button>
+            </div>
+            <div class="player-timeline">
+                <span class="player-time" x-text="formatTime($store.player.currentTime)"></span>
+                <div class="progress-bar" @click="$store.player.seekFromClick($event)">
+                    <div class="progress-bar-fill" :style="'width:' + $store.player.progress + '%'">
+                        <div class="progress-bar-thumb"></div>
+                    </div>
+                </div>
+                <span class="player-time" x-text="formatTime($store.player.duration)"></span>
+            </div>
+        </div>
+
+        <div class="player-right">
+            <div class="volume-control">
+                <button class="volume-btn" @click="$store.player.toggleMute()">
+                    <template x-if="$store.player.volume === 0">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+                    </template>
+                    <template x-if="$store.player.volume > 0 && $store.player.volume < 0.5">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 010 7.07"/></svg>
+                    </template>
+                    <template x-if="$store.player.volume >= 0.5">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/></svg>
+                    </template>
+                </button>
+                <div class="volume-slider" @click="$store.player.setVolumeFromClick($event)">
+                    <div class="volume-slider-fill" :style="'width:' + ($store.player.volume * 100) + '%'"></div>
+                </div>
+            </div>
+            <button class="queue-toggle-btn" :class="{ active: $store.queue.visible }" @click="$store.queue.visible = !$store.queue.visible" title="Queue">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+            </button>
+        </div>
+    </div>
+
+    <!-- Create / Rename Playlist Modal -->
+    <template x-if="$store.playlists.modal">
+        <div class="modal-overlay" @click.self="$store.playlists.modal = null">
+            <div class="modal-box">
+                <h3 x-text="$store.playlists.modal.mode === 'create' ? 'New Playlist' : 'Rename Playlist'"></h3>
+                <input type="text" x-model="$store.playlists.modal.title" placeholder="Playlist name"
+                       @keydown.enter="$store.playlists.submitModal()" x-init="$nextTick(() => $el.focus())">
+                <div class="modal-footer">
+                    <button class="modal-btn modal-btn-ghost" @click="$store.playlists.modal = null">Cancel</button>
+                    <button class="modal-btn modal-btn-primary" @click="$store.playlists.submitModal()"
+                            x-text="$store.playlists.modal.mode === 'create' ? 'Create' : 'Save'"></button>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <!-- Add to Playlist Modal -->
+    <template x-if="$store.playlists.picker">
+        <div class="modal-overlay" @click.self="$store.playlists.picker = null">
+            <div class="modal-box">
+                <h3>Add to Playlist</h3>
+                <div class="modal-playlist-list">
+                    <template x-for="pl in $store.playlists.list.filter(p => p.kind === 'user' && p.is_own)" :key="pl.id">
+                        <div class="modal-playlist-item" @click="$store.playlists.addToPicked(pl.id)">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                            <span x-text="pl.title"></span>
+                        </div>
+                    </template>
+                </div>
+                <div class="modal-footer">
+                    <button class="modal-btn modal-btn-ghost" @click="$store.playlists.picker = null">Cancel</button>
+                    <button class="modal-btn modal-btn-primary" @click="$store.playlists.picker = null; $store.playlists.showCreate()">New Playlist</button>
+                </div>
+            </div>
+        </div>
+    </template>
+</div>
+
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+<script>
+function formatTime(seconds) {
+    if (!seconds || isNaN(seconds)) return '0:00';
+    const s = Math.floor(seconds);
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return m + ':' + (sec < 10 ? '0' : '') + sec;
+}
+
+document.addEventListener('alpine:init', () => {
+    // -----------------------------------------------------------------------
+    // Audio element
+    // -----------------------------------------------------------------------
+    const audio = new Audio();
+    audio.preload = 'auto';
+
+    // -----------------------------------------------------------------------
+    // Player store
+    // -----------------------------------------------------------------------
+    Alpine.store('player', {
+        currentTrack: null,
+        isPlaying: false,
+        currentTime: 0,
+        duration: 0,
+        volume: 0.7,
+        _prevVolume: 0.7,
+        shuffle: false,
+        repeatMode: 'off', // off, all, one
+        progress: 0,
+        _saveTimer: null,
+        _historyRecorded: false,
+
+        init() {
+            audio.volume = this.volume;
+
+            audio.addEventListener('timeupdate', () => {
+                this.currentTime = audio.currentTime;
+                this.duration = audio.duration || 0;
+                this.progress = this.duration > 0 ? (this.currentTime / this.duration) * 100 : 0;
+            });
+
+            audio.addEventListener('ended', () => {
+                this._recordHistory(true);
+                this.next();
+            });
+
+            audio.addEventListener('play', () => { this.isPlaying = true; });
+            audio.addEventListener('pause', () => { this.isPlaying = false; });
+
+            audio.addEventListener('loadedmetadata', () => {
+                this.duration = audio.duration || 0;
+            });
+
+            // Periodic state save
+            this._saveTimer = setInterval(() => {
+                this._saveState();
+            }, 10000);
+
+            // Restore state
+            this._restoreState();
+
+            // Save state on page unload
+            window.addEventListener('beforeunload', () => {
+                this._saveStateSync();
+            });
+        },
+
+        play(track) {
+            this.currentTrack = track;
+            this._historyRecorded = false;
+            audio.src = track.stream_url;
+            audio.play().catch(() => {});
+            this._updateMediaSession();
+        },
+
+        pause() { audio.pause(); },
+        resume() { audio.play().catch(() => {}); },
+
+        toggle() {
+            if (!this.currentTrack) return;
+            if (this.isPlaying) { this.pause(); }
+            else { this.resume(); }
+        },
+
+        seek(time) {
+            audio.currentTime = time;
+        },
+
+        seekRelative(delta) {
+            if (!this.currentTrack) return;
+            audio.currentTime = Math.max(0, Math.min(audio.duration || 0, audio.currentTime + delta));
+        },
+
+        seekFromClick(event) {
+            const bar = event.currentTarget;
+            const rect = bar.getBoundingClientRect();
+            const pct = (event.clientX - rect.left) / rect.width;
+            if (this.duration > 0) {
+                this.seek(pct * this.duration);
+            }
+        },
+
+        next() {
+            const queue = Alpine.store('queue');
+            if (queue.tracks.length === 0) return;
+
+            let nextIdx;
+            if (this.repeatMode === 'one') {
+                this.seek(0);
+                this.resume();
+                return;
+            } else if (this.shuffle) {
+                nextIdx = Math.floor(Math.random() * queue.tracks.length);
+            } else {
+                nextIdx = queue.currentIndex + 1;
+                if (nextIdx >= queue.tracks.length) {
+                    if (this.repeatMode === 'all') {
+                        nextIdx = 0;
+                    } else {
+                        this.isPlaying = false;
+                        return;
+                    }
+                }
+            }
+            queue.playFromIndex(nextIdx);
+        },
+
+        prev() {
+            if (this.currentTime > 3) {
+                this.seek(0);
+                return;
+            }
+            const queue = Alpine.store('queue');
+            if (queue.tracks.length === 0) return;
+
+            let prevIdx = queue.currentIndex - 1;
+            if (prevIdx < 0) {
+                if (this.repeatMode === 'all') {
+                    prevIdx = queue.tracks.length - 1;
+                } else {
+                    this.seek(0);
+                    return;
+                }
+            }
+            queue.playFromIndex(prevIdx);
+        },
+
+        setVolume(v) {
+            this.volume = Math.max(0, Math.min(1, v));
+            audio.volume = this.volume;
+        },
+
+        setVolumeFromClick(event) {
+            const bar = event.currentTarget;
+            const rect = bar.getBoundingClientRect();
+            const pct = (event.clientX - rect.left) / rect.width;
+            this.setVolume(pct);
+        },
+
+        toggleMute() {
+            if (this.volume > 0) {
+                this._prevVolume = this.volume;
+                this.setVolume(0);
+            } else {
+                this.setVolume(this._prevVolume || 0.7);
+            }
+        },
+
+        toggleShuffle() {
+            this.shuffle = !this.shuffle;
+        },
+
+        cycleRepeat() {
+            if (this.repeatMode === 'off') this.repeatMode = 'all';
+            else if (this.repeatMode === 'all') this.repeatMode = 'one';
+            else this.repeatMode = 'off';
+        },
+
+        _updateMediaSession() {
+            if (!('mediaSession' in navigator) || !this.currentTrack) return;
+            const t = this.currentTrack;
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: t.title,
+                artist: t.artists.map(a => a.name).join(', '),
+                artwork: t.cover_url ? [{ src: t.cover_url, sizes: '512x512', type: 'image/jpeg' }] : [],
+            });
+            navigator.mediaSession.setActionHandler('play', () => this.resume());
+            navigator.mediaSession.setActionHandler('pause', () => this.pause());
+            navigator.mediaSession.setActionHandler('previoustrack', () => this.prev());
+            navigator.mediaSession.setActionHandler('nexttrack', () => this.next());
+            navigator.mediaSession.setActionHandler('seekto', (d) => { if (d.seekTime != null) this.seek(d.seekTime); });
+        },
+
+        _buildStatePayload() {
+            const queue = Alpine.store('queue');
+            return {
+                current_track_id: this.currentTrack ? this.currentTrack.id : null,
+                position_ms: Math.floor(this.currentTime * 1000),
+                queue: queue.tracks.map(t => t.id),
+                queue_position: queue.currentIndex,
+                shuffle: this.shuffle,
+                repeat_mode: this.repeatMode,
+                volume: this.volume,
+            };
+        },
+
+        _saveState() {
+            const queue = Alpine.store('queue');
+            if (!this.currentTrack && queue.tracks.length === 0) return;
+            const state = this._buildStatePayload();
+            fetch('/api/player/state', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(state),
+            }).catch(() => {});
+        },
+
+        _saveStateSync() {
+            const queue = Alpine.store('queue');
+            if (!this.currentTrack && queue.tracks.length === 0) return;
+            const state = this._buildStatePayload();
+            const blob = new Blob([JSON.stringify(state)], { type: 'application/json' });
+            navigator.sendBeacon('/api/player/state', blob);
+        },
+
+        async _restoreState() {
+            try {
+                const res = await fetch('/api/player/state');
+                if (!res.ok) return;
+                const state = await res.json();
+                this.shuffle = state.shuffle || false;
+                this.repeatMode = state.repeat_mode || 'off';
+                this.setVolume(typeof state.volume === 'number' ? state.volume : 0.7);
+
+                // Restore queue if there are track IDs
+                if (state.queue && state.queue.length > 0) {
+                    try {
+                        const tracksRes = await fetch('/api/player/tracks-by-ids', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ ids: state.queue }),
+                        });
+                        if (tracksRes.ok) {
+                            const tracks = await tracksRes.json();
+                            if (tracks.length > 0) {
+                                const queue = Alpine.store('queue');
+                                queue.tracks = tracks;
+                                const idx = Math.max(0, Math.min(state.queue_position, tracks.length - 1));
+                                queue.currentIndex = idx;
+
+                                // Restore current track
+                                const currentTrack = state.current_track_id
+                                    ? tracks.find(t => t.id === state.current_track_id)
+                                    : tracks[idx];
+                                if (currentTrack) {
+                                    this.currentTrack = currentTrack;
+                                    this._historyRecorded = false;
+                                    audio.src = currentTrack.stream_url;
+                                    // Seek to saved position once metadata is loaded
+                                    const seekMs = state.position_ms || 0;
+                                    if (seekMs > 0) {
+                                        const onLoaded = () => {
+                                            audio.currentTime = seekMs / 1000;
+                                            audio.removeEventListener('loadedmetadata', onLoaded);
+                                        };
+                                        audio.addEventListener('loadedmetadata', onLoaded);
+                                    }
+                                    this._updateMediaSession();
+                                }
+                            }
+                        }
+                    } catch {}
+                }
+            } catch {}
+        },
+
+        _recordHistory(completed) {
+            if (this._historyRecorded || !this.currentTrack) return;
+            this._historyRecorded = true;
+            fetch('/api/player/history', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    track_id: this.currentTrack.id,
+                    duration_listened: Math.floor(this.currentTime),
+                    completed: completed,
+                }),
+            }).catch(() => {});
+        },
+    });
+
+    // -----------------------------------------------------------------------
+    // Queue store
+    // -----------------------------------------------------------------------
+    Alpine.store('queue', {
+        tracks: [],
+        currentIndex: 0,
+        visible: true,
+        _dragIdx: null,
+
+        add(track) {
+            this.tracks.push(track);
+        },
+
+        addToEnd(tracks) {
+            this.tracks = [...this.tracks, ...tracks];
+        },
+
+        addNextInQueue(tracks) {
+            const insertAt = this.currentIndex + 1;
+            this.tracks.splice(insertAt, 0, ...tracks);
+        },
+
+        playRelease(tracks, startIndex) {
+            this.tracks = [...tracks];
+            this.playFromIndex(startIndex || 0);
+        },
+
+        playFromIndex(idx) {
+            if (idx < 0 || idx >= this.tracks.length) return;
+            this.currentIndex = idx;
+            Alpine.store('player').play(this.tracks[idx]);
+        },
+
+        remove(idx) {
+            if (idx < 0 || idx >= this.tracks.length) return;
+            this.tracks.splice(idx, 1);
+            if (this.tracks.length === 0) {
+                this.currentIndex = 0;
+            } else if (idx < this.currentIndex) {
+                this.currentIndex--;
+            } else if (idx === this.currentIndex) {
+                if (this.currentIndex >= this.tracks.length) {
+                    this.currentIndex = this.tracks.length - 1;
+                }
+            }
+        },
+
+        moveTrack(fromIdx, toIdx) {
+            if (fromIdx === toIdx) return;
+            if (fromIdx < 0 || fromIdx >= this.tracks.length) return;
+            if (toIdx < 0 || toIdx >= this.tracks.length) return;
+            const [track] = this.tracks.splice(fromIdx, 1);
+            this.tracks.splice(toIdx, 0, track);
+            // Adjust currentIndex to follow the currently playing track
+            if (this.currentIndex === fromIdx) {
+                this.currentIndex = toIdx;
+            } else if (fromIdx < this.currentIndex && toIdx >= this.currentIndex) {
+                this.currentIndex--;
+            } else if (fromIdx > this.currentIndex && toIdx <= this.currentIndex) {
+                this.currentIndex++;
+            }
+        },
+
+        clear() {
+            this.tracks = [];
+            this.currentIndex = 0;
+        },
+    });
+
+    // -----------------------------------------------------------------------
+    // Library store
+    // -----------------------------------------------------------------------
+    Alpine.store('library', {
+        view: 'artists',
+        artists: [],
+        artistsPage: 0,
+        artistsTotal: 0,
+        loading: false,
+        _allLoaded: false,
+        currentArtist: null,
+        currentRelease: null,
+        currentPlaylist: null,
+        _observer: null,
+        searchQuery: '',
+        searchResults: null,
+        searchLoading: false,
+        _previousView: 'artists',
+
+        _hashNav: false, // guard against circular hash updates
+
+        init() {
+            this.loadArtists(1);
+            this._setupScroll();
+
+            // Listen for browser back/forward
+            window.addEventListener('hashchange', () => {
+                this._navigateFromHash();
+            });
+
+            // Navigate to initial hash (if any)
+            this._navigateFromHash();
+        },
+
+        _setHash(hash) {
+            this._hashNav = true;
+            location.hash = hash;
+            // Reset guard after a tick
+            setTimeout(() => { this._hashNav = false; }, 0);
+        },
+
+        _navigateFromHash() {
+            if (this._hashNav) return;
+            const hash = location.hash || '#artists';
+            const match = hash.match(/^#(\w+)(?:\/([-]?\d+))?(?:\?(.*))?$/);
+            if (!match) {
+                this.goArtists();
+                return;
+            }
+            const view = match[1];
+            const id = match[2] ? parseInt(match[2], 10) : null;
+            const params = match[3] || '';
+
+            if (view === 'artists' && !id) {
+                if (this.view !== 'artists') this.goArtists();
+            } else if (view === 'artist' && id) {
+                this.openArtist(id);
+            } else if (view === 'release' && id) {
+                this.openRelease(id);
+            } else if (view === 'playlist' && id) {
+                this.openPlaylist(id);
+            } else if (view === 'search') {
+                const qMatch = params.match(/q=([^&]*)/);
+                if (qMatch) {
+                    const q = decodeURIComponent(qMatch[1]);
+                    this.searchQuery = q;
+                    this.search(q);
+                }
+            } else {
+                this.goArtists();
+            }
+        },
+
+        goArtists() {
+            this.view = 'artists';
+            this.currentArtist = null;
+            this.currentRelease = null;
+            this.currentPlaylist = null;
+            this.searchQuery = '';
+            this.searchResults = null;
+            this._previousView = 'artists';
+            this._setHash('#artists');
+            this.$nextTick(() => { this._setupScroll(); });
+        },
+
+        async loadArtists(page) {
+            if (this.loading || this._allLoaded) return;
+            this.loading = true;
+            try {
+                const res = await fetch(`/api/player/artists?page=${page}&limit=60`);
+                if (!res.ok) throw new Error('failed');
+                const data = await res.json();
+                if (page === 1) {
+                    this.artists = data.items;
+                } else {
+                    this.artists = [...this.artists, ...data.items];
+                }
+                this.artistsPage = data.page;
+                this.artistsTotal = data.total;
+                if (this.artists.length >= data.total) {
+                    this._allLoaded = true;
+                }
+            } catch {}
+            this.loading = false;
+        },
+
+        async openArtist(id) {
+            this.searchQuery = '';
+            this.searchResults = null;
+            this.view = 'artist_detail';
+            this.currentArtist = null;
+            this._setHash('#artist/' + id);
+            try {
+                const res = await fetch(`/api/player/artists/${id}`);
+                if (!res.ok) throw new Error('failed');
+                this.currentArtist = await res.json();
+            } catch {}
+        },
+
+        async openRelease(id) {
+            this.searchQuery = '';
+            this.searchResults = null;
+            this.view = 'release_detail';
+            this.currentRelease = null;
+            this._setHash('#release/' + id);
+            try {
+                const res = await fetch(`/api/player/releases/${id}`);
+                if (!res.ok) throw new Error('failed');
+                this.currentRelease = await res.json();
+            } catch {}
+        },
+
+        async openPlaylist(id) {
+            this.view = 'playlist_detail';
+            this.currentPlaylist = null;
+            this._setHash('#playlist/' + id);
+            try {
+                const res = await fetch(`/api/player/playlists/${id}`);
+                if (!res.ok) throw new Error('failed');
+                this.currentPlaylist = await res.json();
+            } catch {}
+        },
+
+        async playRelease(releaseId) {
+            try {
+                const res = await fetch(`/api/player/releases/${releaseId}`);
+                if (!res.ok) return;
+                const release = await res.json();
+                if (release.tracks.length > 0) {
+                    Alpine.store('queue').playRelease(release.tracks, 0);
+                }
+            } catch {}
+        },
+
+        async enqueueRelease(releaseId) {
+            try {
+                const res = await fetch(`/api/player/releases/${releaseId}`);
+                if (!res.ok) return;
+                const release = await res.json();
+                if (release.tracks.length > 0) {
+                    Alpine.store('queue').addToEnd(release.tracks);
+                }
+            } catch {}
+        },
+
+        async enqueueReleaseNext(releaseId) {
+            try {
+                const res = await fetch(`/api/player/releases/${releaseId}`);
+                if (!res.ok) return;
+                const release = await res.json();
+                if (release.tracks.length > 0) {
+                    Alpine.store('queue').addNextInQueue(release.tracks);
+                }
+            } catch {}
+        },
+
+        async search(query) {
+            const q = (query || '').trim();
+            if (!q) {
+                this.clearSearch();
+                return;
+            }
+            if (this.view !== 'search') {
+                this._previousView = this.view;
+            }
+            this.view = 'search';
+            this._setHash('#search?q=' + encodeURIComponent(q));
+            this.searchLoading = true;
+            try {
+                const res = await fetch(`/api/player/search?q=${encodeURIComponent(q)}&limit=10`);
+                if (!res.ok) throw new Error('failed');
+                this.searchResults = await res.json();
+            } catch {
+                this.searchResults = { artists: [], releases: [], tracks: [] };
+            }
+            this.searchLoading = false;
+        },
+
+        clearSearch() {
+            this.searchQuery = '';
+            this.searchResults = null;
+            this.searchLoading = false;
+            if (this.view === 'search') {
+                this.view = this._previousView || 'artists';
+                this._setHash('#artists');
+                if (this.view === 'artists') {
+                    this.$nextTick(() => { this._setupScroll(); });
+                }
+            }
+        },
+
+        playSearchTrack(idx) {
+            if (!this.searchResults || !this.searchResults.tracks) return;
+            Alpine.store('queue').playRelease(this.searchResults.tracks, idx);
+        },
+
+        _setupScroll() {
+            if (this._observer) this._observer.disconnect();
+            this.$nextTick(() => {
+                const sentinel = document.getElementById('artist-sentinel');
+                if (!sentinel) return;
+                this._observer = new IntersectionObserver((entries) => {
+                    if (entries[0].isIntersecting && !this.loading && !this._allLoaded) {
+                        this.loadArtists(this.artistsPage + 1);
+                    }
+                }, { root: document.getElementById('center-scroll'), threshold: 0.1 });
+                this._observer.observe(sentinel);
+            });
+        },
+
+        $nextTick(fn) {
+            setTimeout(fn, 50);
+        },
+    });
+
+    // -----------------------------------------------------------------------
+    // Likes store
+    // -----------------------------------------------------------------------
+    Alpine.store('likes', {
+        _set: new Set(),
+
+        init() {
+            fetch('/api/player/likes')
+                .then(r => r.json())
+                .then(d => { this._set = new Set(d.track_ids || []); })
+                .catch(() => {});
+        },
+
+        has(trackId) {
+            return this._set.has(trackId);
+        },
+
+        async toggle(trackId) {
+            // Optimistic update
+            if (this._set.has(trackId)) {
+                this._set.delete(trackId);
+            } else {
+                this._set.add(trackId);
+            }
+            // Force Alpine reactivity
+            this._set = new Set(this._set);
+            try {
+                const res = await fetch(`/api/player/likes/toggle/${trackId}`, { method: 'POST' });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.liked) {
+                        this._set.add(trackId);
+                    } else {
+                        this._set.delete(trackId);
+                    }
+                    this._set = new Set(this._set);
+                    Alpine.store('playlists').reload();
+                }
+            } catch {}
+        },
+
+        async toggleRelease(releaseId) {
+            try {
+                const res = await fetch(`/api/player/likes/release/${releaseId}`, { method: 'POST' });
+                if (res.ok) {
+                    // Reload liked IDs
+                    const likesRes = await fetch('/api/player/likes');
+                    if (likesRes.ok) {
+                        const d = await likesRes.json();
+                        this._set = new Set(d.track_ids || []);
+                    }
+                    Alpine.store('playlists').reload();
+                }
+            } catch {}
+        },
+
+        isReleaseLiked(release) {
+            if (!release || !release.tracks || release.tracks.length === 0) return false;
+            return release.tracks.every(t => this._set.has(t.id));
+        },
+    });
+
+    // -----------------------------------------------------------------------
+    // Playlists store
+    // -----------------------------------------------------------------------
+    Alpine.store('playlists', {
+        list: [],
+        modal: null,   // { mode: 'create'|'rename', title: '', id?: number }
+        picker: null,  // { trackIds: [1,2,3] }
+
+        init() {
+            this.reload();
+        },
+
+        async reload() {
+            try {
+                const res = await fetch('/api/player/playlists');
+                if (res.ok) this.list = await res.json();
+            } catch {}
+        },
+
+        showCreate() {
+            this.modal = { mode: 'create', title: '' };
+        },
+
+        startRename(pl) {
+            this.modal = { mode: 'rename', title: pl.title, id: pl.id };
+        },
+
+        async submitModal() {
+            if (!this.modal) return;
+            const title = this.modal.title.trim();
+            if (!title) return;
+
+            if (this.modal.mode === 'create') {
+                try {
+                    await fetch('/api/player/playlists', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ title }),
+                    });
+                    await this.reload();
+                } catch {}
+            } else if (this.modal.mode === 'rename') {
+                try {
+                    await fetch(`/api/player/playlists/${this.modal.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ title }),
+                    });
+                    await this.reload();
+                } catch {}
+            }
+            this.modal = null;
+        },
+
+        async deletePlaylist(id) {
+            if (!confirm('Delete this playlist?')) return;
+            try {
+                await fetch(`/api/player/playlists/${id}`, { method: 'DELETE' });
+                await this.reload();
+            } catch {}
+        },
+
+        showPicker(trackIds) {
+            this.picker = { trackIds };
+        },
+
+        async addToPicked(playlistId) {
+            if (!this.picker) return;
+            try {
+                await fetch(`/api/player/playlists/${playlistId}/tracks`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ track_ids: this.picker.trackIds }),
+                });
+                await this.reload();
+            } catch {}
+            this.picker = null;
+        },
+    });
+});
+</script>
+{% endblock body %}

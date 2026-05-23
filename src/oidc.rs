@@ -190,6 +190,11 @@ pub async fn oidc_start_handler(
     let redirect_url = RedirectUrl::new(redirect_uri_str.clone())
         .map_err(|e| cot::Error::internal(format!("bad redirect URI: {e}")))?;
     let client = client.set_redirect_uri(redirect_url);
+    tracing::info!(
+        redirect_uri = %redirect_uri_str,
+        oidc_issuer = %config.oidc_issuer,
+        "OIDC start: building authorization request",
+    );
 
     // Build PKCE challenge.
     let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
@@ -206,6 +211,7 @@ pub async fn oidc_start_handler(
         .add_scope(Scope::new("profile".to_string()))
         .set_pkce_challenge(pkce_challenge)
         .url();
+    tracing::info!(auth_url = %auth_url, "OIDC start: redirecting to provider");
 
     // Store OIDC flow state in the session.
     session
