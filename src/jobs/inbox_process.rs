@@ -262,7 +262,7 @@ async fn process_folder_batch(
         format!("batch({})", file_count)
     } else {
         let short = truncate_path(folder_rel, 20);
-        format!("{short}({})", file_count)
+        truncate_utf8_bytes(&format!("{short}({})", file_count), 32)
     };
     let mut run = match JobRun::create_running(db, "file_process", &trigger_label).await {
         Ok(r) => r,
@@ -963,9 +963,37 @@ fn truncate_path(path: &str, max_len: usize) -> String {
     }
 }
 
+fn truncate_utf8_bytes(value: &str, max_bytes: usize) -> String {
+    if value.len() <= max_bytes {
+        return value.to_owned();
+    }
+
+    if max_bytes <= 3 {
+        return ".".repeat(max_bytes);
+    }
+
+    let suffix_budget = max_bytes - 3;
+    let mut suffix = Vec::new();
+    let mut suffix_len = 0;
+    for ch in value.chars().rev() {
+        let ch_len = ch.len_utf8();
+        if suffix_len + ch_len > suffix_budget {
+            break;
+        }
+        suffix.push(ch);
+        suffix_len += ch_len;
+    }
+
+    let mut result = String::from("...");
+    for ch in suffix.iter().rev() {
+        result.push(*ch);
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
-    use super::truncate_path;
+    use super::{truncate_path, truncate_utf8_bytes};
 
     #[test]
     fn truncate_path_handles_unicode_boundaries() {
@@ -977,5 +1005,13 @@ mod tests {
             truncate_path("KUNTEYNIR/ОченьДлинноеНазвание", 12),
             "...еНазвание"
         );
+    }
+
+    #[test]
+    fn truncate_utf8_bytes_handles_limited_string_boundaries() {
+        let value = truncate_utf8_bytes("KUNTEYNIR/Блёвбургер(1)", 32);
+        assert!(value.len() <= 32);
+        assert!(value.is_char_boundary(value.len()));
+        assert!(value.ends_with("Блёвбургер(1)"));
     }
 }

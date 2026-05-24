@@ -30,6 +30,41 @@ fn now_iso() -> LimitedString<32> {
     LimitedString::new(&chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()).unwrap()
 }
 
+fn truncate_utf8_bytes(value: &str, max_bytes: usize) -> String {
+    if value.len() <= max_bytes {
+        return value.to_owned();
+    }
+
+    if max_bytes <= 3 {
+        return ".".repeat(max_bytes);
+    }
+
+    let suffix_budget = max_bytes - 3;
+    let mut suffix = Vec::new();
+    let mut suffix_len = 0;
+    for ch in value.chars().rev() {
+        let ch_len = ch.len_utf8();
+        if suffix_len + ch_len > suffix_budget {
+            break;
+        }
+        suffix.push(ch);
+        suffix_len += ch_len;
+    }
+
+    let mut result = String::from("...");
+    for ch in suffix.iter().rev() {
+        result.push(*ch);
+    }
+    result
+}
+
+fn limited_string<const N: u32>(value: &str) -> LimitedString<N> {
+    LimitedString::new(value).unwrap_or_else(|_| {
+        let truncated = truncate_utf8_bytes(value, N as usize);
+        LimitedString::new(&truncated).unwrap()
+    })
+}
+
 impl ScheduledJob {
     pub async fn list_all(db: &Database) -> cot::db::Result<Vec<Self>> {
         Self::objects().all(db).await
@@ -138,14 +173,14 @@ impl JobRun {
     pub async fn create_running(db: &Database, job_name: &str, trigger: &str) -> cot::db::Result<Self> {
         let mut run = Self {
             id: Auto::auto(),
-            job_name: LimitedString::new(job_name).unwrap(),
+            job_name: limited_string(job_name),
             status: LimitedString::new("running").unwrap(),
             started_at: now_iso(),
             finished_at: None,
             duration_ms: None,
             log_output: None,
             error_message: None,
-            trigger: LimitedString::new(trigger).unwrap(),
+            trigger: limited_string(trigger),
         };
         run.insert(db).await?;
         Ok(run)
@@ -273,14 +308,14 @@ impl JobRunRow {
     fn into_model(self) -> JobRun {
         JobRun {
             id: Auto::Fixed(self.id),
-            job_name: LimitedString::new(&self.job_name).unwrap(),
-            status: LimitedString::new(&self.status).unwrap(),
-            started_at: LimitedString::new(&self.started_at).unwrap(),
+            job_name: limited_string(&self.job_name),
+            status: limited_string(&self.status),
+            started_at: limited_string(&self.started_at),
             finished_at: self.finished_at,
             duration_ms: self.duration_ms,
             log_output: self.log_output,
             error_message: self.error_message,
-            trigger: LimitedString::new(&self.trigger).unwrap(),
+            trigger: limited_string(&self.trigger),
         }
     }
 }
