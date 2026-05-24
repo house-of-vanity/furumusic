@@ -85,7 +85,7 @@ pub async fn probe_llm(
         let body_text = resp.text().await.unwrap_or_default();
         return AgentProbeResult {
             latency_ms,
-            error: format!("HTTP {status}: {}", &body_text[..body_text.len().min(300)]),
+            error: format!("HTTP {status}: {}", body_text.chars().take(300).collect::<String>()),
             ..Default::default()
         };
     }

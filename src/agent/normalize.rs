@@ -90,7 +90,8 @@ async fn call_llm_chat(
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        tracing::error!(%status, body = &body[..body.len().min(500)], "LLM API error");
+        let body_preview: String = body.chars().take(500).collect();
+        tracing::error!(%status, body = %body_preview, "LLM API error");
         anyhow::bail!("LLM returned {}: {}", status, body);
     }
 
@@ -440,7 +441,7 @@ fn parse_batch_response(
         anyhow::anyhow!(
             "Failed to parse batch LLM response: {} — raw: {}",
             e,
-            &response[..response.len().min(500)]
+            response.chars().take(500).collect::<String>()
         )
     })?;
 

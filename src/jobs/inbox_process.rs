@@ -949,9 +949,33 @@ fn sanitize_filename(name: &str) -> String {
 }
 
 fn truncate_path(path: &str, max_len: usize) -> String {
-    if path.len() <= max_len {
+    let char_count = path.chars().count();
+    if char_count <= max_len {
         path.to_owned()
+    } else if max_len <= 3 {
+        ".".repeat(max_len)
     } else {
-        format!("...{}", &path[path.len() - (max_len - 3)..])
+        let suffix: String = path
+            .chars()
+            .skip(char_count - (max_len - 3))
+            .collect();
+        format!("...{suffix}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_path;
+
+    #[test]
+    fn truncate_path_handles_unicode_boundaries() {
+        assert_eq!(
+            truncate_path("KUNTEYNIR/Блёвбургер", 20),
+            "KUNTEYNIR/Блёвбургер"
+        );
+        assert_eq!(
+            truncate_path("KUNTEYNIR/ОченьДлинноеНазвание", 12),
+            "...еНазвание"
+        );
     }
 }

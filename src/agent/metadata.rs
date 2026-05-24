@@ -128,7 +128,8 @@ fn extract_tags(tags: &[symphonia::core::meta::Tag], meta: &mut RawMetadata) {
                 }
                 StandardTagKey::Date | StandardTagKey::OriginalDate => {
                     if meta.year.is_none() {
-                        meta.year = value[..4.min(value.len())].parse().ok();
+                        let year_prefix: String = value.chars().take(4).collect();
+                        meta.year = year_prefix.parse().ok();
                     }
                 }
                 StandardTagKey::Genre => {
