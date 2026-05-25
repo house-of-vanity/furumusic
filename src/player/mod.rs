@@ -16,6 +16,8 @@ use serde::{Deserialize, Serialize};
 use crate::auth;
 use crate::config::AppConfig;
 use crate::i18n::Translations;
+use crate::scheduler::SchedulerHandle;
+use crate::torrents::{TorrentPreviewRequest, TorrentService, TorrentStartRequest};
 
 // ---------------------------------------------------------------------------
 // JSON error helper
@@ -209,6 +211,11 @@ struct PaginationQuery {
 #[derive(Debug, Deserialize)]
 struct PathId {
     id: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct PathStringId {
+    id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2006,11 +2013,18 @@ async fn tracks_by_ids_handler(
 
 pub struct PlayerApp {
     config: Arc<AppConfig>,
+    scheduler_handle: Arc<tokio::sync::OnceCell<Arc<SchedulerHandle>>>,
 }
 
 impl PlayerApp {
-    pub fn new(config: Arc<AppConfig>) -> Self {
-        Self { config }
+    pub fn new(
+        config: Arc<AppConfig>,
+        scheduler_handle: Arc<tokio::sync::OnceCell<Arc<SchedulerHandle>>>,
+    ) -> Self {
+        Self {
+            config,
+            scheduler_handle,
+        }
     }
 }
 
@@ -2022,6 +2036,8 @@ impl App for PlayerApp {
     fn router(&self) -> Router {
         let pool_config = Arc::clone(&self.config);
         let pool: Arc<tokio::sync::OnceCell<sqlx::PgPool>> = Arc::new(tokio::sync::OnceCell::new());
+        let torrent_service: Arc<tokio::sync::OnceCell<Arc<TorrentService>>> =
+            Arc::new(tokio::sync::OnceCell::new());
 
         Router::with_urls([
             // -- Current user profile --
@@ -2048,6 +2064,120 @@ impl App for PlayerApp {
                     })
                 },
                 "player_me",
+            ),
+            // -- Torrent import widget --
+            Route::with_handler_and_name(
+                "/torrents/preview",
+                {
+                    let torrent_service = Arc::clone(&torrent_service);
+                    let scheduler_handle = Arc::clone(&self.scheduler_handle);
+                    post(
+                        move |session: Session, db: Database, json: Json<TorrentPreviewRequest>| {
+                            let torrent_service = Arc::clone(&torrent_service);
+                            let scheduler_handle = Arc::clone(&scheduler_handle);
+                            async move {
+                                let Some(_user) = auth::get_session_user(&session, &db).await
+                                else {
+                                    return Ok(json_error(
+                                        StatusCode::UNAUTHORIZED,
+                                        "not authenticated",
+                                    ));
+                                };
+                                let service = torrent_service
+                                    .get_or_init(|| async {
+                                        Arc::new(TorrentService::new(Arc::clone(&scheduler_handle)))
+                                    })
+                                    .await;
+                                match service.preview(json.0).await {
+                                    Ok(preview) => Json(preview).into_response(),
+                                    Err(err) => {
+                                        Ok(json_error(StatusCode::BAD_REQUEST, &err.to_string()))
+                                    }
+                                }
+                            }
+                        },
+                    )
+                },
+                "player_torrent_preview",
+            ),
+            Route::with_handler_and_name(
+                "/torrents/{id}/start",
+                {
+                    let torrent_service = Arc::clone(&torrent_service);
+                    let scheduler_handle = Arc::clone(&self.scheduler_handle);
+                    post(
+                        move |session: Session,
+                              db: Database,
+                              path: Path<PathStringId>,
+                              json: Json<TorrentStartRequest>| {
+                            let torrent_service = Arc::clone(&torrent_service);
+                            let scheduler_handle = Arc::clone(&scheduler_handle);
+                            async move {
+                                let Some(_user) = auth::get_session_user(&session, &db).await
+                                else {
+                                    return Ok(json_error(
+                                        StatusCode::UNAUTHORIZED,
+                                        "not authenticated",
+                                    ));
+                                };
+                                let (live_config, _) = AppConfig::load_with_db(&db).await;
+                                let service = torrent_service
+                                    .get_or_init(|| async {
+                                        Arc::new(TorrentService::new(Arc::clone(&scheduler_handle)))
+                                    })
+                                    .await;
+                                match service
+                                    .start(
+                                        &path.0.id,
+                                        json.0.selected_files,
+                                        live_config.agent_inbox_dir,
+                                    )
+                                    .await
+                                {
+                                    Ok(job) => Json(job).into_response(),
+                                    Err(err) => {
+                                        Ok(json_error(StatusCode::BAD_REQUEST, &err.to_string()))
+                                    }
+                                }
+                            }
+                        },
+                    )
+                },
+                "player_torrent_start",
+            ),
+            Route::with_handler_and_name(
+                "/torrents/{id}/status",
+                {
+                    let torrent_service = Arc::clone(&torrent_service);
+                    let scheduler_handle = Arc::clone(&self.scheduler_handle);
+                    get(
+                        move |session: Session, db: Database, path: Path<PathStringId>| {
+                            let torrent_service = Arc::clone(&torrent_service);
+                            let scheduler_handle = Arc::clone(&scheduler_handle);
+                            async move {
+                                let Some(_user) = auth::get_session_user(&session, &db).await
+                                else {
+                                    return Ok(json_error(
+                                        StatusCode::UNAUTHORIZED,
+                                        "not authenticated",
+                                    ));
+                                };
+                                let service = torrent_service
+                                    .get_or_init(|| async {
+                                        Arc::new(TorrentService::new(Arc::clone(&scheduler_handle)))
+                                    })
+                                    .await;
+                                match service.status(&path.0.id).await {
+                                    Ok(job) => Json(job).into_response(),
+                                    Err(err) => {
+                                        Ok(json_error(StatusCode::NOT_FOUND, &err.to_string()))
+                                    }
+                                }
+                            }
+                        },
+                    )
+                },
+                "player_torrent_status",
             ),
             // -- Artists (paginated) --
             Route::with_handler_and_name(

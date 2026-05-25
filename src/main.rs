@@ -9,6 +9,7 @@ mod music;
 mod oidc;
 mod player;
 mod scheduler;
+mod torrents;
 mod user;
 
 use std::sync::Arc;
@@ -370,7 +371,10 @@ impl Project for FuruProject {
         );
         apps.register_with_views(api::ApiApp, "/api");
         apps.register_with_views(
-            player::PlayerApp::new(Arc::clone(&self.app_config)),
+            player::PlayerApp::new(
+                Arc::clone(&self.app_config),
+                Arc::clone(&self.scheduler_handle),
+            ),
             "/api/player",
         );
         if self.app_config.swagger_enabled {

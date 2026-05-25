@@ -938,13 +938,27 @@ body {
 .empty-state p { font-size: 14px; }
 
 .content-topbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     margin-bottom: 20px;
 }
 
 /* Search bar */
 .search-bar {
     position: relative;
+    flex: 1 1 auto;
     min-width: 0;
+}
+
+.version-chip {
+    flex: 0 0 auto;
+    color: var(--text-subdued);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0;
+    white-space: nowrap;
 }
 
 .mobile-account-chip {
@@ -964,6 +978,31 @@ body {
 
 .mobile-account-chip:hover {
     background: var(--bg-hover);
+}
+
+.torrent-import-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    cursor: pointer;
+    flex: 0 0 auto;
+    transition: background 0.15s, color 0.15s;
+}
+
+.torrent-import-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.torrent-import-btn svg {
+    width: 19px;
+    height: 19px;
 }
 
 .mobile-account-chip .user-avatar {
@@ -1238,6 +1277,216 @@ body {
     gap: 8px;
 }
 
+.torrent-modal {
+    width: min(860px, calc(100vw - 32px));
+    max-width: 860px;
+    max-height: min(88dvh, 760px);
+    overflow: hidden;
+}
+
+.torrent-modal-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 12px;
+}
+
+.torrent-modal label {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.torrent-modal input[type="file"],
+.torrent-modal textarea {
+    width: 100%;
+    padding: 10px 12px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font: inherit;
+    outline: none;
+}
+
+.torrent-modal textarea {
+    resize: vertical;
+    min-height: 92px;
+}
+
+.torrent-modal input[type="file"]:focus,
+.torrent-modal textarea:focus {
+    border-color: var(--text-secondary);
+}
+
+.torrent-message {
+    margin: 10px 0 0;
+    min-height: 18px;
+    color: var(--text-subdued);
+    font-size: 12px;
+}
+
+.torrent-message.error { color: #ff8b8b; }
+
+.torrent-preview-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    margin-top: 16px;
+}
+
+.torrent-preview-title {
+    min-width: 0;
+    font-size: 14px;
+    font-weight: 800;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.torrent-preview-meta {
+    margin-top: 3px;
+    color: var(--text-subdued);
+    font-size: 12px;
+}
+
+.torrent-preview-panel {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.torrent-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.torrent-tree-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 12px;
+    padding: 10px 12px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+}
+
+.torrent-selected-summary {
+    min-width: 0;
+    color: var(--text-secondary);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.torrent-file-tree {
+    flex: 1 1 auto;
+    margin-top: 10px;
+    overflow-y: auto;
+    min-height: 140px;
+    max-height: min(46vh, 420px);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-primary);
+}
+
+.torrent-tree-row {
+    display: grid;
+    grid-template-columns: 28px 24px minmax(0, 1fr) 92px;
+    gap: 8px;
+    align-items: center;
+    min-height: 38px;
+    padding: 7px 10px 7px var(--indent, 10px);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.torrent-tree-row:last-child { border-bottom: 0; }
+.torrent-tree-row:hover { background: var(--bg-hover); }
+
+.torrent-tree-toggle,
+.torrent-tree-check {
+    width: 24px;
+    height: 24px;
+    border: 0;
+    background: transparent;
+    color: var(--text-subdued);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    cursor: pointer;
+}
+
+.torrent-tree-toggle svg {
+    width: 16px;
+    height: 16px;
+    transition: transform 0.15s;
+}
+
+.torrent-tree-toggle.expanded svg {
+    transform: rotate(90deg);
+}
+
+.torrent-tree-check {
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    background: var(--bg-secondary);
+}
+
+.torrent-tree-check.checked {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #000;
+}
+
+.torrent-tree-check.partial {
+    border-color: var(--text-secondary);
+    color: var(--text-primary);
+}
+
+.torrent-tree-check svg {
+    width: 15px;
+    height: 15px;
+}
+
+.torrent-tree-label {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.torrent-tree-label svg {
+    flex: 0 0 auto;
+    width: 17px;
+    height: 17px;
+    color: var(--text-subdued);
+}
+
+.torrent-file-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+}
+
+.torrent-file-size {
+    color: var(--text-subdued);
+    font-size: 12px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
 /* Sidebar playlist actions */
 .playlist-item-row {
     display: flex;
@@ -1322,9 +1571,6 @@ body {
     }
 
     .content-topbar {
-        display: flex;
-        align-items: center;
-        gap: 10px;
         margin-bottom: 16px;
     }
 
@@ -1335,6 +1581,14 @@ body {
     .mobile-account-chip {
         display: flex;
         flex: 0 0 auto;
+    }
+
+    .version-chip {
+        display: none;
+    }
+
+    .torrent-modal {
+        width: calc(100vw - 24px);
     }
 
     .card-grid {
@@ -1622,15 +1876,74 @@ body {
 
     .modal-overlay {
         align-items: flex-end;
-        padding: 12px;
+        padding: 8px;
     }
 
     .modal-box {
         width: 100%;
         min-width: 0;
         max-width: none;
-        max-height: min(76dvh, 560px);
+        max-height: calc(100dvh - 16px);
         border-radius: 10px;
+        overflow-y: auto;
+    }
+
+    .torrent-modal {
+        max-height: calc(100dvh - 16px);
+        padding: 16px;
+    }
+
+    .torrent-modal h3 {
+        margin-bottom: 12px;
+    }
+
+    .torrent-modal-grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+
+    .torrent-modal textarea {
+        min-height: 68px;
+        max-height: 84px;
+    }
+
+    .torrent-message {
+        margin-top: 8px;
+    }
+
+    .torrent-actions {
+        margin-top: 8px;
+    }
+
+    .torrent-preview-head {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 10px;
+    }
+
+    .torrent-tree-toolbar {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 8px;
+        padding: 8px 10px;
+    }
+
+    .torrent-file-tree {
+        min-height: 120px;
+        max-height: min(32dvh, 260px);
+    }
+
+    .torrent-tree-row {
+        grid-template-columns: 24px 22px minmax(0, 1fr) 74px;
+        gap: 6px;
+    }
+
+    .torrent-file-size {
+        grid-column: 4;
+        text-align: right;
+        white-space: nowrap;
     }
 
     .queue-panel {
@@ -1785,6 +2098,16 @@ body {
                         <span class="search-shortcut">Ctrl+K</span>
                     </template>
                 </div>
+                <button class="torrent-import-btn"
+                        @click="$store.torrents.open()"
+                        title="Import torrent">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                </button>
+                <span class="version-chip">v{{ t.app_version() }}</span>
                 <button class="mobile-account-chip"
                         x-show="$store.user.profile"
                         x-cloak
@@ -2298,6 +2621,101 @@ body {
                     <button class="modal-btn modal-btn-ghost" @click="$store.playlists.picker = null">Cancel</button>
                     <button class="modal-btn modal-btn-primary" @click="$store.playlists.picker = null; $store.playlists.showCreate()">New Playlist</button>
                 </div>
+            </div>
+        </div>
+    </template>
+
+    <!-- Torrent Import Modal -->
+    <template x-if="$store.torrents.modal">
+        <div class="modal-overlay" @click.self="$store.torrents.close()">
+            <div class="modal-box torrent-modal">
+                <h3>Import torrent</h3>
+                <div class="torrent-modal-grid">
+                    <div>
+                        <label for="torrent-file-input">Torrent file</label>
+                        <input id="torrent-file-input" type="file" accept=".torrent,application/x-bittorrent"
+                               @change="$store.torrents.file = $event.target.files[0] || null">
+                    </div>
+                    <div>
+                        <label for="torrent-magnet-input">Magnet link</label>
+                        <textarea id="torrent-magnet-input" x-model="$store.torrents.magnet" placeholder="magnet:?xt=urn:btih:..."></textarea>
+                    </div>
+                </div>
+                <p class="torrent-message" :class="{ error: $store.torrents.error }"
+                   x-text="$store.torrents.message"></p>
+                <div class="torrent-actions">
+                    <button class="modal-btn modal-btn-primary" @click="$store.torrents.preview()" :disabled="$store.torrents.loading">
+                        Preview content
+                    </button>
+                    <button class="modal-btn modal-btn-ghost" @click="$store.torrents.selectAudio()" :disabled="!$store.torrents.previewData">Audio only</button>
+                    <button class="modal-btn modal-btn-ghost" @click="$store.torrents.selectAll(true)" :disabled="!$store.torrents.previewData">All</button>
+                    <button class="modal-btn modal-btn-ghost" @click="$store.torrents.selectAll(false)" :disabled="!$store.torrents.previewData">Clear</button>
+                </div>
+                <template x-if="$store.torrents.previewData">
+                    <div class="torrent-preview-panel">
+                        <div class="torrent-preview-head">
+                            <div style="min-width:0">
+                                <div class="torrent-preview-title" x-text="$store.torrents.previewData.name"></div>
+                                <div class="torrent-preview-meta"
+                                     x-text="$store.torrents.previewData.files.length + ' files · ' + $store.torrents.bytes($store.torrents.previewData.total_size)"></div>
+                            </div>
+                            <button class="modal-btn modal-btn-primary" @click="$store.torrents.start()" :disabled="$store.torrents.loading">
+                                Download selected
+                            </button>
+                        </div>
+                        <div class="torrent-tree-toolbar">
+                            <div class="torrent-selected-summary"
+                                 x-text="$store.torrents.selected.size + ' selected · ' + $store.torrents.bytes($store.torrents.selectedBytes())"></div>
+                            <div class="torrent-actions" style="margin-top:0">
+                                <button class="modal-btn modal-btn-ghost" @click="$store.torrents.expandAll(true)">Expand all</button>
+                                <button class="modal-btn modal-btn-ghost" @click="$store.torrents.expandAll(false)">Collapse</button>
+                            </div>
+                        </div>
+                        <div class="torrent-file-tree">
+                            <template x-for="node in $store.torrents.visibleNodes()" :key="node.key">
+                                <div class="torrent-tree-row" :style="'--indent:' + $store.torrents.rowIndent(node) + 'px'">
+                                    <button class="torrent-tree-toggle"
+                                            :class="{ expanded: $store.torrents.expanded.has(node.key) }"
+                                            @click="$store.torrents.toggleExpand(node)"
+                                            :style="node.type === 'folder' ? '' : 'visibility:hidden'">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <polyline points="9 18 15 12 9 6"/>
+                                        </svg>
+                                    </button>
+                                    <button class="torrent-tree-check"
+                                            :class="$store.torrents.nodeCheckClass(node)"
+                                            @click="$store.torrents.toggleNode(node)">
+                                        <template x-if="$store.torrents.nodeState(node) === 'checked'">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                                                <polyline points="20 6 9 17 4 12"/>
+                                            </svg>
+                                        </template>
+                                        <template x-if="$store.torrents.nodeState(node) === 'partial'">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                                                <line x1="5" y1="12" x2="19" y2="12"/>
+                                            </svg>
+                                        </template>
+                                    </button>
+                                    <div class="torrent-tree-label" :title="node.name">
+                                        <template x-if="node.type === 'folder'">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <path d="M3 7a2 2 0 012-2h5l2 2h7a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+                                            </svg>
+                                        </template>
+                                        <template x-if="node.type === 'file'">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                                                <polyline points="14 2 14 8 20 8"/>
+                                            </svg>
+                                        </template>
+                                        <span class="torrent-file-name" x-text="node.name"></span>
+                                    </div>
+                                    <span class="torrent-file-size" x-text="$store.torrents.bytes(node.size)"></span>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </template>
             </div>
         </div>
     </template>
@@ -3025,6 +3443,338 @@ document.addEventListener('alpine:init', () => {
         isReleaseLiked(release) {
             if (!release || !release.tracks || release.tracks.length === 0) return false;
             return release.tracks.every(t => this._set.has(t.id));
+        },
+    });
+
+    // -----------------------------------------------------------------------
+    // Torrent import store
+    // -----------------------------------------------------------------------
+    Alpine.store('torrents', {
+        modal: false,
+        file: null,
+        magnet: '',
+        previewData: null,
+        treeRoot: null,
+        selected: new Set(),
+        expanded: new Set(),
+        loading: false,
+        message: '',
+        error: false,
+        _pollTimer: null,
+
+        open() {
+            this.modal = true;
+            this.message = '';
+            this.error = false;
+        },
+
+        close() {
+            this.modal = false;
+        },
+
+        _setMessage(message, error = false) {
+            this.message = message || '';
+            this.error = error;
+        },
+
+        bytes(value) {
+            if (!value) return '0 B';
+            const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+            let size = Number(value);
+            let idx = 0;
+            while (size >= 1024 && idx < units.length - 1) {
+                size /= 1024;
+                idx++;
+            }
+            return (idx === 0 ? size.toFixed(0) : size.toFixed(1)) + ' ' + units[idx];
+        },
+
+        async _fileBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onerror = () => reject(reader.error);
+                reader.onload = () => {
+                    const result = String(reader.result || '');
+                    resolve(result.includes(',') ? result.split(',')[1] : result);
+                };
+                reader.readAsDataURL(file);
+            });
+        },
+
+        async preview() {
+            if (this.loading) return;
+            const magnet = this.magnet.trim();
+            if (!this.file && !magnet) {
+                this._setMessage('Choose a .torrent file or paste a magnet link.', true);
+                return;
+            }
+
+            this.loading = true;
+            this.previewData = null;
+            this.treeRoot = null;
+            this.selected = new Set();
+            this.expanded = new Set();
+            this._setMessage(this.file ? 'Reading torrent file...' : 'Resolving magnet metadata. This can take a while...');
+
+            try {
+                const payload = this.file
+                    ? { kind: 'torrent_file', torrent_base64: await this._fileBase64(this.file) }
+                    : { kind: 'magnet', magnet };
+                const res = await fetch('/api/player/torrents/preview', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Preview failed');
+
+                this.previewData = data;
+                this.selected = new Set(data.files.filter(f => f.selected).map(f => f.index));
+                this.treeRoot = this._buildTree(data.files || []);
+                this._setMessage('Choose files and start download.');
+            } catch (err) {
+                this._setMessage(err.message || String(err), true);
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        toggle(index, checked) {
+            const next = new Set(this.selected);
+            if (checked) next.add(index);
+            else next.delete(index);
+            this.selected = next;
+        },
+
+        selectAll(value) {
+            if (!this.previewData) return;
+            this.selected = value
+                ? new Set(this.previewData.files.map(f => f.index))
+                : new Set();
+        },
+
+        selectAudio() {
+            if (!this.previewData) return;
+            this.selected = new Set(
+                this.previewData.files
+                    .filter(f => /\.(mp3|flac|ogg|opus|aac|m4a|wav|ape|wv|wma|tta|aiff|aif)$/i.test(f.name))
+                    .map(f => f.index)
+            );
+        },
+
+        selectedBytes() {
+            if (!this.previewData) return 0;
+            return this.previewData.files
+                .filter(file => this.selected.has(file.index))
+                .reduce((sum, file) => sum + Number(file.length || 0), 0);
+        },
+
+        _buildTree(files) {
+            const root = {
+                type: 'folder',
+                key: 'root',
+                name: 'root',
+                depth: -1,
+                size: 0,
+                fileIndexes: [],
+                children: [],
+                childMap: new Map(),
+            };
+
+            const ensureFolder = (parent, name, key, depth) => {
+                let node = parent.childMap.get(key);
+                if (!node) {
+                    node = {
+                        type: 'folder',
+                        key,
+                        name,
+                        depth,
+                        size: 0,
+                        fileIndexes: [],
+                        children: [],
+                        childMap: new Map(),
+                    };
+                    parent.childMap.set(key, node);
+                    parent.children.push(node);
+                }
+                return node;
+            };
+
+            files.forEach(file => {
+                const components = file.components && file.components.length
+                    ? file.components
+                    : String(file.name || '').split('/').filter(Boolean);
+                const pathParts = components.length ? components : [file.name || ('file-' + file.index)];
+                let parent = root;
+                const folderChain = [root];
+
+                pathParts.slice(0, -1).forEach((part, depth) => {
+                    const key = parent.key + '/' + part;
+                    parent = ensureFolder(parent, part, key, depth);
+                    folderChain.push(parent);
+                });
+
+                const fileNode = {
+                    type: 'file',
+                    key: 'file:' + file.index,
+                    name: pathParts[pathParts.length - 1],
+                    depth: Math.max(pathParts.length - 1, 0),
+                    size: Number(file.length || 0),
+                    fileIndex: file.index,
+                    fileIndexes: [file.index],
+                    children: [],
+                };
+                parent.children.push(fileNode);
+
+                folderChain.forEach(folder => {
+                    folder.size += fileNode.size;
+                    folder.fileIndexes.push(file.index);
+                });
+            });
+
+            const sortAndSeal = node => {
+                node.children.sort((a, b) => {
+                    if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+                    return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+                });
+                node.children.forEach(sortAndSeal);
+                delete node.childMap;
+            };
+            sortAndSeal(root);
+
+            const initiallyExpanded = new Set();
+            const collectExpanded = node => {
+                if (node.type === 'folder' && node.depth < 1) initiallyExpanded.add(node.key);
+                node.children.forEach(collectExpanded);
+            };
+            collectExpanded(root);
+            this.expanded = initiallyExpanded;
+
+            return root;
+        },
+
+        visibleNodes() {
+            if (!this.treeRoot) return [];
+            const rows = [];
+            const visit = node => {
+                node.children.forEach(child => {
+                    rows.push(child);
+                    if (child.type === 'folder' && this.expanded.has(child.key)) {
+                        visit(child);
+                    }
+                });
+            };
+            visit(this.treeRoot);
+            return rows;
+        },
+
+        rowIndent(node) {
+            return Math.min(10 + Math.max(node.depth, 0) * 18, 82);
+        },
+
+        toggleExpand(node) {
+            if (node.type !== 'folder') return;
+            const next = new Set(this.expanded);
+            if (next.has(node.key)) next.delete(node.key);
+            else next.add(node.key);
+            this.expanded = next;
+        },
+
+        expandAll(value) {
+            if (!this.treeRoot) return;
+            const next = new Set();
+            const visit = node => {
+                if (node.type === 'folder' && value) next.add(node.key);
+                node.children.forEach(visit);
+            };
+            visit(this.treeRoot);
+            this.expanded = next;
+        },
+
+        nodeState(node) {
+            if (node.type === 'file') {
+                return this.selected.has(node.fileIndex) ? 'checked' : 'empty';
+            }
+            const total = node.fileIndexes.length;
+            const selected = node.fileIndexes.filter(index => this.selected.has(index)).length;
+            if (selected === 0) return 'empty';
+            if (selected === total) return 'checked';
+            return 'partial';
+        },
+
+        nodeCheckClass(node) {
+            const state = this.nodeState(node);
+            return {
+                checked: state === 'checked',
+                partial: state === 'partial',
+            };
+        },
+
+        toggleNode(node) {
+            const next = new Set(this.selected);
+            if (node.type === 'file') {
+                if (next.has(node.fileIndex)) next.delete(node.fileIndex);
+                else next.add(node.fileIndex);
+                this.selected = next;
+                return;
+            }
+
+            if (this.nodeState(node) === 'checked') {
+                node.fileIndexes.forEach(index => next.delete(index));
+            } else {
+                node.fileIndexes.forEach(index => next.add(index));
+            }
+            this.selected = next;
+        },
+
+        async start() {
+            if (!this.previewData || this.loading) return;
+            const selected = [...this.selected];
+            if (selected.length === 0) {
+                this._setMessage('Select at least one file.', true);
+                return;
+            }
+
+            this.loading = true;
+            this._setMessage('Starting download...');
+            try {
+                const res = await fetch(`/api/player/torrents/${this.previewData.id}/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ selected_files: selected }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Start failed');
+                this._setMessage('Download started. Files will move to inbox when complete.');
+                this._poll(data.id);
+            } catch (err) {
+                this._setMessage(err.message || String(err), true);
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        _poll(id) {
+            if (this._pollTimer) clearInterval(this._pollTimer);
+            this._pollTimer = setInterval(async () => {
+                try {
+                    const res = await fetch(`/api/player/torrents/${id}/status`);
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error || 'Status failed');
+                    this._setMessage(
+                        data.status + ' · ' + data.progress_percent.toFixed(1) + '% · ' + this.bytes(data.downloaded_bytes),
+                        data.status === 'failed'
+                    );
+                    if (data.status === 'complete' || data.status === 'failed') {
+                        clearInterval(this._pollTimer);
+                        this._pollTimer = null;
+                    }
+                } catch (err) {
+                    this._setMessage(err.message || String(err), true);
+                    clearInterval(this._pollTimer);
+                    this._pollTimer = null;
+                }
+            }, 2000);
         },
     });
 
