@@ -360,6 +360,8 @@ pub async fn save_cover_to_storage(
         None,
         None,
         None,
+        None,
+        Some("UFO"),
     )
     .await
     .map_err(|e| anyhow::anyhow!("failed to create cover MediaFile: {e}"))?;

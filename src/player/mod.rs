@@ -10,14 +10,22 @@ use cot::router::method::{get, post};
 use cot::router::{Route, Router};
 use cot::session::Session;
 use cot::{App, Body, Template};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 
 use crate::auth;
 use crate::config::AppConfig;
 use crate::i18n::Translations;
 use crate::scheduler::SchedulerHandle;
 use crate::torrents::{TorrentPreviewRequest, TorrentService, TorrentStartRequest};
+
+mod dto;
+mod helpers;
+mod queries;
+mod rows;
+
+use dto::*;
+use helpers::{cover_url, load_release_uploaders, track_cover_url};
+use queries::*;
+use rows::*;
 
 // ---------------------------------------------------------------------------
 // JSON error helper
@@ -30,429 +38,6 @@ fn json_error(status: StatusCode, message: &str) -> cot::response::Response {
         .header(CONTENT_TYPE, "application/json")
         .body(Body::fixed(body.to_string()))
         .expect("valid response")
-}
-
-// ---------------------------------------------------------------------------
-// DTO structs
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Serialize, JsonSchema)]
-struct ArtistCard {
-    id: i64,
-    name: String,
-    image_url: Option<String>,
-    release_count: i64,
-    track_count: i64,
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-struct Paginated<T: Serialize> {
-    items: Vec<T>,
-    total: i64,
-    page: i32,
-    per_page: i32,
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-struct ReleaseCard {
-    id: i64,
-    title: String,
-    release_type: String,
-    year: Option<i32>,
-    cover_url: Option<String>,
-    track_count: i64,
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-struct ArtistDetail {
-    id: i64,
-    name: String,
-    image_url: Option<String>,
-    total_track_count: i64,
-    total_play_count: i64,
-    releases: Vec<ReleaseCard>,
-    featured_tracks: Vec<ArtistAppearanceTrack>,
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-struct ArtistRef {
-    id: i64,
-    name: String,
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-struct TrackItem {
-    id: i64,
-    title: String,
-    track_number: Option<i32>,
-    disc_number: Option<i32>,
-    duration_seconds: f64,
-    artists: Vec<ArtistRef>,
-    featured_artists: Vec<ArtistRef>,
-    cover_url: Option<String>,
-    stream_url: String,
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-struct ArtistAppearanceTrack {
-    id: i64,
-    title: String,
-    release_id: i64,
-    release_title: String,
-    duration_seconds: f64,
-    artists: Vec<ArtistRef>,
-    featured_artists: Vec<ArtistRef>,
-    cover_url: Option<String>,
-    stream_url: String,
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-struct ReleaseDetail {
-    id: i64,
-    title: String,
-    release_type: String,
-    year: Option<i32>,
-    cover_url: Option<String>,
-    artists: Vec<ArtistRef>,
-    tracks: Vec<TrackItem>,
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-struct PlaylistCard {
-    id: i64,
-    title: String,
-    track_count: i64,
-    is_own: bool,
-    kind: String, // "user" or "likes"
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-struct PlaybackStateDto {
-    current_track_id: Option<i64>,
-    position_ms: i32,
-    queue: Vec<i64>,
-    queue_position: i32,
-    shuffle: bool,
-    repeat_mode: String,
-    volume: f64,
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-struct PlaylistDetail {
-    id: i64,
-    title: String,
-    description: Option<String>,
-    is_own: bool,
-    kind: String,
-    tracks: Vec<TrackItem>,
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-struct SearchResults {
-    artists: Vec<ArtistCard>,
-    releases: Vec<ReleaseCard>,
-    tracks: Vec<TrackItem>,
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-struct UserStats {
-    liked_tracks: i64,
-    playlists: i64,
-    plays: i64,
-    listened_minutes: i64,
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-struct UserProfile {
-    name: String,
-    role: String,
-    stats: UserStats,
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-struct PlayHistoryItem {
-    id: i64,
-    track_id: i64,
-    track_title: String,
-    release_title: Option<String>,
-    played_at: String,
-    duration_listened: Option<i32>,
-    completed: bool,
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-struct PlayHistoryPage {
-    items: Vec<PlayHistoryItem>,
-    total: i64,
-    page: i32,
-    per_page: i32,
-}
-
-#[derive(Debug, Deserialize)]
-struct HistoryEntry {
-    track_id: i64,
-    duration_listened: Option<i32>,
-    completed: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct HistoryQuery {
-    page: Option<i32>,
-    limit: Option<i32>,
-}
-
-#[derive(Debug, Deserialize)]
-struct TracksByIdsRequest {
-    ids: Vec<i64>,
-}
-
-#[derive(Debug, Deserialize)]
-struct CreatePlaylistRequest {
-    title: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct UpdatePlaylistRequest {
-    title: Option<String>,
-    description: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct AddTracksRequest {
-    track_ids: Vec<i64>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RemoveTrackRequest {
-    track_id: i64,
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-struct LikeStatus {
-    liked: bool,
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-struct LikedIds {
-    track_ids: Vec<i64>,
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-struct FollowStatus {
-    followed: bool,
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-struct FollowedArtists {
-    artist_ids: Vec<i64>,
-    artists: Vec<ArtistCard>,
-}
-
-// ---------------------------------------------------------------------------
-// Query helpers
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Deserialize)]
-struct PaginationQuery {
-    page: Option<i32>,
-    limit: Option<i32>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PathId {
-    id: i64,
-}
-
-#[derive(Debug, Deserialize)]
-struct PathStringId {
-    id: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct SearchQuery {
-    q: String,
-    limit: Option<i32>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PathTrackId {
-    track_id: i64,
-}
-
-#[derive(Debug, Deserialize)]
-struct PathMediaFileId {
-    media_file_id: i64,
-}
-
-// ---------------------------------------------------------------------------
-// sqlx row types
-// ---------------------------------------------------------------------------
-
-#[derive(sqlx::FromRow)]
-struct ArtistRow {
-    id: i64,
-    name: String,
-    image_file_id: Option<i64>,
-    release_count: i64,
-    track_count: i64,
-}
-
-#[derive(sqlx::FromRow)]
-struct CountRow {
-    count: i64,
-}
-
-#[derive(sqlx::FromRow)]
-struct ReleaseRow {
-    id: i64,
-    title: String,
-    release_type: String,
-    year: Option<i32>,
-    cover_file_id: Option<i64>,
-    track_count: i64,
-}
-
-#[derive(sqlx::FromRow)]
-struct ArtistBriefRow {
-    id: i64,
-    name: String,
-}
-
-#[derive(sqlx::FromRow)]
-struct TrackRow {
-    id: i64,
-    title: String,
-    track_number: Option<i32>,
-    disc_number: Option<i32>,
-    duration_seconds: f64,
-    cover_file_id: Option<i64>,
-    release_cover_file_id: Option<i64>,
-}
-
-#[derive(sqlx::FromRow)]
-struct TrackArtistRow {
-    track_id: i64,
-    artist_id: i64,
-    artist_name: String,
-    role: String,
-}
-
-#[derive(sqlx::FromRow)]
-struct MediaFileRow {
-    file_path: String,
-    mime_type: String,
-    file_size_bytes: i64,
-}
-
-#[derive(sqlx::FromRow)]
-struct PlaybackStateRow {
-    current_track_id: Option<i64>,
-    position_ms: i32,
-    queue_json: String,
-    queue_position: i32,
-    shuffle: bool,
-    repeat_mode: String,
-    volume: f64,
-}
-
-#[derive(sqlx::FromRow)]
-struct PlaylistRow {
-    id: i64,
-    title: String,
-    track_count: i64,
-    is_own: bool,
-}
-
-#[derive(sqlx::FromRow)]
-struct PlaylistInfoRow {
-    id: i64,
-    title: String,
-    description: Option<String>,
-    owner_id: i64,
-}
-
-#[derive(sqlx::FromRow)]
-struct PlaylistTrackRow {
-    id: i64,
-    title: String,
-    track_number: Option<i32>,
-    disc_number: Option<i32>,
-    duration_seconds: f64,
-    cover_file_id: Option<i64>,
-    release_cover_file_id: Option<i64>,
-}
-
-#[derive(sqlx::FromRow)]
-struct AppearanceTrackRow {
-    id: i64,
-    title: String,
-    release_id: i64,
-    release_title: String,
-    duration_seconds: f64,
-    cover_file_id: Option<i64>,
-    release_cover_file_id: Option<i64>,
-}
-
-#[derive(sqlx::FromRow)]
-struct SearchArtistRow {
-    id: i64,
-    name: String,
-    image_file_id: Option<i64>,
-    release_count: i64,
-    track_count: i64,
-}
-
-#[derive(sqlx::FromRow)]
-struct SearchReleaseRow {
-    id: i64,
-    title: String,
-    release_type: String,
-    year: Option<i32>,
-    cover_file_id: Option<i64>,
-    track_count: i64,
-}
-
-#[derive(sqlx::FromRow)]
-struct SearchTrackRow {
-    id: i64,
-    title: String,
-    track_number: Option<i32>,
-    disc_number: Option<i32>,
-    duration_seconds: f64,
-    cover_file_id: Option<i64>,
-    release_cover_file_id: Option<i64>,
-}
-
-#[derive(sqlx::FromRow)]
-struct PlayHistoryRow {
-    id: i64,
-    track_id: i64,
-    track_title: String,
-    release_title: Option<String>,
-    played_at: String,
-    duration_listened: Option<i32>,
-    completed: bool,
-}
-
-#[derive(sqlx::FromRow)]
-struct ReleaseInfoRow {
-    id: i64,
-    title: String,
-    release_type: String,
-    year: Option<i32>,
-    cover_file_id: Option<i64>,
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-fn cover_url(file_id: Option<i64>) -> Option<String> {
-    file_id.map(|id| format!("/api/player/cover/{id}"))
-}
-
-fn track_cover_url(track_cover: Option<i64>, release_cover: Option<i64>) -> Option<String> {
-    cover_url(track_cover.or(release_cover))
 }
 
 // ---------------------------------------------------------------------------
@@ -643,6 +228,11 @@ async fn artist_detail_handler(
     .await
     .map_err(|e| cot::Error::internal(e.to_string()))?;
 
+    let release_ids: Vec<i64> = releases.iter().map(|r| r.id).collect();
+    let mut release_uploaders = load_release_uploaders(pool, &release_ids)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+
     let release_cards: Vec<ReleaseCard> = releases
         .into_iter()
         .map(|r| ReleaseCard {
@@ -652,6 +242,7 @@ async fn artist_detail_handler(
             year: r.year,
             cover_url: cover_url(r.cover_file_id),
             track_count: r.track_count,
+            uploaders: release_uploaders.remove(&r.id).unwrap_or_default(),
         })
         .collect();
 
@@ -676,10 +267,17 @@ async fn artist_detail_handler(
                   r.title::text AS release_title,
                   t.duration_seconds,
                   t.cover_file_id,
-                  r.cover_file_id AS release_cover_file_id
+                  r.cover_file_id AS release_cover_file_id,
+                  COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
+                  mf.audio_format,
+                  mf.audio_bitrate,
+                  mf.audio_sample_rate,
+                  mf.audio_bit_depth,
+                  mf.file_size_bytes
            FROM furumusic__track_artist ta
            JOIN furumusic__track t ON t.id = ta.track_id
            JOIN furumusic__release r ON r.id = t.release_id
+           LEFT JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
            WHERE ta.artist_id = $1
              AND ta.role = 'featuring'
              AND t.is_hidden = false
@@ -745,6 +343,12 @@ async fn artist_detail_handler(
                 featured_artists: featured_feat_artists.remove(&tid).unwrap_or_default(),
                 cover_url: track_cover_url(t.cover_file_id, t.release_cover_file_id),
                 stream_url: format!("/api/player/stream/{tid}"),
+                uploader_name: t.uploader_name,
+                audio_format: t.audio_format,
+                audio_bitrate: t.audio_bitrate,
+                audio_sample_rate: t.audio_sample_rate,
+                audio_bit_depth: t.audio_bit_depth,
+                file_size_bytes: t.file_size_bytes,
             }
         })
         .collect();
@@ -807,9 +411,16 @@ async fn release_detail_handler(
     let tracks = sqlx::query_as::<_, TrackRow>(
         r#"SELECT t.id, t.title::text as title, t.track_number, t.disc_number,
                   t.duration_seconds, t.cover_file_id,
-                  r.cover_file_id as release_cover_file_id
+                  r.cover_file_id as release_cover_file_id,
+                  COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
+                  mf.audio_format,
+                  mf.audio_bitrate,
+                  mf.audio_sample_rate,
+                  mf.audio_bit_depth,
+                  mf.file_size_bytes
            FROM furumusic__track t
            JOIN furumusic__release r ON r.id = t.release_id
+           LEFT JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
            WHERE t.release_id = $1 AND t.is_hidden = false
            ORDER BY t.disc_number NULLS FIRST, t.track_number NULLS LAST"#,
     )
@@ -875,9 +486,20 @@ async fn release_detail_handler(
                 featured_artists: track_feat_artists.remove(&tid).unwrap_or_default(),
                 cover_url: track_cover_url(t.cover_file_id, t.release_cover_file_id),
                 stream_url: format!("/api/player/stream/{tid}"),
+                uploader_name: t.uploader_name,
+                audio_format: t.audio_format,
+                audio_bitrate: t.audio_bitrate,
+                audio_sample_rate: t.audio_sample_rate,
+                audio_bit_depth: t.audio_bit_depth,
+                file_size_bytes: t.file_size_bytes,
             }
         })
         .collect();
+    let uploaders = load_release_uploaders(pool, &[release.id])
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?
+        .remove(&release.id)
+        .unwrap_or_default();
 
     Json(ReleaseDetail {
         id: release.id,
@@ -893,6 +515,7 @@ async fn release_detail_handler(
             })
             .collect(),
         tracks: track_items,
+        uploaders,
     })
     .into_response()
 }
@@ -988,10 +611,17 @@ async fn playlist_detail_handler(
     let tracks = sqlx::query_as::<_, PlaylistTrackRow>(
         r#"SELECT t.id, t.title::text as title, t.track_number, t.disc_number,
                   t.duration_seconds, t.cover_file_id,
-                  r.cover_file_id as release_cover_file_id
+                  r.cover_file_id as release_cover_file_id,
+                  COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
+                  mf.audio_format,
+                  mf.audio_bitrate,
+                  mf.audio_sample_rate,
+                  mf.audio_bit_depth,
+                  mf.file_size_bytes
            FROM furumusic__playlist_track pt
            JOIN furumusic__track t ON t.id = pt.track_id
            JOIN furumusic__release r ON r.id = t.release_id
+           LEFT JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
            WHERE pt.playlist_id = $1 AND t.is_hidden = false
            ORDER BY pt.position"#,
     )
@@ -1073,6 +703,12 @@ async fn build_track_items(
                 featured_artists: track_feat_artists.remove(&tid).unwrap_or_default(),
                 cover_url: track_cover_url(t.cover_file_id, t.release_cover_file_id),
                 stream_url: format!("/api/player/stream/{tid}"),
+                uploader_name: t.uploader_name,
+                audio_format: t.audio_format,
+                audio_bitrate: t.audio_bitrate,
+                audio_sample_rate: t.audio_sample_rate,
+                audio_bit_depth: t.audio_bit_depth,
+                file_size_bytes: t.file_size_bytes,
             }
         })
         .collect())
@@ -1086,10 +722,17 @@ async fn likes_playlist_handler(
     let tracks = sqlx::query_as::<_, PlaylistTrackRow>(
         r#"SELECT t.id, t.title::text as title, t.track_number, t.disc_number,
                   t.duration_seconds, t.cover_file_id,
-                  r.cover_file_id as release_cover_file_id
+                  r.cover_file_id as release_cover_file_id,
+                  COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
+                  mf.audio_format,
+                  mf.audio_bitrate,
+                  mf.audio_sample_rate,
+                  mf.audio_bit_depth,
+                  mf.file_size_bytes
            FROM furumusic__user_liked_track ult
            JOIN furumusic__track t ON t.id = ult.track_id
            JOIN furumusic__release r ON r.id = t.release_id
+           LEFT JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
            WHERE ult.user_id = $1 AND t.is_hidden = false
            ORDER BY ult.created_at DESC"#,
     )
@@ -1543,9 +1186,16 @@ async fn search_handler(
         let t = sqlx::query_as::<_, SearchTrackRow>(
             r#"SELECT t.id, t.title::text AS title, t.track_number, t.disc_number,
                       t.duration_seconds, t.cover_file_id,
-                      rel.cover_file_id AS release_cover_file_id
+                      rel.cover_file_id AS release_cover_file_id,
+                      COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
+                      mf.audio_format,
+                      mf.audio_bitrate,
+                      mf.audio_sample_rate,
+                      mf.audio_bit_depth,
+                      mf.file_size_bytes
                FROM furumusic__track t
                JOIN furumusic__release rel ON rel.id = t.release_id
+               LEFT JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
                WHERE t.is_hidden = false AND t.title_sort ILIKE '%' || $1 || '%'
                ORDER BY t.title_sort LIMIT $2"#,
         )
@@ -1605,22 +1255,32 @@ async fn search_handler(
         .fetch_all(pool);
 
         let t = sqlx::query_as::<_, SearchTrackRow>(
-            r#"SELECT id, title, track_number, disc_number, duration_seconds, cover_file_id, release_cover_file_id FROM (
+            r#"SELECT id, title, track_number, disc_number, duration_seconds, cover_file_id,
+                      release_cover_file_id, uploader_name, audio_format, audio_bitrate,
+                      audio_sample_rate, audio_bit_depth, file_size_bytes FROM (
                 SELECT t.id, t.title::text AS title, t.track_number, t.disc_number,
                        t.duration_seconds, t.cover_file_id,
                        rel.cover_file_id AS release_cover_file_id,
+                       COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
+                       mf.audio_format,
+                       mf.audio_bitrate,
+                       mf.audio_sample_rate,
+                       mf.audio_bit_depth,
+                       mf.file_size_bytes,
                        MAX(sim) AS similarity
                 FROM (
-                    SELECT id, title, title_sort, track_number, disc_number, duration_seconds, cover_file_id, release_id,
+                    SELECT id, title, title_sort, track_number, disc_number, duration_seconds, cover_file_id, release_id, audio_file_id,
                            similarity(title_sort, $1) AS sim
                     FROM furumusic__track WHERE is_hidden = false AND title_sort % $1
                     UNION ALL
-                    SELECT id, title, title_sort, track_number, disc_number, duration_seconds, cover_file_id, release_id,
+                    SELECT id, title, title_sort, track_number, disc_number, duration_seconds, cover_file_id, release_id, audio_file_id,
                            0.01::real AS sim
                     FROM furumusic__track WHERE is_hidden = false AND title_sort ILIKE '%' || $1 || '%'
                 ) t
                 JOIN furumusic__release rel ON rel.id = t.release_id
-                GROUP BY t.id, t.title, t.track_number, t.disc_number, t.duration_seconds, t.cover_file_id, rel.cover_file_id
+                LEFT JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
+                GROUP BY t.id, t.title, t.track_number, t.disc_number, t.duration_seconds, t.cover_file_id, rel.cover_file_id,
+                         mf.uploader_name, mf.audio_format, mf.audio_bitrate, mf.audio_sample_rate, mf.audio_bit_depth, mf.file_size_bytes
                 ORDER BY similarity DESC
                 LIMIT $2
             ) sub"#,
@@ -1685,6 +1345,11 @@ async fn search_handler(
         })
         .collect();
 
+    let release_ids: Vec<i64> = release_rows.iter().map(|r| r.id).collect();
+    let mut release_uploaders = load_release_uploaders(pool, &release_ids)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+
     let releases: Vec<ReleaseCard> = release_rows
         .into_iter()
         .map(|r| ReleaseCard {
@@ -1694,6 +1359,7 @@ async fn search_handler(
             year: r.year,
             cover_url: cover_url(r.cover_file_id),
             track_count: r.track_count,
+            uploaders: release_uploaders.remove(&r.id).unwrap_or_default(),
         })
         .collect();
 
@@ -1711,6 +1377,12 @@ async fn search_handler(
                 featured_artists: track_feat_artists.remove(&tid).unwrap_or_default(),
                 cover_url: track_cover_url(t.cover_file_id, t.release_cover_file_id),
                 stream_url: format!("/api/player/stream/{tid}"),
+                uploader_name: t.uploader_name,
+                audio_format: t.audio_format,
+                audio_bitrate: t.audio_bitrate,
+                audio_sample_rate: t.audio_sample_rate,
+                audio_bit_depth: t.audio_bit_depth,
+                file_size_bytes: t.file_size_bytes,
             }
         })
         .collect();
@@ -2265,9 +1937,16 @@ async fn tracks_by_ids_handler(
     let tracks = sqlx::query_as::<_, TrackRow>(
         r#"SELECT t.id, t.title::text as title, t.track_number, t.disc_number,
                   t.duration_seconds, t.cover_file_id,
-                  r.cover_file_id as release_cover_file_id
+                  r.cover_file_id as release_cover_file_id,
+                  COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
+                  mf.audio_format,
+                  mf.audio_bitrate,
+                  mf.audio_sample_rate,
+                  mf.audio_bit_depth,
+                  mf.file_size_bytes
            FROM furumusic__track t
            JOIN furumusic__release r ON r.id = t.release_id
+           LEFT JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
            WHERE t.id = ANY($1) AND t.is_hidden = false"#,
     )
     .bind(&ids)
@@ -2332,6 +2011,12 @@ async fn tracks_by_ids_handler(
                 featured_artists: track_feat_artists.remove(&tid).unwrap_or_default(),
                 cover_url: track_cover_url(t.cover_file_id, t.release_cover_file_id),
                 stream_url: format!("/api/player/stream/{tid}"),
+                uploader_name: t.uploader_name,
+                audio_format: t.audio_format,
+                audio_bitrate: t.audio_bitrate,
+                audio_sample_rate: t.audio_sample_rate,
+                audio_bit_depth: t.audio_bit_depth,
+                file_size_bytes: t.file_size_bytes,
             },
         );
     }
@@ -2448,8 +2133,7 @@ impl App for PlayerApp {
                             let torrent_service = Arc::clone(&torrent_service);
                             let scheduler_handle = Arc::clone(&scheduler_handle);
                             async move {
-                                let Some(_user) = auth::get_session_user(&session, &db).await
-                                else {
+                                let Some(user) = auth::get_session_user(&session, &db).await else {
                                     return Ok(json_error(
                                         StatusCode::UNAUTHORIZED,
                                         "not authenticated",
@@ -2466,6 +2150,7 @@ impl App for PlayerApp {
                                         &path.0.id,
                                         json.0.selected_files,
                                         live_config.agent_inbox_dir,
+                                        user.id,
                                     )
                                     .await
                                 {

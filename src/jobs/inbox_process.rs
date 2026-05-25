@@ -337,7 +337,9 @@ async fn process_folder_batch(
 
         // Parse path hints
         let relative = file_path.strip_prefix(inbox_path).unwrap_or(file_path);
-        let hints = crate::agent::path_hints::parse(relative);
+        let uploader = crate::jobs::uploader_from_relative_path(pool, relative).await;
+        let hinted_relative = crate::jobs::strip_user_upload_prefix(relative);
+        let hints = crate::agent::path_hints::parse(&hinted_relative);
         if let Some(context_obj) = context.as_object_mut() {
             context_obj.insert(
                 "audio_bitrate".to_owned(),
@@ -351,6 +353,15 @@ async fn process_folder_batch(
                 "audio_bit_depth".to_owned(),
                 serde_json::json!(raw_meta.audio_bit_depth),
             );
+            if !context_obj.contains_key("uploaded_by_user_id") {
+                context_obj.insert(
+                    "uploaded_by_user_id".to_owned(),
+                    serde_json::json!(uploader.user_id),
+                );
+            }
+            if !context_obj.contains_key("uploader_name") {
+                context_obj.insert("uploader_name".to_owned(), serde_json::json!(uploader.name));
+            }
         }
 
         prepared.push(PreparedFile {
@@ -737,6 +748,12 @@ pub async fn finalize_approved(
         .get("audio_bit_depth")
         .and_then(|v| v.as_i64())
         .and_then(|v| i32::try_from(v).ok());
+    let uploaded_by_user_id = context.get("uploaded_by_user_id").and_then(|v| v.as_i64());
+    let uploader_name = context
+        .get("uploader_name")
+        .and_then(|v| v.as_str())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("UFO");
 
     let source_path = Path::new(input_path_str);
     let original_filename = source_path
@@ -805,6 +822,8 @@ pub async fn finalize_approved(
         audio_bitrate,
         audio_sample_rate,
         audio_bit_depth,
+        uploaded_by_user_id,
+        Some(uploader_name),
     )
     .await
     .map_err(|e| anyhow::anyhow!("failed to create media file: {e}"))?;

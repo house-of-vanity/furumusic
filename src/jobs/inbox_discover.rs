@@ -140,7 +140,9 @@ impl Job for InboxDiscoverJob {
 
                 // Parse path hints
                 let relative = file_path.strip_prefix(inbox).unwrap_or(file_path);
-                let hints = crate::agent::path_hints::parse(relative);
+                let uploader = crate::jobs::uploader_from_relative_path(&ctx.pool, relative).await;
+                let hinted_relative = crate::jobs::strip_user_upload_prefix(relative);
+                let hints = crate::agent::path_hints::parse(&hinted_relative);
 
                 // Build context JSON
                 let context = serde_json::json!({
@@ -156,6 +158,8 @@ impl Job for InboxDiscoverJob {
                     "audio_bitrate": raw_meta.audio_bitrate,
                     "audio_sample_rate": raw_meta.audio_sample_rate,
                     "audio_bit_depth": raw_meta.audio_bit_depth,
+                    "uploaded_by_user_id": uploader.user_id,
+                    "uploader_name": uploader.name,
                     "path_title": hints.title,
                     "path_artist": hints.artist,
                     "path_album": hints.album,

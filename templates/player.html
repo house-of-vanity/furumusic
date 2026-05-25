@@ -610,6 +610,47 @@ button.user-stat:hover {
 .track-action-btn.play-btn:hover { color: var(--accent); }
 .track-action-btn svg { width: 16px; height: 16px; }
 
+.info-btn {
+    color: var(--text-subdued);
+}
+
+.info-btn:hover {
+    color: var(--text-primary);
+}
+
+.card-info-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 1px solid var(--border-color);
+    background: rgba(18,18,18,0.78);
+    color: var(--text-primary);
+    cursor: help;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.2s, background 0.15s;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+}
+
+.card:hover .card-info-btn,
+.search-release-card:hover .card-info-btn {
+    opacity: 1;
+}
+
+.card-info-btn:hover {
+    background: var(--bg-hover);
+}
+
+.card-info-btn svg {
+    width: 15px;
+    height: 15px;
+}
+
 /* Card enqueue button (next to play button on release cards) */
 .card-enqueue-btn {
     position: absolute;
@@ -1826,6 +1867,7 @@ button.user-stat:hover {
     .card-subtitle { font-size: 11px; }
     .card-play-btn,
     .card-enqueue-btn,
+    .card-info-btn,
     .artist-follow-card-btn,
     .track-actions,
     .playlist-item-actions,
@@ -2461,6 +2503,9 @@ button.user-stat:hover {
                                                     <template x-if="!release.cover_url">
                                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="12" r="4"/></svg>
                                                     </template>
+                                                    <button class="card-info-btn" @click.stop :title="$store.library.releaseInfo(release)" aria-label="Release info">
+                                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                                                    </button>
                                                 </div>
                                                 <div class="card-title" x-text="release.title"></div>
                                                 <div class="card-subtitle">
@@ -2501,6 +2546,9 @@ button.user-stat:hover {
                                             </div>
                                             <span></span>
                                             <div class="track-actions">
+                                                <button class="track-action-btn info-btn" @click.stop :title="$store.library.trackInfo(track)" aria-label="Track info">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                                                </button>
                                                 <button class="track-action-btn play-btn" @click.stop="$store.library.playSearchTrack(idx)" title="Play">
                                                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                                                 </button>
@@ -2620,6 +2668,9 @@ button.user-stat:hover {
                                             <template x-if="!release.cover_url">
                                                 <span class="placeholder-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="12" r="4"/></svg></span>
                                             </template>
+                                            <button class="card-info-btn" @click.stop :title="$store.library.releaseInfo(release)" aria-label="Release info">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                                            </button>
                                             <button class="card-enqueue-btn" @click.stop="$store.library.enqueueRelease(release.id)" title="Add to queue">
                                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                                             </button>
@@ -2669,6 +2720,9 @@ button.user-stat:hover {
                                     </div>
                                     <span></span>
                                     <div class="track-actions">
+                                        <button class="track-action-btn info-btn" @click.stop :title="$store.library.trackInfo(track)" aria-label="Track info">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                                        </button>
                                         <button class="track-action-btn play-btn" @click.stop="$store.queue.playRelease($store.library.currentArtist.featured_tracks, idx)" title="Play">
                                             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                                         </button>
@@ -2727,6 +2781,13 @@ button.user-stat:hover {
                             </div>
                             <div class="release-year" x-text="$store.library.currentRelease.year || ''"></div>
                             <div class="release-actions">
+                                <button class="release-action-btn secondary"
+                                        @click.stop
+                                        :title="$store.library.releaseInfo($store.library.currentRelease)"
+                                        aria-label="Release info">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                                    Info
+                                </button>
                                 <button class="release-action-btn primary" @click="$store.queue.playRelease($store.library.currentRelease.tracks, 0)">
                                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                                     Play
@@ -2774,6 +2835,9 @@ button.user-stat:hover {
                             </div>
                             <span></span>
                             <div class="track-actions">
+                                <button class="track-action-btn info-btn" @click.stop :title="$store.library.trackInfo(track)" aria-label="Track info">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                                </button>
                                 <button class="track-action-btn play-btn" @click.stop="$store.queue.playRelease($store.library.currentRelease.tracks, idx)" title="Play">
                                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                                 </button>
@@ -2833,6 +2897,9 @@ button.user-stat:hover {
                             </div>
                             <span></span>
                             <div class="track-actions">
+                                <button class="track-action-btn info-btn" @click.stop :title="$store.library.trackInfo(track)" aria-label="Track info">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                                </button>
                                 <button class="track-action-btn play-btn" @click.stop="$store.queue.playRelease($store.library.currentPlaylist.tracks, idx)" title="Play">
                                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                                 </button>
@@ -2902,6 +2969,9 @@ button.user-stat:hover {
                             </div>
                         </div>
                         <div class="queue-track-actions">
+                            <button class="queue-track-remove info-btn" @click.stop :title="$store.library.trackInfo(track)" aria-label="Track info">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                            </button>
                             <button class="queue-track-remove" @click.stop="$store.queue.remove(idx)" title="Remove">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                             </button>
@@ -3825,6 +3895,58 @@ document.addEventListener('alpine:init', () => {
                 label: 'ft. ' + artist.name,
             }));
             return [...main, ...featured];
+        },
+
+        bytes(value) {
+            if (!value) return 'unknown size';
+            const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+            let size = Number(value);
+            let idx = 0;
+            while (size >= 1024 && idx < units.length - 1) {
+                size /= 1024;
+                idx++;
+            }
+            return (idx === 0 ? size.toFixed(0) : size.toFixed(1)) + ' ' + units[idx];
+        },
+
+        uploadersInfo(uploaders) {
+            const rows = uploaders || [];
+            if (!rows.length) return 'UFO';
+            return rows
+                .map(row => `${row.name || 'UFO'} (${row.track_count} track${row.track_count === 1 ? '' : 's'})`)
+                .join(', ');
+        },
+
+        releaseInfo(release) {
+            if (!release) return '';
+            const lines = [
+                release.title || 'Unknown release',
+                `Type: ${release.release_type || 'unknown'}`,
+                `Year: ${release.year || 'unknown'}`,
+                `Tracks: ${release.track_count || release.tracks?.length || 0}`,
+                `Uploaders: ${this.uploadersInfo(release.uploaders || [])}`,
+            ];
+            return lines.join('\n');
+        },
+
+        trackInfo(track) {
+            if (!track) return '';
+            const artists = this.trackArtistLinks(track).map(artist => artist.label).join(', ') || 'unknown';
+            const audio = [
+                track.audio_format || null,
+                track.audio_bitrate ? `${track.audio_bitrate} kbps` : null,
+                track.audio_sample_rate ? `${track.audio_sample_rate} Hz` : null,
+                track.audio_bit_depth ? `${track.audio_bit_depth}-bit` : null,
+            ].filter(Boolean).join(' · ') || 'unknown audio details';
+            const lines = [
+                track.title || 'Unknown track',
+                `Artists: ${artists}`,
+                `Duration: ${formatTime(track.duration_seconds)}`,
+                `Audio: ${audio}`,
+                `Size: ${this.bytes(track.file_size_bytes)}`,
+                `Uploader: ${track.uploader_name || 'UFO'}`,
+            ];
+            return lines.join('\n');
         },
 
         async openRelease(id) {

@@ -1,0 +1,72 @@
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize)]
+pub(super) struct HistoryEntry {
+    pub(super) track_id: i64,
+    pub(super) duration_listened: Option<i32>,
+    pub(super) completed: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct HistoryQuery {
+    pub(super) page: Option<i32>,
+    pub(super) limit: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct TracksByIdsRequest {
+    pub(super) ids: Vec<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct CreatePlaylistRequest {
+    pub(super) title: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct UpdatePlaylistRequest {
+    pub(super) title: Option<String>,
+    pub(super) description: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct AddTracksRequest {
+    pub(super) track_ids: Vec<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct RemoveTrackRequest {
+    pub(super) track_id: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct PaginationQuery {
+    pub(super) page: Option<i32>,
+    pub(super) limit: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct PathId {
+    pub(super) id: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct PathStringId {
+    pub(super) id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct SearchQuery {
+    pub(super) q: String,
+    pub(super) limit: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct PathTrackId {
+    pub(super) track_id: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct PathMediaFileId {
+    pub(super) media_file_id: i64,
+}

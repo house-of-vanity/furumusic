@@ -36,6 +36,10 @@ pub struct MediaFile {
     pub audio_sample_rate: Option<i32>,
     /// Bit depth (16, 24, 32)
     pub audio_bit_depth: Option<i32>,
+    /// FK -> user who imported/uploaded the source, NULL when unknown.
+    pub uploaded_by_user_id: Option<i64>,
+    /// Stable display label for the uploader. Unknown uploads are stored as "UFO".
+    pub uploader_name: LimitedString<255>,
     pub created_at: LimitedString<32>,
 }
 
@@ -607,8 +611,13 @@ impl MediaFile {
         audio_bitrate: Option<i32>,
         audio_sample_rate: Option<i32>,
         audio_bit_depth: Option<i32>,
+        uploaded_by_user_id: Option<i64>,
+        uploader_name: Option<&str>,
     ) -> cot::db::Result<Self> {
         let now = now_iso();
+        let uploader_name = uploader_name
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or("UFO");
         let mut mf = Self {
             id: Auto::auto(),
             file_type: LimitedString::new(file_type).unwrap(),
@@ -621,6 +630,8 @@ impl MediaFile {
             audio_bitrate,
             audio_sample_rate,
             audio_bit_depth,
+            uploaded_by_user_id,
+            uploader_name: LimitedString::new(uploader_name).unwrap(),
             created_at: now,
         };
         mf.insert(db).await?;
@@ -1533,6 +1544,40 @@ pub mod db_migrations {
         const OPERATIONS: &'static [Operation] = &[Operation::custom(add_playback_volume).build()];
     }
 
+    // -- M0030: add uploader attribution to media_file ------------------------
+
+    #[cot::db::migrations::migration_op]
+    async fn add_media_file_uploader(ctx: migrations::MigrationContext<'_>) -> cot::db::Result<()> {
+        ctx.db
+            .raw("ALTER TABLE furumusic__media_file ADD COLUMN uploaded_by_user_id BIGINT DEFAULT NULL")
+            .await?;
+        ctx.db
+            .raw("ALTER TABLE furumusic__media_file ADD COLUMN uploader_name VARCHAR(255) NOT NULL DEFAULT 'UFO'")
+            .await?;
+        ctx.db
+            .raw("CREATE INDEX IF NOT EXISTS idx_media_file_uploaded_by_user ON furumusic__media_file (uploaded_by_user_id)")
+            .await?;
+        ctx.db
+            .raw("CREATE INDEX IF NOT EXISTS idx_media_file_uploader_name ON furumusic__media_file (uploader_name)")
+            .await?;
+        Ok(())
+    }
+
+    #[derive(Debug, Copy, Clone)]
+    pub struct M0030AddMediaFileUploader;
+
+    impl migrations::Migration for M0030AddMediaFileUploader {
+        const APP_NAME: &'static str = "furumusic";
+        const MIGRATION_NAME: &'static str = "m_0030_add_media_file_uploader";
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
+                "furumusic",
+                "m_0029_add_playback_volume",
+            )];
+        const OPERATIONS: &'static [Operation] =
+            &[Operation::custom(add_media_file_uploader).build()];
+    }
+
     pub const MIGRATIONS: &[&SyncDynMigration] = &[
         &M0006CreateMediaFile,
         &M0007CreateArtist,
@@ -1553,5 +1598,6 @@ pub mod db_migrations {
         &M0022CreateTrackTrgmIndex,
         &M0028AddModelNameColumns,
         &M0029AddPlaybackVolume,
+        &M0030AddMediaFileUploader,
     ];
 }

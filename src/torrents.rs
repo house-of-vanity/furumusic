@@ -316,6 +316,7 @@ impl TorrentService {
         id: &str,
         selected_files: Vec<usize>,
         inbox_dir: String,
+        uploader_user_id: i64,
     ) -> anyhow::Result<TorrentJobDto> {
         if selected_files.is_empty() {
             bail!("select at least one file");
@@ -371,7 +372,10 @@ impl TorrentService {
                 return;
             }
             service.stop_torrent(&handle).await;
-            if let Err(err) = service.finalize_completed(&id, &inbox_dir).await {
+            if let Err(err) = service
+                .finalize_completed(&id, &inbox_dir, uploader_user_id)
+                .await
+            {
                 service.fail_job(&id, err.to_string()).await;
             }
         });
@@ -400,7 +404,12 @@ impl TorrentService {
         }
     }
 
-    async fn finalize_completed(&self, id: &str, inbox_dir: &Path) -> anyhow::Result<()> {
+    async fn finalize_completed(
+        &self,
+        id: &str,
+        inbox_dir: &Path,
+        uploader_user_id: i64,
+    ) -> anyhow::Result<()> {
         let (name, files, selected_files, output_dir) = {
             let mut jobs = self.jobs.lock().await;
             let job = jobs.get_mut(id).context("torrent job not found")?;
@@ -414,7 +423,8 @@ impl TorrentService {
         };
 
         let destination_root = inbox_dir
-            .join("torrents")
+            .join("user_uploads")
+            .join(uploader_user_id.to_string())
             .join(sanitize_path_component(&name));
         tokio::fs::create_dir_all(&destination_root).await?;
 
