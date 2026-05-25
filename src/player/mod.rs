@@ -546,18 +546,33 @@ async fn playlists_handler(
         title: "Likes".to_string(),
         track_count: likes_count.0,
         is_own: true,
+        owner_name: None,
+        is_public: false,
+        is_saved: false,
         kind: "likes".to_string(),
     }];
 
     let rows = sqlx::query_as::<_, PlaylistRow>(
         r#"SELECT p.id, p.title::text as title,
                   COALESCE((SELECT COUNT(*) FROM furumusic__playlist_track pt WHERE pt.playlist_id = p.id), 0) as track_count,
-                  (p.owner_id = $1) as is_own
+                  (p.owner_id = $1) as is_own,
+                  COALESCE(NULLIF(u.display_name, ''), u.username)::text as owner_name,
+                  p.is_public,
+                  EXISTS (
+                      SELECT 1 FROM furumusic__saved_playlist sp
+                      WHERE sp.user_id = $1 AND sp.playlist_id = p.id
+                  ) as is_saved
            FROM furumusic__playlist p
+           JOIN furumusic__user u ON u.id = p.owner_id
            WHERE p.owner_id = $1
-              OR p.id IN (SELECT sp.playlist_id FROM furumusic__saved_playlist sp WHERE sp.user_id = $1)
+              OR EXISTS (
+                  SELECT 1 FROM furumusic__saved_playlist sp
+                  WHERE sp.user_id = $1 AND sp.playlist_id = p.id
+              )
               OR p.is_public = true
-           ORDER BY p.title"#,
+           ORDER BY
+              CASE WHEN p.owner_id = $1 THEN 0 WHEN p.is_public THEN 2 ELSE 1 END,
+              p.title"#,
     )
     .bind(user.id)
     .fetch_all(pool)
@@ -569,6 +584,9 @@ async fn playlists_handler(
         title: r.title,
         track_count: r.track_count,
         is_own: r.is_own,
+        owner_name: Some(r.owner_name),
+        is_public: r.is_public,
+        is_saved: r.is_saved,
         kind: "user".to_string(),
     }));
 
@@ -597,9 +615,19 @@ async fn playlist_detail_handler(
     }
 
     let info = sqlx::query_as::<_, PlaylistInfoRow>(
-        "SELECT id, title::text as title, description, owner_id FROM furumusic__playlist WHERE id = $1",
+        r#"SELECT p.id, p.title::text as title, p.description, p.owner_id,
+                  COALESCE(NULLIF(u.display_name, ''), u.username)::text as owner_name,
+                  p.is_public,
+                  EXISTS (
+                      SELECT 1 FROM furumusic__saved_playlist sp
+                      WHERE sp.user_id = $2 AND sp.playlist_id = p.id
+                  ) as is_saved
+           FROM furumusic__playlist p
+           JOIN furumusic__user u ON u.id = p.owner_id
+           WHERE p.id = $1"#,
     )
     .bind(playlist_id)
+    .bind(user.id)
     .fetch_optional(pool)
     .await
     .map_err(|e| cot::Error::internal(e.to_string()))?;
@@ -637,6 +665,9 @@ async fn playlist_detail_handler(
         title: info.title,
         description: info.description,
         is_own: info.owner_id == user.id,
+        owner_name: Some(info.owner_name),
+        is_public: info.is_public,
+        is_saved: info.is_saved,
         kind: "user".to_string(),
         tracks: track_items,
     })
@@ -748,6 +779,9 @@ async fn likes_playlist_handler(
         title: "Likes".to_string(),
         description: None,
         is_own: true,
+        owner_name: None,
+        is_public: false,
+        is_saved: false,
         kind: "likes".to_string(),
         tracks: track_items,
     })
@@ -1429,6 +1463,9 @@ async fn create_playlist_handler(
         title,
         track_count: 0,
         is_own: true,
+        owner_name: Some(user.name),
+        is_public: false,
+        is_saved: false,
         kind: "user".to_string(),
     })
     .into_response()

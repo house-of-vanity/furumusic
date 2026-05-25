@@ -1124,6 +1124,34 @@ pub struct SchedulerHandle {
 }
 
 impl SchedulerHandle {
+    /// Start a job immediately in the background and return the created run id.
+    pub async fn trigger_job_now_background(
+        self: Arc<Self>,
+        job_name: &str,
+    ) -> anyhow::Result<i64> {
+        self.registry
+            .get(job_name)
+            .ok_or_else(|| anyhow::anyhow!("unknown job: {job_name}"))?;
+
+        let db = self.shared_db.clone();
+        let pool = self.shared_pool.clone();
+        let (live_config, _) = AppConfig::load_with_db(&db).await;
+        let run = JobRun::create_running(&db, job_name, "manual")
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to create job run: {e}"))?;
+        let run_id = run.id_val();
+        let job_name = job_name.to_owned();
+        let handle = Arc::clone(&self);
+
+        tokio::spawn(async move {
+            handle
+                .finish_manual_run(job_name, live_config, db, pool, run)
+                .await;
+        });
+
+        Ok(run_id)
+    }
+
     /// Execute a job immediately (manual or programmatic trigger).
     pub async fn trigger_job_now(&self, job_name: &str) -> anyhow::Result<i64> {
         let job_impl = self
@@ -1170,6 +1198,51 @@ impl SchedulerHandle {
         }
 
         Ok(run.id_val())
+    }
+
+    async fn finish_manual_run(
+        self: Arc<Self>,
+        job_name: String,
+        live_config: AppConfig,
+        db: Database,
+        pool: sqlx::PgPool,
+        mut run: JobRun,
+    ) {
+        let Some(job_impl) = self.registry.get(&job_name) else {
+            let _ = run
+                .set_failed(&db, 0, "", &format!("unknown job: {job_name}"))
+                .await;
+            return;
+        };
+
+        let start = std::time::Instant::now();
+        let ctx = JobContext {
+            config: Arc::new(live_config),
+            db: db.clone(),
+            pool: pool.clone(),
+            run_id: run.id_val(),
+            registry: Arc::clone(&self.registry),
+        };
+        let mut log = JobLog::with_live_flush(pool, run.id_val());
+
+        match job_impl.run(&ctx, &mut log).await {
+            Ok(()) => {
+                let duration_ms = start.elapsed().as_millis() as i64;
+                let _ = run.set_completed(&db, duration_ms, &log.output()).await;
+            }
+            Err(e) => {
+                let duration_ms = start.elapsed().as_millis() as i64;
+                let _ = run
+                    .set_failed(&db, duration_ms, &log.output(), &e.to_string())
+                    .await;
+            }
+        }
+
+        if let Ok(Some(mut sched_job)) = ScheduledJob::get_by_name(&db, &job_name).await {
+            sched_job.last_run_at = Some(now_iso().to_string());
+            sched_job.updated_at = now_iso();
+            let _ = sched_job.save(&db).await;
+        }
     }
 
     /// Remove a cron job from the scheduler and re-add it with a new cron

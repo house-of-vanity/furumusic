@@ -77,6 +77,9 @@ pub(super) struct PlaylistRow {
     pub(super) title: String,
     pub(super) track_count: i64,
     pub(super) is_own: bool,
+    pub(super) owner_name: String,
+    pub(super) is_public: bool,
+    pub(super) is_saved: bool,
 }
 
 #[derive(sqlx::FromRow)]
@@ -85,6 +88,9 @@ pub(super) struct PlaylistInfoRow {
     pub(super) title: String,
     pub(super) description: Option<String>,
     pub(super) owner_id: i64,
+    pub(super) owner_name: String,
+    pub(super) is_public: bool,
+    pub(super) is_saved: bool,
 }
 
 #[derive(sqlx::FromRow)]

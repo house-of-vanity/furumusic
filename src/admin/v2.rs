@@ -1,0 +1,1766 @@
+use std::collections::HashMap;
+
+use cot::db::Database;
+use cot::html::Html;
+use cot::http::StatusCode;
+use cot::http::header::CONTENT_TYPE;
+use cot::json::Json;
+use cot::response::IntoResponse;
+use cot::session::Session;
+use cot::{Body, Template};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use sqlx::{PgPool, Postgres, QueryBuilder};
+
+use super::BUILD_INFO;
+use crate::auth::{self, AuthenticatedUser, Role};
+use crate::i18n::{I18n, Translations};
+use crate::scheduler::{JobRegistry, ScheduledJob};
+
+#[derive(Debug, Template)]
+#[template(path = "admin/v2.html")]
+struct AdminV2Template {
+    t: &'static Translations,
+    user_name: String,
+    user_role: String,
+    version: &'static str,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct ReviewsQuery {
+    pub(super) status: Option<String>,
+    pub(super) search: Option<String>,
+    pub(super) limit: Option<i64>,
+    pub(super) offset: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct LibraryQuery {
+    pub(super) kind: Option<String>,
+    pub(super) search: Option<String>,
+    pub(super) limit: Option<i64>,
+    pub(super) offset: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct BulkReviewsRequest {
+    action: String,
+    mode: Option<String>,
+    ids: Option<Vec<i64>>,
+    filter: Option<ReviewFilter>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct BulkLibraryRequest {
+    action: String,
+    kind: String,
+    mode: Option<String>,
+    ids: Option<Vec<i64>>,
+    filter: Option<LibraryFilter>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct UpdateLibraryItemRequest {
+    kind: String,
+    id: i64,
+    title: String,
+    hidden: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+struct ReviewFilter {
+    status: Option<String>,
+    search: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+struct LibraryFilter {
+    search: Option<String>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct AdminUserDto {
+    id: i64,
+    name: String,
+    role: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct BuildDto {
+    package: &'static str,
+    version: &'static str,
+    profile: &'static str,
+    target: &'static str,
+    rustc_version: &'static str,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct AdminDashboardDto {
+    user: AdminUserDto,
+    build: BuildDto,
+    stats: OverviewStatsDto,
+    reviews: ReviewPageDto,
+    jobs: Vec<JobDto>,
+    recent_runs: Vec<JobRunDto>,
+    library: LibraryOverviewDto,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct OverviewStatsDto {
+    tracks: i64,
+    releases: i64,
+    artists: i64,
+    playlists: i64,
+    hidden_tracks: i64,
+    hidden_releases: i64,
+    hidden_artists: i64,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct StatusCountDto {
+    status: String,
+    count: i64,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct TagDto {
+    label: String,
+    kind: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct ReviewPageDto {
+    items: Vec<ReviewDto>,
+    total: i64,
+    limit: i64,
+    offset: i64,
+    status: Option<String>,
+    search: Option<String>,
+    status_counts: Vec<StatusCountDto>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct ReviewDto {
+    id: i64,
+    job_run_id: i64,
+    review_type: String,
+    input_path: String,
+    display_path: String,
+    filename: String,
+    status: String,
+    confidence: Option<f64>,
+    model_name: Option<String>,
+    llm_duration_ms: Option<i64>,
+    token_count: Option<i64>,
+    tags: Vec<TagDto>,
+    error_message: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct JobDto {
+    name: String,
+    description: String,
+    cron_expression: String,
+    enabled: bool,
+    health: String,
+    is_running: bool,
+    last_run_at: Option<String>,
+    next_run_at: Option<String>,
+    recent_runs: Vec<JobRunDto>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+struct JobRunDto {
+    id: i64,
+    job_name: String,
+    status: String,
+    started_at: String,
+    finished_at: Option<String>,
+    duration_ms: Option<i64>,
+    trigger: String,
+    error_message: Option<String>,
+    log_excerpt: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct JobRunStartedDto {
+    ok: bool,
+    run_id: i64,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct JobRunsDto {
+    job_name: String,
+    runs: Vec<JobRunDto>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct JobRunDetailDto {
+    run: JobRunDto,
+    log_output: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct BulkReviewsResponse {
+    ok: bool,
+    affected: u64,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct MutationResponse {
+    ok: bool,
+    affected: u64,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct LibraryOverviewDto {
+    artists: i64,
+    releases: i64,
+    tracks: i64,
+    playlists: i64,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct LibraryPageDto {
+    kind: String,
+    items: Vec<LibraryItemDto>,
+    total: i64,
+    limit: i64,
+    offset: i64,
+    search: Option<String>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct LibraryItemDto {
+    id: i64,
+    kind: String,
+    title: String,
+    subtitle: String,
+    is_hidden: Option<bool>,
+    tags: Vec<TagDto>,
+    updated_at: Option<String>,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct IdRow {
+    id: i64,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct CountRow {
+    count: i64,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct StatusCountRow {
+    status: String,
+    count: i64,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct ReviewRow {
+    id: i64,
+    job_run_id: i64,
+    review_type: String,
+    input_path: Option<String>,
+    context_json: Option<String>,
+    result_json: Option<String>,
+    status: String,
+    created_at: String,
+    updated_at: String,
+    error_message: Option<String>,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct ReviewStatsRow {
+    pending_review_id: i64,
+    model_name: String,
+    llm_duration_ms: i64,
+    prompt_tokens: i64,
+    completion_tokens: i64,
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct ReviewMediaRow {
+    sha256_hash: String,
+    original_filename: String,
+    file_size_bytes: i64,
+    audio_format: Option<String>,
+    audio_bitrate: Option<i32>,
+    audio_sample_rate: Option<i32>,
+    audio_bit_depth: Option<i32>,
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct JobRunRow {
+    id: i64,
+    job_name: String,
+    status: String,
+    started_at: String,
+    finished_at: Option<String>,
+    duration_ms: Option<i64>,
+    trigger: String,
+    error_message: Option<String>,
+    log_excerpt: String,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct JobRunDetailRow {
+    id: i64,
+    job_name: String,
+    status: String,
+    started_at: String,
+    finished_at: Option<String>,
+    duration_ms: Option<i64>,
+    trigger: String,
+    error_message: Option<String>,
+    log_excerpt: String,
+    log_output: Option<String>,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct LibraryItemRow {
+    id: i64,
+    title: String,
+    subtitle: Option<String>,
+    is_hidden: Option<bool>,
+    primary_count: i64,
+    secondary_count: i64,
+    tertiary_count: i64,
+    updated_at: Option<String>,
+}
+
+pub async fn page(admin: AuthenticatedUser, i18n: I18n) -> cot::Result<Html> {
+    let template = AdminV2Template {
+        t: i18n.t,
+        user_name: admin.name,
+        user_role: admin.role.code().to_owned(),
+        version: BUILD_INFO.pkg_version,
+    };
+    Ok(Html::new(template.render()?))
+}
+
+pub async fn dashboard(
+    session: Session,
+    db: Database,
+    pool: &PgPool,
+    registry: &JobRegistry,
+) -> cot::Result<cot::response::Response> {
+    let admin = match require_admin_json(&session, &db).await {
+        Ok(admin) => admin,
+        Err(response) => return Ok(response),
+    };
+
+    sync_registered_jobs(&db, registry).await;
+    let reviews_query = ReviewsQuery {
+        status: None,
+        search: None,
+        limit: Some(80),
+        offset: Some(0),
+    };
+    let (reviews, stats, jobs, recent_runs, library) = tokio::try_join!(
+        load_review_page(pool, reviews_query),
+        load_overview_stats(pool),
+        load_jobs(&db, pool, registry),
+        load_recent_runs(pool, 5),
+        load_library_overview(pool),
+    )
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    Json(AdminDashboardDto {
+        user: AdminUserDto {
+            id: admin.id,
+            name: admin.name,
+            role: admin.role.code().to_owned(),
+        },
+        build: build_dto(),
+        stats,
+        reviews,
+        jobs,
+        recent_runs,
+        library,
+    })
+    .into_response()
+}
+
+pub async fn reviews(
+    session: Session,
+    db: Database,
+    pool: &PgPool,
+    query: ReviewsQuery,
+) -> cot::Result<cot::response::Response> {
+    if let Err(response) = require_admin_json(&session, &db).await {
+        return Ok(response);
+    }
+
+    let page = load_review_page(pool, query)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    Json(page).into_response()
+}
+
+pub async fn bulk_reviews(
+    session: Session,
+    db: Database,
+    pool: &PgPool,
+    Json(body): Json<BulkReviewsRequest>,
+) -> cot::Result<cot::response::Response> {
+    if let Err(response) = require_admin_json(&session, &db).await {
+        return Ok(response);
+    }
+
+    let action = body.action.trim();
+    if action != "delete" && action != "requeue" {
+        return Ok(json_error(StatusCode::BAD_REQUEST, "unknown bulk action"));
+    }
+
+    let mode = body.mode.as_deref().unwrap_or("ids");
+    let affected = if mode == "filter" {
+        apply_review_filter_action(pool, action, body.filter.unwrap_or_default()).await?
+    } else {
+        let mut ids = body.ids.unwrap_or_default();
+        ids.retain(|id| *id > 0);
+        ids.sort_unstable();
+        ids.dedup();
+        if ids.is_empty() {
+            0
+        } else if action == "delete" {
+            crate::scheduler::PendingReview::delete_by_ids(&db, &ids)
+                .await
+                .map_err(|e| cot::Error::internal(e.to_string()))?;
+            ids.len() as u64
+        } else {
+            crate::scheduler::PendingReview::requeue_by_ids(&db, &ids)
+                .await
+                .map_err(|e| cot::Error::internal(e.to_string()))?;
+            ids.len() as u64
+        }
+    };
+
+    Json(BulkReviewsResponse { ok: true, affected }).into_response()
+}
+
+pub async fn jobs(
+    session: Session,
+    db: Database,
+    pool: &PgPool,
+    registry: &JobRegistry,
+) -> cot::Result<cot::response::Response> {
+    if let Err(response) = require_admin_json(&session, &db).await {
+        return Ok(response);
+    }
+    sync_registered_jobs(&db, registry).await;
+    let jobs = load_jobs(&db, pool, registry)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    Json(jobs).into_response()
+}
+
+pub async fn run_job(
+    session: Session,
+    db: Database,
+    handle_cell: &std::sync::Arc<
+        tokio::sync::OnceCell<std::sync::Arc<crate::scheduler::SchedulerHandle>>,
+    >,
+    job_name: &str,
+) -> cot::Result<cot::response::Response> {
+    if let Err(response) = require_admin_json(&session, &db).await {
+        return Ok(response);
+    }
+
+    let Some(handle) = handle_cell.get() else {
+        return Ok(json_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "scheduler is not ready",
+        ));
+    };
+
+    match std::sync::Arc::clone(handle)
+        .trigger_job_now_background(job_name)
+        .await
+    {
+        Ok(run_id) => Json(JobRunStartedDto { ok: true, run_id }).into_response(),
+        Err(e) => Ok(json_error(StatusCode::BAD_REQUEST, &e.to_string())),
+    }
+}
+
+pub async fn toggle_job(
+    session: Session,
+    db: Database,
+    handle_cell: &std::sync::Arc<
+        tokio::sync::OnceCell<std::sync::Arc<crate::scheduler::SchedulerHandle>>,
+    >,
+    job_name: &str,
+) -> cot::Result<cot::response::Response> {
+    if let Err(response) = require_admin_json(&session, &db).await {
+        return Ok(response);
+    }
+
+    let job = ScheduledJob::get_by_name(&db, job_name)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?
+        .ok_or_else(|| cot::Error::internal("job not found"))?;
+    let Some(handle) = handle_cell.get() else {
+        return Ok(json_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "scheduler is not ready",
+        ));
+    };
+    let enabled = !job.enabled;
+    if let Err(e) = handle.toggle_job(job_name, enabled).await {
+        return Ok(json_error(StatusCode::BAD_REQUEST, &e.to_string()));
+    }
+
+    Json(serde_json::json!({ "ok": true, "enabled": enabled })).into_response()
+}
+
+pub async fn job_runs(
+    session: Session,
+    db: Database,
+    pool: &PgPool,
+    job_name: &str,
+) -> cot::Result<cot::response::Response> {
+    if let Err(response) = require_admin_json(&session, &db).await {
+        return Ok(response);
+    }
+    let runs = load_runs_for_job(pool, job_name, 40)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    Json(JobRunsDto {
+        job_name: job_name.to_owned(),
+        runs,
+    })
+    .into_response()
+}
+
+pub async fn job_run_detail(
+    session: Session,
+    db: Database,
+    pool: &PgPool,
+    run_id: i64,
+) -> cot::Result<cot::response::Response> {
+    if let Err(response) = require_admin_json(&session, &db).await {
+        return Ok(response);
+    }
+    let row = sqlx::query_as::<_, JobRunDetailRow>(
+        "SELECT id, job_name::text AS job_name, status::text AS status, started_at::text AS started_at, \
+                finished_at, duration_ms, trigger::text AS trigger, error_message, \
+                LEFT(COALESCE(log_output, ''), 1600) AS log_excerpt, log_output \
+         FROM furumusic__job_run WHERE id = $1",
+    )
+    .bind(run_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    let Some(row) = row else {
+        return Ok(json_error(StatusCode::NOT_FOUND, "run not found"));
+    };
+
+    let log_output = row.log_output.clone().unwrap_or_default();
+    Json(JobRunDetailDto {
+        run: row.into(),
+        log_output,
+    })
+    .into_response()
+}
+
+pub async fn library(
+    session: Session,
+    db: Database,
+    pool: &PgPool,
+    query: LibraryQuery,
+) -> cot::Result<cot::response::Response> {
+    if let Err(response) = require_admin_json(&session, &db).await {
+        return Ok(response);
+    }
+    let page = load_library_page(pool, query)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    Json(page).into_response()
+}
+
+pub async fn update_library_item(
+    session: Session,
+    db: Database,
+    pool: &PgPool,
+    Json(body): Json<UpdateLibraryItemRequest>,
+) -> cot::Result<cot::response::Response> {
+    if let Err(response) = require_admin_json(&session, &db).await {
+        return Ok(response);
+    }
+
+    let kind = normalize_library_kind(Some(body.kind.as_str()));
+    let title = body.title.trim();
+    if title.is_empty() {
+        return Ok(json_error(StatusCode::BAD_REQUEST, "title cannot be empty"));
+    }
+
+    let now = now_string();
+    let affected = match kind.as_str() {
+        "artists" => {
+            sqlx::query(
+                "UPDATE furumusic__artist \
+                 SET name = $1, name_sort = $2, is_hidden = $3, updated_at = $4 \
+                 WHERE id = $5",
+            )
+            .bind(title)
+            .bind(normalize_name(title))
+            .bind(body.hidden)
+            .bind(&now)
+            .bind(body.id)
+            .execute(pool)
+            .await
+        }
+        "releases" => {
+            sqlx::query(
+                "UPDATE furumusic__release \
+                 SET title = $1, title_sort = $2, is_hidden = $3, updated_at = $4 \
+                 WHERE id = $5",
+            )
+            .bind(title)
+            .bind(normalize_name(title))
+            .bind(body.hidden)
+            .bind(&now)
+            .bind(body.id)
+            .execute(pool)
+            .await
+        }
+        "playlists" => {
+            sqlx::query(
+                "UPDATE furumusic__playlist \
+                 SET title = $1, is_public = $2, updated_at = $3 \
+                 WHERE id = $4",
+            )
+            .bind(title)
+            .bind(!body.hidden)
+            .bind(&now)
+            .bind(body.id)
+            .execute(pool)
+            .await
+        }
+        _ => unreachable!(),
+    }
+    .map_err(|e| cot::Error::internal(e.to_string()))?
+    .rows_affected();
+
+    if affected == 0 {
+        return Ok(json_error(StatusCode::NOT_FOUND, "library item not found"));
+    }
+
+    let Some(item) = fetch_library_item(pool, &kind, body.id)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?
+    else {
+        return Ok(json_error(StatusCode::NOT_FOUND, "library item not found"));
+    };
+
+    Json(item).into_response()
+}
+
+pub async fn bulk_library(
+    session: Session,
+    db: Database,
+    pool: &PgPool,
+    Json(body): Json<BulkLibraryRequest>,
+) -> cot::Result<cot::response::Response> {
+    if let Err(response) = require_admin_json(&session, &db).await {
+        return Ok(response);
+    }
+
+    let kind = normalize_library_kind(Some(body.kind.as_str()));
+    let action = body.action.trim();
+    if !matches!(action, "hide" | "show" | "delete") {
+        return Ok(json_error(
+            StatusCode::BAD_REQUEST,
+            "unknown library action",
+        ));
+    }
+
+    let mut ids = if body.mode.as_deref() == Some("filter") {
+        library_ids_by_filter(pool, &kind, body.filter.unwrap_or_default()).await?
+    } else {
+        body.ids.unwrap_or_default()
+    };
+    ids.retain(|id| *id > 0);
+    ids.sort_unstable();
+    ids.dedup();
+    if ids.is_empty() {
+        return Json(MutationResponse {
+            ok: true,
+            affected: 0,
+        })
+        .into_response();
+    }
+
+    let affected = apply_library_action(pool, &kind, action, &ids).await?;
+    Json(MutationResponse { ok: true, affected }).into_response()
+}
+
+async fn require_admin_json(
+    session: &Session,
+    db: &Database,
+) -> Result<AuthenticatedUser, cot::response::Response> {
+    let Some(user) = auth::get_session_user(session, db).await else {
+        return Err(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    if user.role != Role::Admin {
+        return Err(json_error(StatusCode::FORBIDDEN, "forbidden"));
+    }
+    Ok(user)
+}
+
+fn json_error(status: StatusCode, message: &str) -> cot::response::Response {
+    let body = serde_json::json!({ "error": message });
+    cot::http::Response::builder()
+        .status(status)
+        .header(CONTENT_TYPE, "application/json")
+        .body(Body::fixed(body.to_string()))
+        .expect("valid response")
+}
+
+fn build_dto() -> BuildDto {
+    BuildDto {
+        package: BUILD_INFO.pkg_name,
+        version: BUILD_INFO.pkg_version,
+        profile: BUILD_INFO.profile,
+        target: BUILD_INFO.target,
+        rustc_version: BUILD_INFO.rustc_version,
+    }
+}
+
+async fn sync_registered_jobs(db: &Database, registry: &JobRegistry) {
+    for job in registry.all_jobs() {
+        if let Err(e) =
+            ScheduledJob::upsert(db, job.name(), job.description(), job.default_cron()).await
+        {
+            tracing::error!("failed to upsert scheduled job {}: {e}", job.name());
+        }
+    }
+    if let Ok(all) = ScheduledJob::list_all(db).await {
+        for sched_job in all {
+            if registry.get(sched_job.name_str()).is_none() {
+                tracing::warn!("removing orphaned scheduled job '{}'", sched_job.name_str());
+                let _ = ScheduledJob::delete_by_name(db, sched_job.name_str()).await;
+            }
+        }
+    }
+}
+
+async fn load_overview_stats(pool: &PgPool) -> anyhow::Result<OverviewStatsDto> {
+    let tracks: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM furumusic__track")
+        .fetch_one(pool)
+        .await?;
+    let releases: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM furumusic__release")
+        .fetch_one(pool)
+        .await?;
+    let artists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM furumusic__artist")
+        .fetch_one(pool)
+        .await?;
+    let playlists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM furumusic__playlist")
+        .fetch_one(pool)
+        .await?;
+    let hidden_tracks: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM furumusic__track WHERE is_hidden")
+            .fetch_one(pool)
+            .await?;
+    let hidden_releases: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM furumusic__release WHERE is_hidden")
+            .fetch_one(pool)
+            .await?;
+    let hidden_artists: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM furumusic__artist WHERE is_hidden")
+            .fetch_one(pool)
+            .await?;
+
+    Ok(OverviewStatsDto {
+        tracks,
+        releases,
+        artists,
+        playlists,
+        hidden_tracks,
+        hidden_releases,
+        hidden_artists,
+    })
+}
+
+async fn load_library_overview(pool: &PgPool) -> anyhow::Result<LibraryOverviewDto> {
+    let stats = load_overview_stats(pool).await?;
+    Ok(LibraryOverviewDto {
+        artists: stats.artists,
+        releases: stats.releases,
+        tracks: stats.tracks,
+        playlists: stats.playlists,
+    })
+}
+
+async fn load_review_page(pool: &PgPool, query: ReviewsQuery) -> anyhow::Result<ReviewPageDto> {
+    let limit = query.limit.unwrap_or(80).clamp(10, 250);
+    let offset = query.offset.unwrap_or(0).max(0);
+    let status = normalize_status(query.status.as_deref());
+    let search = clean_search(query.search.as_deref());
+    let search_pattern = search.as_ref().map(|s| format!("%{s}%"));
+
+    let total = count_reviews(pool, status.clone(), search_pattern.clone()).await?;
+    let status_counts = load_review_status_counts(pool, None, search_pattern.clone()).await?;
+
+    let mut qb = QueryBuilder::<Postgres>::new(
+        "SELECT id, job_run_id, review_type::text AS review_type, input_path, context_json, \
+                result_json, status::text AS status, created_at::text AS created_at, \
+                updated_at::text AS updated_at, error_message \
+         FROM furumusic__pending_review WHERE 1=1",
+    );
+    push_review_filters(&mut qb, status.clone(), search_pattern.clone());
+    qb.push(" ORDER BY id DESC LIMIT ");
+    qb.push_bind(limit);
+    qb.push(" OFFSET ");
+    qb.push_bind(offset);
+
+    let rows = qb.build_query_as::<ReviewRow>().fetch_all(pool).await?;
+    let stats = load_review_stats(pool, rows.iter().map(|row| row.id).collect()).await?;
+    let media = load_review_media(pool, &rows).await?;
+    let items = rows
+        .into_iter()
+        .map(|row| review_dto(row, &stats, &media))
+        .collect();
+
+    Ok(ReviewPageDto {
+        items,
+        total,
+        limit,
+        offset,
+        status,
+        search,
+        status_counts,
+    })
+}
+
+async fn count_reviews(
+    pool: &PgPool,
+    status: Option<String>,
+    search_pattern: Option<String>,
+) -> anyhow::Result<i64> {
+    let mut qb = QueryBuilder::<Postgres>::new(
+        "SELECT COUNT(*) AS count FROM furumusic__pending_review WHERE 1=1",
+    );
+    push_review_filters(&mut qb, status, search_pattern);
+    Ok(qb.build_query_as::<CountRow>().fetch_one(pool).await?.count)
+}
+
+async fn load_review_status_counts(
+    pool: &PgPool,
+    status: Option<String>,
+    search_pattern: Option<String>,
+) -> anyhow::Result<Vec<StatusCountDto>> {
+    let mut qb = QueryBuilder::<Postgres>::new(
+        "SELECT status::text AS status, COUNT(*) AS count \
+         FROM furumusic__pending_review WHERE 1=1",
+    );
+    push_review_filters(&mut qb, status, search_pattern);
+    qb.push(" GROUP BY status ORDER BY status");
+
+    let rows = qb
+        .build_query_as::<StatusCountRow>()
+        .fetch_all(pool)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| StatusCountDto {
+            status: row.status,
+            count: row.count,
+        })
+        .collect())
+}
+
+fn push_review_filters(
+    qb: &mut QueryBuilder<'_, Postgres>,
+    status: Option<String>,
+    search_pattern: Option<String>,
+) {
+    if let Some(status) = status {
+        qb.push(" AND status = ");
+        qb.push_bind(status);
+    }
+    if let Some(pattern) = search_pattern {
+        qb.push(" AND (input_path ILIKE ");
+        qb.push_bind(pattern.clone());
+        qb.push(" OR review_type::text ILIKE ");
+        qb.push_bind(pattern.clone());
+        qb.push(" OR COALESCE(error_message, '') ILIKE ");
+        qb.push_bind(pattern);
+        qb.push(")");
+    }
+}
+
+async fn load_review_stats(
+    pool: &PgPool,
+    ids: Vec<i64>,
+) -> anyhow::Result<HashMap<i64, ReviewStatsRow>> {
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let rows = sqlx::query_as::<_, ReviewStatsRow>(
+        "SELECT pending_review_id, model_name::text AS model_name, llm_duration_ms, \
+                prompt_tokens, completion_tokens \
+         FROM furumusic__processing_stats WHERE pending_review_id = ANY($1)",
+    )
+    .bind(&ids)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| (row.pending_review_id, row))
+        .collect())
+}
+
+async fn load_review_media(
+    pool: &PgPool,
+    rows: &[ReviewRow],
+) -> anyhow::Result<HashMap<String, ReviewMediaRow>> {
+    let mut hashes = rows
+        .iter()
+        .filter_map(|row| context_sha256(row.context_json.as_deref().unwrap_or("")))
+        .collect::<Vec<_>>();
+    hashes.sort();
+    hashes.dedup();
+    if hashes.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let media_rows = sqlx::query_as::<_, ReviewMediaRow>(
+        "SELECT sha256_hash::text AS sha256_hash, original_filename::text AS original_filename, \
+                file_size_bytes, audio_format, audio_bitrate, audio_sample_rate, audio_bit_depth \
+         FROM furumusic__media_file \
+         WHERE file_type = 'audio' AND sha256_hash = ANY($1)",
+    )
+    .bind(&hashes)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(media_rows
+        .into_iter()
+        .map(|row| (row.sha256_hash.to_ascii_lowercase(), row))
+        .collect())
+}
+
+fn review_dto(
+    row: ReviewRow,
+    stats: &HashMap<i64, ReviewStatsRow>,
+    media: &HashMap<String, ReviewMediaRow>,
+) -> ReviewDto {
+    let input_path = row.input_path.unwrap_or_default();
+    let filename = file_name(&input_path);
+    let sha = context_sha256(row.context_json.as_deref().unwrap_or(""));
+    let media_row = sha.as_ref().and_then(|hash| media.get(hash));
+    let tags = media_row.map(media_tags).unwrap_or_default();
+    let stat = stats.get(&row.id);
+    let confidence = row
+        .result_json
+        .as_deref()
+        .and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok())
+        .and_then(|value| value.get("confidence").and_then(|v| v.as_f64()));
+
+    ReviewDto {
+        id: row.id,
+        job_run_id: row.job_run_id,
+        review_type: row.review_type,
+        display_path: compact_path_tail(&input_path, 96),
+        input_path,
+        filename,
+        status: row.status,
+        confidence,
+        model_name: stat.map(|s| s.model_name.clone()),
+        llm_duration_ms: stat.map(|s| s.llm_duration_ms),
+        token_count: stat.map(|s| s.prompt_tokens + s.completion_tokens),
+        tags,
+        error_message: row.error_message,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+    }
+}
+
+fn media_tags(row: &ReviewMediaRow) -> Vec<TagDto> {
+    let mut tags = Vec::new();
+    if let Some(format) = row.audio_format.as_deref().filter(|s| !s.trim().is_empty()) {
+        tags.push(tag(format.to_ascii_lowercase(), "format"));
+    } else if let Some(ext) = file_extension(&row.original_filename) {
+        tags.push(tag(ext, "format"));
+    }
+    if let Some(bitrate) = row.audio_bitrate {
+        tags.push(tag(format!("{bitrate} kbps"), "bitrate"));
+    }
+    if let Some(sample_rate) = row.audio_sample_rate {
+        if sample_rate % 1000 == 0 {
+            tags.push(tag(format!("{} kHz", sample_rate / 1000), "sample"));
+        } else {
+            tags.push(tag(
+                format!("{:.1} kHz", sample_rate as f64 / 1000.0),
+                "sample",
+            ));
+        }
+    }
+    if let Some(bit_depth) = row.audio_bit_depth {
+        tags.push(tag(format!("{bit_depth}-bit"), "depth"));
+    }
+    tags.push(tag(size_display(row.file_size_bytes), "size"));
+    tags
+}
+
+async fn apply_review_filter_action(
+    pool: &PgPool,
+    action: &str,
+    filter: ReviewFilter,
+) -> cot::Result<u64> {
+    let status = normalize_status(filter.status.as_deref());
+    let search_pattern = clean_search(filter.search.as_deref()).map(|s| format!("%{s}%"));
+
+    let result = if action == "delete" {
+        let mut qb =
+            QueryBuilder::<Postgres>::new("DELETE FROM furumusic__pending_review WHERE 1=1");
+        push_review_filters(&mut qb, status, search_pattern);
+        qb.build()
+            .execute(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?
+    } else {
+        let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+        let mut qb = QueryBuilder::<Postgres>::new(
+            "UPDATE furumusic__pending_review \
+             SET status = 'queued', error_message = NULL, updated_at = ",
+        );
+        qb.push_bind(now);
+        qb.push(" WHERE 1=1");
+        push_review_filters(&mut qb, status, search_pattern);
+        qb.build()
+            .execute(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?
+    };
+
+    Ok(result.rows_affected())
+}
+
+async fn load_jobs(
+    db: &Database,
+    pool: &PgPool,
+    _registry: &JobRegistry,
+) -> anyhow::Result<Vec<JobDto>> {
+    let mut jobs = ScheduledJob::list_all(db).await?;
+    jobs.sort_by(|a, b| a.name_str().cmp(b.name_str()));
+    let recent_runs = load_recent_runs_per_job(pool, 8).await?;
+    let mut runs_by_job: HashMap<String, Vec<JobRunDto>> = HashMap::new();
+    for run in recent_runs {
+        runs_by_job
+            .entry(run.job_name.clone())
+            .or_default()
+            .push(run);
+    }
+
+    Ok(jobs
+        .into_iter()
+        .map(|job| {
+            let runs = runs_by_job.remove(job.name_str()).unwrap_or_default();
+            let is_running = runs.iter().any(|run| run.status == "running");
+            let last_run = runs.first();
+            let health = if !job.enabled {
+                "disabled"
+            } else if is_running {
+                "running"
+            } else if last_run.is_some_and(|run| run.status == "failed") {
+                "failed"
+            } else if last_run.is_some() {
+                "ok"
+            } else {
+                "idle"
+            };
+            JobDto {
+                name: job.name_str().to_owned(),
+                description: job.description_str().to_owned(),
+                cron_expression: job.cron_expression_str().to_owned(),
+                enabled: job.enabled,
+                health: health.to_owned(),
+                is_running,
+                last_run_at: optional_job_time(job.last_run_at_str()),
+                next_run_at: optional_job_time(job.next_run_at_str()),
+                recent_runs: runs,
+            }
+        })
+        .collect())
+}
+
+async fn load_recent_runs(pool: &PgPool, limit: i64) -> anyhow::Result<Vec<JobRunDto>> {
+    let rows = sqlx::query_as::<_, JobRunRow>(
+        "SELECT id, job_name::text AS job_name, status::text AS status, started_at::text AS started_at, \
+                finished_at, duration_ms, trigger::text AS trigger, error_message, \
+                LEFT(COALESCE(log_output, ''), 1600) AS log_excerpt \
+         FROM furumusic__job_run ORDER BY id DESC LIMIT $1",
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
+async fn load_recent_runs_per_job(pool: &PgPool, per_job: i64) -> anyhow::Result<Vec<JobRunDto>> {
+    let rows = sqlx::query_as::<_, JobRunRow>(
+        "WITH ranked AS ( \
+             SELECT id, job_name::text AS job_name, status::text AS status, started_at::text AS started_at, \
+                    finished_at, duration_ms, trigger::text AS trigger, error_message, \
+                    LEFT(COALESCE(log_output, ''), 1600) AS log_excerpt, \
+                    ROW_NUMBER() OVER (PARTITION BY job_name ORDER BY id DESC) AS rn \
+             FROM furumusic__job_run \
+         ) \
+         SELECT id, job_name, status, started_at, finished_at, duration_ms, trigger, error_message, log_excerpt \
+         FROM ranked WHERE rn <= $1 ORDER BY id DESC",
+    )
+    .bind(per_job)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
+async fn load_runs_for_job(
+    pool: &PgPool,
+    job_name: &str,
+    limit: i64,
+) -> anyhow::Result<Vec<JobRunDto>> {
+    let rows = sqlx::query_as::<_, JobRunRow>(
+        "SELECT id, job_name::text AS job_name, status::text AS status, started_at::text AS started_at, \
+                finished_at, duration_ms, trigger::text AS trigger, error_message, \
+                LEFT(COALESCE(log_output, ''), 1600) AS log_excerpt \
+         FROM furumusic__job_run WHERE job_name = $1 ORDER BY id DESC LIMIT $2",
+    )
+    .bind(job_name)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
+async fn load_library_page(pool: &PgPool, query: LibraryQuery) -> anyhow::Result<LibraryPageDto> {
+    let kind = normalize_library_kind(query.kind.as_deref());
+    let limit = query.limit.unwrap_or(40).clamp(10, 120);
+    let offset = query.offset.unwrap_or(0).max(0);
+    let search = clean_search(query.search.as_deref());
+    let search_pattern = search.as_ref().map(|s| format!("%{s}%"));
+
+    let total = count_library(pool, &kind, search_pattern.clone()).await?;
+    let rows = match kind.as_str() {
+        "releases" => load_release_items(pool, search_pattern.clone(), limit, offset).await?,
+        "playlists" => load_playlist_items(pool, search_pattern.clone(), limit, offset).await?,
+        _ => load_artist_items(pool, search_pattern.clone(), limit, offset).await?,
+    };
+    let items = rows
+        .into_iter()
+        .map(|row| library_item_dto(&kind, row))
+        .collect();
+
+    Ok(LibraryPageDto {
+        kind,
+        items,
+        total,
+        limit,
+        offset,
+        search,
+    })
+}
+
+async fn fetch_library_item(
+    pool: &PgPool,
+    kind: &str,
+    id: i64,
+) -> anyhow::Result<Option<LibraryItemDto>> {
+    let row = match kind {
+        "releases" => {
+            sqlx::query_as::<_, LibraryItemRow>(
+                "SELECT r.id, r.title::text AS title, \
+                        CONCAT(r.release_type::text, COALESCE(' · ' || r.year::text, '')) AS subtitle, \
+                        r.is_hidden, COUNT(DISTINCT t.id)::bigint AS primary_count, \
+                        COUNT(DISTINCT ra.artist_id)::bigint AS secondary_count, \
+                        COUNT(DISTINCT ph.id)::bigint AS tertiary_count, \
+                        r.updated_at::text AS updated_at \
+                 FROM furumusic__release r \
+                 LEFT JOIN furumusic__track t ON t.release_id = r.id \
+                 LEFT JOIN furumusic__release_artist ra ON ra.release_id = r.id \
+                 LEFT JOIN furumusic__play_history ph ON ph.track_id = t.id \
+                 WHERE r.id = $1 \
+                 GROUP BY r.id",
+            )
+            .bind(id)
+            .fetch_optional(pool)
+            .await?
+        }
+        "playlists" => {
+            sqlx::query_as::<_, LibraryItemRow>(
+                "SELECT p.id, p.title::text AS title, \
+                        COALESCE(u.display_name, u.username, 'unknown') AS subtitle, \
+                        (NOT p.is_public) AS is_hidden, COUNT(pt.id)::bigint AS primary_count, \
+                        CASE WHEN p.is_public THEN 1 ELSE 0 END::bigint AS secondary_count, \
+                        0::bigint AS tertiary_count, p.updated_at::text AS updated_at \
+                 FROM furumusic__playlist p \
+                 LEFT JOIN furumusic__playlist_track pt ON pt.playlist_id = p.id \
+                 LEFT JOIN furumusic__user u ON u.id = p.owner_id \
+                 WHERE p.id = $1 \
+                 GROUP BY p.id, u.display_name, u.username",
+            )
+            .bind(id)
+            .fetch_optional(pool)
+            .await?
+        }
+        _ => {
+            sqlx::query_as::<_, LibraryItemRow>(
+                "SELECT a.id, a.name::text AS title, NULL::text AS subtitle, a.is_hidden, \
+                        COUNT(DISTINCT ra.release_id)::bigint AS primary_count, \
+                        COUNT(DISTINCT ta.track_id)::bigint AS secondary_count, \
+                        COUNT(DISTINCT ufa.user_id)::bigint AS tertiary_count, \
+                        a.updated_at::text AS updated_at \
+                 FROM furumusic__artist a \
+                 LEFT JOIN furumusic__release_artist ra ON ra.artist_id = a.id \
+                 LEFT JOIN furumusic__track_artist ta ON ta.artist_id = a.id \
+                 LEFT JOIN furumusic__user_followed_artist ufa ON ufa.artist_id = a.id \
+                 WHERE a.id = $1 \
+                 GROUP BY a.id",
+            )
+            .bind(id)
+            .fetch_optional(pool)
+            .await?
+        }
+    };
+
+    Ok(row.map(|row| library_item_dto(kind, row)))
+}
+
+async fn library_ids_by_filter(
+    pool: &PgPool,
+    kind: &str,
+    filter: LibraryFilter,
+) -> cot::Result<Vec<i64>> {
+    let search_pattern = clean_search(filter.search.as_deref()).map(|s| format!("%{s}%"));
+    let mut qb = match kind {
+        "releases" => QueryBuilder::<Postgres>::new(
+            "SELECT DISTINCT r.id \
+             FROM furumusic__release r \
+             LEFT JOIN furumusic__release_artist ra ON ra.release_id = r.id \
+             LEFT JOIN furumusic__artist a ON a.id = ra.artist_id WHERE 1=1",
+        ),
+        "playlists" => QueryBuilder::<Postgres>::new(
+            "SELECT DISTINCT p.id \
+             FROM furumusic__playlist p \
+             LEFT JOIN furumusic__user u ON u.id = p.owner_id WHERE 1=1",
+        ),
+        _ => {
+            QueryBuilder::<Postgres>::new("SELECT DISTINCT a.id FROM furumusic__artist a WHERE 1=1")
+        }
+    };
+    push_library_search_filter(&mut qb, kind, search_pattern);
+    let rows = qb
+        .build_query_as::<IdRow>()
+        .fetch_all(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    Ok(rows.into_iter().map(|row| row.id).collect())
+}
+
+async fn apply_library_action(
+    pool: &PgPool,
+    kind: &str,
+    action: &str,
+    ids: &[i64],
+) -> cot::Result<u64> {
+    match action {
+        "hide" | "show" => set_library_visibility(pool, kind, ids, action == "hide").await,
+        "delete" => delete_library_items(pool, kind, ids).await,
+        _ => Ok(0),
+    }
+}
+
+async fn set_library_visibility(
+    pool: &PgPool,
+    kind: &str,
+    ids: &[i64],
+    hidden: bool,
+) -> cot::Result<u64> {
+    let now = now_string();
+    let result =
+        match kind {
+            "releases" => sqlx::query(
+                "UPDATE furumusic__release SET is_hidden = $1, updated_at = $2 WHERE id = ANY($3)",
+            )
+            .bind(hidden)
+            .bind(&now)
+            .bind(ids)
+            .execute(pool)
+            .await,
+            "playlists" => sqlx::query(
+                "UPDATE furumusic__playlist SET is_public = $1, updated_at = $2 WHERE id = ANY($3)",
+            )
+            .bind(!hidden)
+            .bind(&now)
+            .bind(ids)
+            .execute(pool)
+            .await,
+            _ => sqlx::query(
+                "UPDATE furumusic__artist SET is_hidden = $1, updated_at = $2 WHERE id = ANY($3)",
+            )
+            .bind(hidden)
+            .bind(&now)
+            .bind(ids)
+            .execute(pool)
+            .await,
+        }
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    Ok(result.rows_affected())
+}
+
+async fn delete_library_items(pool: &PgPool, kind: &str, ids: &[i64]) -> cot::Result<u64> {
+    match kind {
+        "releases" => delete_releases(pool, ids).await,
+        "playlists" => delete_playlists(pool, ids).await,
+        _ => delete_artists(pool, ids).await,
+    }
+}
+
+async fn delete_artists(pool: &PgPool, ids: &[i64]) -> cot::Result<u64> {
+    sqlx::query("DELETE FROM furumusic__user_followed_artist WHERE artist_id = ANY($1)")
+        .bind(ids)
+        .execute(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    sqlx::query("DELETE FROM furumusic__track_artist WHERE artist_id = ANY($1)")
+        .bind(ids)
+        .execute(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    sqlx::query("DELETE FROM furumusic__release_artist WHERE artist_id = ANY($1)")
+        .bind(ids)
+        .execute(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let result = sqlx::query("DELETE FROM furumusic__artist WHERE id = ANY($1)")
+        .bind(ids)
+        .execute(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    Ok(result.rows_affected())
+}
+
+async fn delete_releases(pool: &PgPool, ids: &[i64]) -> cot::Result<u64> {
+    let track_ids =
+        sqlx::query_as::<_, IdRow>("SELECT id FROM furumusic__track WHERE release_id = ANY($1)")
+            .bind(ids)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?
+            .into_iter()
+            .map(|row| row.id)
+            .collect::<Vec<_>>();
+
+    if !track_ids.is_empty() {
+        sqlx::query("DELETE FROM furumusic__playlist_track WHERE track_id = ANY($1)")
+            .bind(&track_ids)
+            .execute(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
+        sqlx::query("DELETE FROM furumusic__user_liked_track WHERE track_id = ANY($1)")
+            .bind(&track_ids)
+            .execute(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
+        sqlx::query("DELETE FROM furumusic__play_history WHERE track_id = ANY($1)")
+            .bind(&track_ids)
+            .execute(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
+        sqlx::query("DELETE FROM furumusic__track_genre WHERE track_id = ANY($1)")
+            .bind(&track_ids)
+            .execute(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
+        sqlx::query("DELETE FROM furumusic__track_artist WHERE track_id = ANY($1)")
+            .bind(&track_ids)
+            .execute(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
+    }
+
+    sqlx::query("DELETE FROM furumusic__track WHERE release_id = ANY($1)")
+        .bind(ids)
+        .execute(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    sqlx::query("DELETE FROM furumusic__release_artist WHERE release_id = ANY($1)")
+        .bind(ids)
+        .execute(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let result = sqlx::query("DELETE FROM furumusic__release WHERE id = ANY($1)")
+        .bind(ids)
+        .execute(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    Ok(result.rows_affected())
+}
+
+async fn delete_playlists(pool: &PgPool, ids: &[i64]) -> cot::Result<u64> {
+    sqlx::query("DELETE FROM furumusic__playlist_track WHERE playlist_id = ANY($1)")
+        .bind(ids)
+        .execute(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    sqlx::query("DELETE FROM furumusic__saved_playlist WHERE playlist_id = ANY($1)")
+        .bind(ids)
+        .execute(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let result = sqlx::query("DELETE FROM furumusic__playlist WHERE id = ANY($1)")
+        .bind(ids)
+        .execute(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    Ok(result.rows_affected())
+}
+
+async fn count_library(
+    pool: &PgPool,
+    kind: &str,
+    search_pattern: Option<String>,
+) -> anyhow::Result<i64> {
+    let mut qb = match kind {
+        "releases" => QueryBuilder::<Postgres>::new(
+            "SELECT COUNT(DISTINCT r.id) AS count \
+             FROM furumusic__release r \
+             LEFT JOIN furumusic__release_artist ra ON ra.release_id = r.id \
+             LEFT JOIN furumusic__artist a ON a.id = ra.artist_id WHERE 1=1",
+        ),
+        "playlists" => QueryBuilder::<Postgres>::new(
+            "SELECT COUNT(DISTINCT p.id) AS count \
+             FROM furumusic__playlist p \
+             LEFT JOIN furumusic__user u ON u.id = p.owner_id WHERE 1=1",
+        ),
+        _ => QueryBuilder::<Postgres>::new(
+            "SELECT COUNT(DISTINCT a.id) AS count FROM furumusic__artist a WHERE 1=1",
+        ),
+    };
+
+    push_library_search_filter(&mut qb, kind, search_pattern);
+
+    Ok(qb.build_query_as::<CountRow>().fetch_one(pool).await?.count)
+}
+
+fn push_library_search_filter(
+    qb: &mut QueryBuilder<'_, Postgres>,
+    kind: &str,
+    search_pattern: Option<String>,
+) {
+    let Some(pattern) = search_pattern else {
+        return;
+    };
+    match kind {
+        "releases" => {
+            qb.push(" AND (r.title ILIKE ");
+            qb.push_bind(pattern.clone());
+            qb.push(" OR a.name ILIKE ");
+            qb.push_bind(pattern);
+            qb.push(")");
+        }
+        "playlists" => {
+            qb.push(" AND (p.title ILIKE ");
+            qb.push_bind(pattern.clone());
+            qb.push(" OR COALESCE(p.description, '') ILIKE ");
+            qb.push_bind(pattern.clone());
+            qb.push(" OR COALESCE(u.display_name, u.username, '') ILIKE ");
+            qb.push_bind(pattern);
+            qb.push(")");
+        }
+        _ => {
+            qb.push(" AND a.name ILIKE ");
+            qb.push_bind(pattern);
+        }
+    }
+}
+
+async fn load_artist_items(
+    pool: &PgPool,
+    search_pattern: Option<String>,
+    limit: i64,
+    offset: i64,
+) -> anyhow::Result<Vec<LibraryItemRow>> {
+    let mut qb = QueryBuilder::<Postgres>::new(
+        "SELECT a.id, a.name::text AS title, NULL::text AS subtitle, a.is_hidden, \
+                COUNT(DISTINCT ra.release_id)::bigint AS primary_count, \
+                COUNT(DISTINCT ta.track_id)::bigint AS secondary_count, \
+                COUNT(DISTINCT ufa.user_id)::bigint AS tertiary_count, \
+                a.updated_at::text AS updated_at \
+         FROM furumusic__artist a \
+         LEFT JOIN furumusic__release_artist ra ON ra.artist_id = a.id \
+         LEFT JOIN furumusic__track_artist ta ON ta.artist_id = a.id \
+         LEFT JOIN furumusic__user_followed_artist ufa ON ufa.artist_id = a.id \
+         WHERE 1=1",
+    );
+    if let Some(pattern) = search_pattern {
+        qb.push(" AND a.name ILIKE ");
+        qb.push_bind(pattern);
+    }
+    qb.push(" GROUP BY a.id ORDER BY secondary_count DESC, a.name ASC LIMIT ");
+    qb.push_bind(limit);
+    qb.push(" OFFSET ");
+    qb.push_bind(offset);
+    Ok(qb
+        .build_query_as::<LibraryItemRow>()
+        .fetch_all(pool)
+        .await?)
+}
+
+async fn load_release_items(
+    pool: &PgPool,
+    search_pattern: Option<String>,
+    limit: i64,
+    offset: i64,
+) -> anyhow::Result<Vec<LibraryItemRow>> {
+    let mut qb = QueryBuilder::<Postgres>::new(
+        "SELECT r.id, r.title::text AS title, \
+                CONCAT(r.release_type::text, COALESCE(' · ' || r.year::text, '')) AS subtitle, \
+                r.is_hidden, COUNT(DISTINCT t.id)::bigint AS primary_count, \
+                COUNT(DISTINCT ra.artist_id)::bigint AS secondary_count, \
+                COUNT(DISTINCT ph.id)::bigint AS tertiary_count, \
+                r.updated_at::text AS updated_at \
+         FROM furumusic__release r \
+         LEFT JOIN furumusic__track t ON t.release_id = r.id \
+         LEFT JOIN furumusic__release_artist ra ON ra.release_id = r.id \
+         LEFT JOIN furumusic__artist a ON a.id = ra.artist_id \
+         LEFT JOIN furumusic__play_history ph ON ph.track_id = t.id \
+         WHERE 1=1",
+    );
+    if let Some(pattern) = search_pattern {
+        qb.push(" AND (r.title ILIKE ");
+        qb.push_bind(pattern.clone());
+        qb.push(" OR a.name ILIKE ");
+        qb.push_bind(pattern);
+        qb.push(")");
+    }
+    qb.push(" GROUP BY r.id ORDER BY r.updated_at DESC, r.title ASC LIMIT ");
+    qb.push_bind(limit);
+    qb.push(" OFFSET ");
+    qb.push_bind(offset);
+    Ok(qb
+        .build_query_as::<LibraryItemRow>()
+        .fetch_all(pool)
+        .await?)
+}
+
+async fn load_playlist_items(
+    pool: &PgPool,
+    search_pattern: Option<String>,
+    limit: i64,
+    offset: i64,
+) -> anyhow::Result<Vec<LibraryItemRow>> {
+    let mut qb = QueryBuilder::<Postgres>::new(
+        "SELECT p.id, p.title::text AS title, \
+                COALESCE(u.display_name, u.username, 'unknown') AS subtitle, \
+                (NOT p.is_public) AS is_hidden, COUNT(pt.id)::bigint AS primary_count, \
+                CASE WHEN p.is_public THEN 1 ELSE 0 END::bigint AS secondary_count, \
+                0::bigint AS tertiary_count, p.updated_at::text AS updated_at \
+         FROM furumusic__playlist p \
+         LEFT JOIN furumusic__playlist_track pt ON pt.playlist_id = p.id \
+         LEFT JOIN furumusic__user u ON u.id = p.owner_id \
+         WHERE 1=1",
+    );
+    if let Some(pattern) = search_pattern {
+        qb.push(" AND (p.title ILIKE ");
+        qb.push_bind(pattern.clone());
+        qb.push(" OR COALESCE(p.description, '') ILIKE ");
+        qb.push_bind(pattern.clone());
+        qb.push(" OR COALESCE(u.display_name, u.username, '') ILIKE ");
+        qb.push_bind(pattern);
+        qb.push(")");
+    }
+    qb.push(
+        " GROUP BY p.id, u.display_name, u.username ORDER BY p.updated_at DESC, p.title ASC LIMIT ",
+    );
+    qb.push_bind(limit);
+    qb.push(" OFFSET ");
+    qb.push_bind(offset);
+    Ok(qb
+        .build_query_as::<LibraryItemRow>()
+        .fetch_all(pool)
+        .await?)
+}
+
+fn library_item_dto(kind: &str, row: LibraryItemRow) -> LibraryItemDto {
+    let tags = match kind {
+        "releases" => vec![
+            tag(format!("{} tracks", row.primary_count), "count"),
+            tag(format!("{} artists", row.secondary_count), "relation"),
+            tag(format!("{} plays", row.tertiary_count), "plays"),
+        ],
+        "playlists" => vec![
+            tag(format!("{} tracks", row.primary_count), "count"),
+            tag(
+                if row.secondary_count > 0 {
+                    "public"
+                } else {
+                    "private"
+                },
+                "visibility",
+            ),
+        ],
+        _ => vec![
+            tag(format!("{} tracks", row.secondary_count), "count"),
+            tag(format!("{} releases", row.primary_count), "relation"),
+            tag(format!("{} followers", row.tertiary_count), "followers"),
+        ],
+    };
+
+    LibraryItemDto {
+        id: row.id,
+        kind: kind.to_owned(),
+        title: row.title,
+        subtitle: row.subtitle.unwrap_or_default(),
+        is_hidden: row.is_hidden,
+        tags,
+        updated_at: row.updated_at,
+    }
+}
+
+impl Default for ReviewFilter {
+    fn default() -> Self {
+        Self {
+            status: None,
+            search: None,
+        }
+    }
+}
+
+impl From<JobRunRow> for JobRunDto {
+    fn from(row: JobRunRow) -> Self {
+        Self {
+            id: row.id,
+            job_name: row.job_name,
+            status: row.status,
+            started_at: row.started_at,
+            finished_at: row.finished_at,
+            duration_ms: row.duration_ms,
+            trigger: row.trigger,
+            error_message: row.error_message,
+            log_excerpt: row.log_excerpt,
+        }
+    }
+}
+
+impl From<JobRunDetailRow> for JobRunDto {
+    fn from(row: JobRunDetailRow) -> Self {
+        Self {
+            id: row.id,
+            job_name: row.job_name,
+            status: row.status,
+            started_at: row.started_at,
+            finished_at: row.finished_at,
+            duration_ms: row.duration_ms,
+            trigger: row.trigger,
+            error_message: row.error_message,
+            log_excerpt: row.log_excerpt,
+        }
+    }
+}
+
+fn tag(label: impl Into<String>, kind: impl Into<String>) -> TagDto {
+    TagDto {
+        label: label.into(),
+        kind: kind.into(),
+    }
+}
+
+fn optional_job_time(value: &str) -> Option<String> {
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_owned())
+    }
+}
+
+fn normalize_library_kind(kind: Option<&str>) -> String {
+    match kind {
+        Some("releases") => "releases",
+        Some("playlists") => "playlists",
+        _ => "artists",
+    }
+    .to_owned()
+}
+
+fn normalize_status(status: Option<&str>) -> Option<String> {
+    let status = status?.trim();
+    if status.is_empty() || status == "all" {
+        return None;
+    }
+    Some(status.to_owned())
+}
+
+fn clean_search(search: Option<&str>) -> Option<String> {
+    search
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.chars().take(120).collect())
+}
+
+fn normalize_name(value: &str) -> String {
+    value.trim().to_lowercase()
+}
+
+fn now_string() -> String {
+    chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
+}
+
+fn context_sha256(context_json: &str) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(context_json).ok()?;
+    let sha = value.get("sha256")?.as_str()?.trim();
+    let is_sha256 = sha.len() == 64 && sha.chars().all(|ch| ch.is_ascii_hexdigit());
+    is_sha256.then(|| sha.to_ascii_lowercase())
+}
+
+fn file_name(path: &str) -> String {
+    path.replace('\\', "/")
+        .rsplit('/')
+        .next()
+        .unwrap_or(path)
+        .to_owned()
+}
+
+fn compact_path_tail(path: &str, max_chars: usize) -> String {
+    let normalized = path.replace('\\', "/");
+    if normalized.chars().count() <= max_chars {
+        return normalized;
+    }
+    let filename = file_name(&normalized);
+    let filename_len = filename.chars().count();
+    if filename_len + 4 <= max_chars {
+        return format!(".../{filename}");
+    }
+    let suffix_len = max_chars.saturating_sub(3);
+    let suffix = filename
+        .chars()
+        .skip(filename_len.saturating_sub(suffix_len))
+        .collect::<String>();
+    format!("...{suffix}")
+}
+
+fn file_extension(filename: &str) -> Option<String> {
+    std::path::Path::new(filename)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.trim().to_ascii_lowercase())
+        .filter(|ext| !ext.is_empty())
+}
+
+fn size_display(bytes: i64) -> String {
+    if bytes >= 1_073_741_824 {
+        format!("{:.1} GB", bytes as f64 / 1_073_741_824.0)
+    } else if bytes >= 1_048_576 {
+        format!("{:.1} MB", bytes as f64 / 1_048_576.0)
+    } else if bytes >= 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{bytes} B")
+    }
+}

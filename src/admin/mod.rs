@@ -1,3 +1,4 @@
+mod v2;
 pub mod views;
 
 use std::sync::Arc;
@@ -131,20 +132,296 @@ impl App for AdminApp {
                 ),
                 "admin_setup",
             ),
+            // -- Admin v2 -----------------------------------------------------
+            Route::with_handler_and_name(
+                "/v2",
+                |session: Session, db: Database, i18n: I18n| async move {
+                    let count = User::count_all(&db).await.unwrap_or(0);
+                    if count == 0 {
+                        return Ok(auth::redirect("/admin/setup"));
+                    }
+                    let admin = match auth::require_admin_or_redirect(&session, &db).await {
+                        Ok(u) => u,
+                        Err(resp) => return Ok(resp),
+                    };
+                    v2::page(admin, i18n).await?.into_response()
+                },
+                "admin_v2",
+            ),
+            Route::with_handler_and_name(
+                "/v2/api/dashboard",
+                {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    let registry = Arc::clone(&self.registry);
+                    get(move |session: Session, db: Database| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        let registry = Arc::clone(&registry);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("admin pool")
+                                })
+                                .await;
+                            v2::dashboard(session, db, pg_pool, &registry).await
+                        }
+                    })
+                },
+                "admin_v2_dashboard",
+            ),
+            Route::with_handler_and_name(
+                "/v2/api/reviews",
+                {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    get(move |session: Session, db: Database,
+                              query: UrlQuery<v2::ReviewsQuery>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("admin pool")
+                                })
+                                .await;
+                            v2::reviews(session, db, pg_pool, query.0).await
+                        }
+                    })
+                },
+                "admin_v2_reviews",
+            ),
+            Route::with_handler_and_name(
+                "/v2/api/reviews/bulk",
+                {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    cot::router::method::post(
+                        move |session: Session,
+                              db: Database,
+                              json: Json<v2::BulkReviewsRequest>| {
+                            let pool = Arc::clone(&pool);
+                            let pool_config = Arc::clone(&pool_config);
+                            async move {
+                                let pg_pool = pool
+                                    .get_or_init(|| async {
+                                        sqlx::postgres::PgPoolOptions::new()
+                                            .max_connections(5)
+                                            .connect(&pool_config.database_url)
+                                            .await
+                                            .expect("admin pool")
+                                    })
+                                    .await;
+                                v2::bulk_reviews(session, db, pg_pool, json).await
+                            }
+                        },
+                    )
+                },
+                "admin_v2_reviews_bulk",
+            ),
+            Route::with_handler_and_name(
+                "/v2/api/jobs",
+                {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    let registry = Arc::clone(&self.registry);
+                    get(move |session: Session, db: Database| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        let registry = Arc::clone(&registry);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("admin pool")
+                                })
+                                .await;
+                            v2::jobs(session, db, pg_pool, &registry).await
+                        }
+                    })
+                },
+                "admin_v2_jobs",
+            ),
+            Route::with_handler_and_name(
+                "/v2/api/jobs/{name}/run",
+                cot::router::method::post({
+                    let handle = Arc::clone(&self.scheduler_handle);
+                    move |session: Session, db: Database, path: Path<PathName>| {
+                        let handle = Arc::clone(&handle);
+                        async move { v2::run_job(session, db, &handle, &path.0.name).await }
+                    }
+                }),
+                "admin_v2_job_run",
+            ),
+            Route::with_handler_and_name(
+                "/v2/api/jobs/{name}/toggle",
+                cot::router::method::post({
+                    let handle = Arc::clone(&self.scheduler_handle);
+                    move |session: Session, db: Database, path: Path<PathName>| {
+                        let handle = Arc::clone(&handle);
+                        async move { v2::toggle_job(session, db, &handle, &path.0.name).await }
+                    }
+                }),
+                "admin_v2_job_toggle",
+            ),
+            Route::with_handler_and_name(
+                "/v2/api/jobs/{name}/runs",
+                {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    get(move |session: Session, db: Database, path: Path<PathName>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("admin pool")
+                                })
+                                .await;
+                            v2::job_runs(session, db, pg_pool, &path.0.name).await
+                        }
+                    })
+                },
+                "admin_v2_job_runs",
+            ),
+            Route::with_handler_and_name(
+                "/v2/api/jobs/{name}/runs/{run_id}",
+                {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    get(
+                        move |session: Session, db: Database, path: Path<PathNameRunId>| {
+                            let pool = Arc::clone(&pool);
+                            let pool_config = Arc::clone(&pool_config);
+                            async move {
+                                let pg_pool = pool
+                                    .get_or_init(|| async {
+                                        sqlx::postgres::PgPoolOptions::new()
+                                            .max_connections(5)
+                                            .connect(&pool_config.database_url)
+                                            .await
+                                            .expect("admin pool")
+                                    })
+                                    .await;
+                                v2::job_run_detail(session, db, pg_pool, path.0.run_id).await
+                            }
+                        },
+                    )
+                },
+                "admin_v2_job_run_detail",
+            ),
+            Route::with_handler_and_name(
+                "/v2/api/library",
+                {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    get(move |session: Session, db: Database,
+                              query: UrlQuery<v2::LibraryQuery>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("admin pool")
+                                })
+                                .await;
+                            v2::library(session, db, pg_pool, query.0).await
+                        }
+                    })
+                },
+                "admin_v2_library",
+            ),
+            Route::with_handler_and_name(
+                "/v2/api/library/item",
+                {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    cot::router::method::post(
+                        move |session: Session,
+                              db: Database,
+                              json: Json<v2::UpdateLibraryItemRequest>| {
+                            let pool = Arc::clone(&pool);
+                            let pool_config = Arc::clone(&pool_config);
+                            async move {
+                                let pg_pool = pool
+                                    .get_or_init(|| async {
+                                        sqlx::postgres::PgPoolOptions::new()
+                                            .max_connections(5)
+                                            .connect(&pool_config.database_url)
+                                            .await
+                                            .expect("admin pool")
+                                    })
+                                    .await;
+                                v2::update_library_item(session, db, pg_pool, json).await
+                            }
+                        },
+                    )
+                },
+                "admin_v2_library_item",
+            ),
+            Route::with_handler_and_name(
+                "/v2/api/library/bulk",
+                {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    cot::router::method::post(
+                        move |session: Session,
+                              db: Database,
+                              json: Json<v2::BulkLibraryRequest>| {
+                            let pool = Arc::clone(&pool);
+                            let pool_config = Arc::clone(&pool_config);
+                            async move {
+                                let pg_pool = pool
+                                    .get_or_init(|| async {
+                                        sqlx::postgres::PgPoolOptions::new()
+                                            .max_connections(5)
+                                            .connect(&pool_config.database_url)
+                                            .await
+                                            .expect("admin pool")
+                                    })
+                                    .await;
+                                v2::bulk_library(session, db, pg_pool, json).await
+                            }
+                        },
+                    )
+                },
+                "admin_v2_library_bulk",
+            ),
             // -- Dashboard ----------------------------------------------------
             Route::with_handler_and_name(
                 "/",
                 |session: Session, db: Database, i18n: I18n| async move {
                     let count = User::count_all(&db).await.unwrap_or(0);
                     if count == 0 {
-                        return Ok(auth::redirect("/admin/setup"));
+                        return Ok::<cot::response::Response, cot::Error>(auth::redirect(
+                            "/admin/setup",
+                        ));
                     }
-                    let admin =
-                        match auth::require_admin_or_redirect(&session, &db).await {
-                            Ok(u) => u,
-                            Err(resp) => return Ok(resp),
-                        };
-                    views::admin_index(admin, i18n).await?.into_response()
+                    let _admin = match auth::require_admin_or_redirect(&session, &db).await {
+                        Ok(u) => u,
+                        Err(resp) => return Ok(resp),
+                    };
+                    let _ = i18n;
+                    Ok::<cot::response::Response, cot::Error>(auth::redirect("/admin/v2"))
                 },
                 "admin_index",
             ),

@@ -211,23 +211,6 @@ pub async fn debug_handler(
     Ok(Html::new(template.render()?))
 }
 
-#[derive(Debug, Template)]
-#[template(path = "admin/index.html")]
-struct AdminIndexTemplate {
-    t: &'static Translations,
-    user_name: String,
-    user_role: String,
-}
-
-pub async fn admin_index(admin: AuthenticatedUser, i18n: I18n) -> cot::Result<Html> {
-    let template = AdminIndexTemplate {
-        t: i18n.t,
-        user_name: admin.name,
-        user_role: admin.role.code().to_owned(),
-    };
-    Ok(Html::new(template.render()?))
-}
-
 // ---------------------------------------------------------------------------
 // Settings page
 // ---------------------------------------------------------------------------

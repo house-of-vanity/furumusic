@@ -1,0 +1,1905 @@
+{% extends "base.html" %}
+
+{% block title %}FuruMusic Admin v{{ version }}{% endblock title %}
+
+{% block head_extra %}
+<style>
+:root {
+    --bg-primary: #121212;
+    --bg-secondary: #181818;
+    --bg-elevated: #232323;
+    --bg-hover: #2a2a2a;
+    --bg-active: #333;
+    --text-primary: #fff;
+    --text-secondary: #b3b3b3;
+    --text-subdued: #727272;
+    --accent: #1db954;
+    --accent-hover: #1ed760;
+    --blue: #5aa7ff;
+    --amber: #f1b84b;
+    --red: #ef6262;
+    --violet: #b98cff;
+    --border-color: #2b2b2b;
+    --sidebar-width: 244px;
+}
+
+* { box-sizing: border-box; }
+[x-cloak] { display: none !important; }
+
+html, body {
+    width: 100%;
+    height: 100%;
+    min-width: 1180px;
+    margin: 0;
+    overflow: hidden;
+}
+
+body {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+}
+
+button, input, select, textarea {
+    font: inherit;
+}
+
+button {
+    border: 0;
+}
+
+.admin-shell {
+    display: grid;
+    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+}
+
+.sidebar {
+    min-width: 0;
+    border-right: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    display: flex;
+    flex-direction: column;
+}
+
+.brand {
+    padding: 18px 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.brand-title {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 18px;
+    font-weight: 800;
+}
+
+.version {
+    color: var(--text-subdued);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.admin-user {
+    margin-top: 8px;
+    color: var(--text-subdued);
+    font-size: 12px;
+}
+
+.nav-group {
+    padding: 12px;
+}
+
+.nav-label {
+    padding: 8px 8px 6px;
+    color: var(--text-subdued);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0;
+    text-transform: uppercase;
+}
+
+.nav-btn {
+    width: 100%;
+    height: 38px;
+    padding: 0 10px;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-secondary);
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    text-align: left;
+}
+
+.nav-btn:hover,
+.nav-btn.active {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.nav-btn svg,
+.icon-btn svg,
+.btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+.nav-count {
+    color: var(--text-subdued);
+    font-size: 11px;
+}
+
+.main {
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+    background: var(--bg-primary);
+}
+
+.topbar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    height: 64px;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--border-color);
+    background: rgba(18, 18, 18, 0.96);
+    backdrop-filter: blur(12px);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.page-title {
+    min-width: 0;
+}
+
+.page-title h1 {
+    margin: 0;
+    font-size: 20px;
+    line-height: 1.1;
+}
+
+.page-title p {
+    margin: 4px 0 0;
+    color: var(--text-subdued);
+    font-size: 12px;
+}
+
+.top-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.content {
+    padding: 18px;
+}
+
+.stats-strip {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(104px, 1fr));
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+.stat-cell {
+    min-width: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+}
+
+.stat-value {
+    font-size: 18px;
+    font-weight: 800;
+}
+
+.stat-label {
+    margin-top: 2px;
+    color: var(--text-subdued);
+    font-size: 11px;
+}
+
+.panel {
+    min-width: 0;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+}
+
+.panel-head {
+    min-height: 56px;
+    padding: 12px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.panel-title {
+    min-width: 0;
+}
+
+.panel-title strong {
+    display: block;
+    font-size: 14px;
+}
+
+.panel-title span {
+    display: block;
+    margin-top: 2px;
+    color: var(--text-subdued);
+    font-size: 11px;
+}
+
+.toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.btn,
+.icon-btn,
+.seg-btn {
+    height: 32px;
+    border-radius: 6px;
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    cursor: pointer;
+}
+
+.btn {
+    padding: 0 12px;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.icon-btn {
+    width: 32px;
+    padding: 0;
+}
+
+.btn:hover,
+.icon-btn:hover,
+.seg-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.btn.primary {
+    background: var(--accent);
+    color: #07120b;
+}
+
+.btn.primary:hover {
+    background: var(--accent-hover);
+}
+
+.btn.danger {
+    background: rgba(239, 98, 98, 0.18);
+    color: #ffb8b8;
+}
+
+.btn.warn {
+    background: rgba(241, 184, 75, 0.16);
+    color: #ffd891;
+}
+
+.btn:disabled,
+.icon-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.segmented {
+    display: inline-flex;
+    padding: 3px;
+    border-radius: 8px;
+    background: var(--bg-primary);
+}
+
+.seg-btn {
+    min-width: 76px;
+    height: 28px;
+    padding: 0 10px;
+    background: transparent;
+    font-size: 12px;
+}
+
+.seg-btn.active {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+}
+
+.search {
+    width: 260px;
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    outline: none;
+}
+
+.search:focus {
+    border-color: var(--accent);
+}
+
+.action-strip {
+    min-height: 44px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.selection-summary {
+    color: var(--text-subdued);
+    font-size: 12px;
+}
+
+.table-wrap {
+    max-height: 560px;
+    overflow: auto;
+}
+
+.review-table-wrap {
+    max-height: calc(100vh - 318px);
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+}
+
+th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    height: 34px;
+    padding: 0 10px;
+    background: var(--bg-secondary);
+    color: var(--text-subdued);
+    border-bottom: 1px solid var(--border-color);
+    font-size: 11px;
+    font-weight: 800;
+    text-align: left;
+    text-transform: uppercase;
+}
+
+td {
+    height: 54px;
+    padding: 8px 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+    color: var(--text-secondary);
+    font-size: 12px;
+    vertical-align: middle;
+}
+
+tr {
+    cursor: default;
+}
+
+tbody tr:hover {
+    background: rgba(255, 255, 255, 0.035);
+}
+
+.col-check { width: 38px; }
+.col-status { width: 112px; }
+.col-type { width: 120px; }
+.col-confidence { width: 88px; }
+.col-tags { width: 250px; }
+.col-time { width: 132px; }
+
+.check {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent);
+}
+
+.primary-line {
+    color: var(--text-primary);
+    font-weight: 750;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.secondary-line {
+    margin-top: 3px;
+    color: var(--text-subdued);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.badge {
+    display: inline-flex;
+    align-items: center;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 999px;
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.badge.queued { background: rgba(90, 167, 255, 0.16); color: #9ccbff; }
+.badge.processing { background: rgba(185, 140, 255, 0.18); color: #d8c2ff; }
+.badge.pending { background: rgba(241, 184, 75, 0.18); color: #ffe1a6; }
+.badge.failed,
+.badge.rejected { background: rgba(239, 98, 98, 0.18); color: #ffb7b7; }
+.badge.approved,
+.badge.auto_approved,
+.badge.completed,
+.badge.ok { background: rgba(29, 185, 84, 0.16); color: #8ef0b2; }
+.badge.running { background: rgba(185, 140, 255, 0.18); color: #d8c2ff; }
+.badge.disabled { background: rgba(255, 255, 255, 0.08); color: var(--text-subdued); }
+
+.tags {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+    max-height: 42px;
+    overflow: hidden;
+}
+
+.tag {
+    display: inline-flex;
+    align-items: center;
+    height: 20px;
+    padding: 0 7px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 800;
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.tag.format { background: rgba(90, 167, 255, 0.22); color: #b8d9ff; }
+.tag.bitrate { background: rgba(185, 140, 255, 0.22); color: #dfcbff; }
+.tag.sample,
+.tag.depth { background: rgba(29, 185, 84, 0.18); color: #9af0b8; }
+.tag.size { background: rgba(255, 255, 255, 0.1); color: #d2d2d2; }
+.tag.count { background: rgba(90, 167, 255, 0.18); color: #b8d9ff; }
+.tag.relation { background: rgba(241, 184, 75, 0.18); color: #ffe1a6; }
+.tag.plays,
+.tag.followers { background: rgba(185, 140, 255, 0.18); color: #d8c2ff; }
+.tag.visibility { background: rgba(29, 185, 84, 0.16); color: #8ef0b2; }
+
+.jobs-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding: 12px;
+}
+
+.jobs-page {
+    display: grid;
+    grid-template-columns: minmax(720px, 1fr) 380px;
+    grid-template-rows: minmax(310px, 1fr) minmax(260px, 0.85fr);
+    gap: 14px;
+    align-items: stretch;
+    height: calc(100vh - 100px);
+    min-height: 0;
+}
+
+.jobs-page .jobs-list-panel {
+    grid-column: 1;
+    grid-row: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.job-table-wrap {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+    overflow: auto;
+}
+
+.job-table {
+    table-layout: fixed;
+}
+
+.jobs-page .jobs-list-panel .panel-head,
+.jobs-page .jobs-list-panel .action-strip {
+    flex-shrink: 0;
+}
+
+.jobs-page .jobs-list-panel .action-strip {
+    border-top: 1px solid var(--border-color);
+    border-bottom: 0;
+}
+
+.job-table .job-column { width: 28%; }
+.job-table .state-column { width: 13%; }
+.job-table .schedule-column { width: 20%; }
+.job-table .runs-column { width: 29%; }
+.job-table .actions-column { width: 10%; }
+
+.inline-runs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+.run-chip {
+    gap: 5px;
+    max-width: 128px;
+}
+
+.task-form {
+    position: sticky;
+    top: 82px;
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: start;
+}
+
+.run-log-panel {
+    grid-column: 1;
+    grid-row: 2;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.run-log-body {
+    flex: 1;
+    min-height: 0;
+    padding: 12px;
+    overflow: hidden;
+}
+
+.run-log-output {
+    width: 100%;
+    height: 100%;
+    min-height: 210px;
+    margin: 0;
+    padding: 14px 16px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: #0b0d0f;
+    color: #dce6ef;
+    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    font-size: 13px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow: auto;
+    tab-size: 4;
+}
+
+.job-card {
+    min-width: 0;
+    padding: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-primary);
+    cursor: pointer;
+}
+
+.job-card:hover,
+.job-card.active {
+    border-color: rgba(29, 185, 84, 0.55);
+}
+
+.job-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.job-name {
+    min-width: 0;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 850;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.job-desc {
+    height: 32px;
+    margin-top: 6px;
+    color: var(--text-subdued);
+    font-size: 11px;
+    line-height: 16px;
+    overflow: hidden;
+}
+
+.job-meta {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-top: 8px;
+    color: var(--text-subdued);
+    font-size: 11px;
+}
+
+.runs {
+    border-top: 1px solid var(--border-color);
+}
+
+.run-row {
+    display: grid;
+    grid-template-columns: 76px 96px minmax(0, 1fr) 72px;
+    align-items: center;
+    gap: 8px;
+    min-height: 42px;
+    padding: 6px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+    color: var(--text-secondary);
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.run-row:hover {
+    background: rgba(255, 255, 255, 0.035);
+}
+
+.library-shell {
+    display: block;
+}
+
+.library-row {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr) 300px 130px;
+    align-items: center;
+    gap: 10px;
+    min-height: 58px;
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.library-row:hover,
+.library-row.active {
+    background: rgba(255, 255, 255, 0.035);
+}
+
+.field {
+    margin-bottom: 12px;
+}
+
+.field label {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--text-subdued);
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.field input,
+.field textarea {
+    width: 100%;
+    min-height: 34px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    resize: vertical;
+    outline: none;
+}
+
+.field textarea {
+    min-height: 110px;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 11px;
+}
+
+.muted {
+    color: var(--text-subdued);
+}
+
+.empty {
+    padding: 28px;
+    color: var(--text-subdued);
+    text-align: center;
+}
+
+.toast {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    z-index: 20;
+    max-width: 420px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+    font-size: 12px;
+}
+
+.loading-mask {
+    position: absolute;
+    inset: 64px 0 0 var(--sidebar-width);
+    z-index: 10;
+    display: grid;
+    place-items: center;
+    background: rgba(18, 18, 18, 0.68);
+}
+
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    display: grid;
+    place-items: center;
+    padding: 28px;
+    background: rgba(0, 0, 0, 0.62);
+}
+
+.modal {
+    width: min(760px, calc(100vw - 80px));
+    max-height: calc(100vh - 80px);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+    box-shadow: 0 24px 72px rgba(0, 0, 0, 0.56);
+    overflow: hidden;
+}
+
+.modal-head {
+    min-height: 58px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.modal-body {
+    max-height: calc(100vh - 154px);
+    padding: 14px;
+    overflow: auto;
+}
+</style>
+{% endblock head_extra %}
+
+{% block content %}
+<div class="admin-shell" x-data="adminV2()" x-init="init()" x-cloak>
+    <aside class="sidebar">
+        <div class="brand">
+            <div class="brand-title">
+                <span>FuruMusic Admin</span>
+                <span class="version">v{{ version }}</span>
+            </div>
+            <div class="admin-user">{{ user_name }} - {{ user_role }}</div>
+        </div>
+
+        <div class="nav-group">
+            <div class="nav-label">Operations</div>
+            <button class="nav-btn" :class="{active: activeView === 'reviews'}" @click="activeView = 'reviews'">
+                <i data-lucide="inbox"></i>
+                <span>Review Queue</span>
+                <span class="nav-count" x-text="reviews.total || 0"></span>
+            </button>
+            <button class="nav-btn" :class="{active: activeView === 'jobs'}" @click="activeView = 'jobs'; loadJobs()">
+                <i data-lucide="calendar-clock"></i>
+                <span>Tasks</span>
+                <span class="nav-count" x-text="jobs.length || 0"></span>
+            </button>
+            <button class="nav-btn" :class="{active: activeView === 'library'}" @click="activeView = 'library'; loadLibrary()">
+                <i data-lucide="library"></i>
+                <span>Library Workbench</span>
+                <span class="nav-count" x-text="fmt(stats.tracks || 0)"></span>
+            </button>
+            <button class="nav-btn" :class="{active: activeView === 'tools'}" @click="activeView = 'tools'">
+                <i data-lucide="wrench"></i>
+                <span>Future Tools</span>
+            </button>
+        </div>
+
+        <div class="nav-group">
+            <div class="nav-label">Entities</div>
+            <button class="nav-btn" @click="activeView = 'library'; libraryKind = 'artists'; loadLibrary()">
+                <i data-lucide="mic-2"></i>
+                <span>Artists</span>
+                <span class="nav-count" x-text="fmt(libraryOverview.artists || 0)"></span>
+            </button>
+            <button class="nav-btn" @click="activeView = 'library'; libraryKind = 'releases'; loadLibrary()">
+                <i data-lucide="disc-3"></i>
+                <span>Releases</span>
+                <span class="nav-count" x-text="fmt(libraryOverview.releases || 0)"></span>
+            </button>
+            <button class="nav-btn" @click="activeView = 'library'; libraryKind = 'playlists'; loadLibrary()">
+                <i data-lucide="list-music"></i>
+                <span>Playlists</span>
+                <span class="nav-count" x-text="fmt(libraryOverview.playlists || 0)"></span>
+            </button>
+        </div>
+    </aside>
+
+    <main class="main">
+        <div class="topbar">
+            <div class="page-title">
+                <h1 x-text="pageTitle()"></h1>
+                <p x-text="pageSubtitle()"></p>
+            </div>
+            <div class="top-actions">
+                <button class="btn" @click="refreshAll()">
+                    <i data-lucide="refresh-cw"></i>
+                    Refresh
+                </button>
+                <a class="btn" href="/admin/debug">
+                    <i data-lucide="bug"></i>
+                    Debug
+                </a>
+                <a class="btn" href="/">
+                    <i data-lucide="music-2"></i>
+                    Player
+                </a>
+            </div>
+        </div>
+
+        <div class="content" x-show="activeView === 'reviews'">
+            <section class="stats-strip">
+                <template x-for="cell in statCells()" :key="cell.label">
+                    <div class="stat-cell">
+                        <div class="stat-value" x-text="fmt(cell.value)"></div>
+                        <div class="stat-label" x-text="cell.label"></div>
+                    </div>
+                </template>
+            </section>
+
+            <div>
+                <section class="panel jobs-list-panel">
+                    <div class="panel-head">
+                        <div class="panel-title">
+                            <strong>Pending Reviews</strong>
+                            <span x-text="reviewPanelSubtitle()"></span>
+                        </div>
+                        <div class="toolbar">
+                            <div class="segmented">
+                                <template x-for="status in reviewStatuses" :key="status.value">
+                                    <button class="seg-btn" :class="{active: reviewFilter.status === status.value}" @click="setReviewStatus(status.value)">
+                                        <span x-text="status.label"></span>
+                                        <span class="muted" x-text="status.value ? statusCount(status.value) : reviews.total"></span>
+                                    </button>
+                                </template>
+                            </div>
+                            <input class="search" placeholder="Search queue" x-model="reviewFilter.search" @input.debounce.350ms="loadReviews()" />
+                        </div>
+                    </div>
+
+                    <div class="action-strip">
+                        <div class="toolbar">
+                            <button class="btn" @click="selectVisibleReviews()">
+                                <i data-lucide="check-square"></i>
+                                Select visible
+                            </button>
+                            <button class="btn" @click="selectReviewFilter()" :disabled="reviews.total === 0">
+                                <i data-lucide="list-checks"></i>
+                                Select filter
+                            </button>
+                            <button class="btn" @click="clearReviewSelection()" :disabled="selectedReviewCount() === 0">
+                                <i data-lucide="x"></i>
+                                Clear
+                            </button>
+                        </div>
+                        <div class="toolbar">
+                            <span class="selection-summary" x-text="reviewSelectionSummary()"></span>
+                            <button class="btn warn" @click="bulkReviews('requeue')" :disabled="selectedReviewCount() === 0">
+                                <i data-lucide="rotate-ccw"></i>
+                                Requeue selected
+                            </button>
+                            <button class="btn danger" @click="bulkReviews('delete')" :disabled="selectedReviewCount() === 0">
+                                <i data-lucide="trash-2"></i>
+                                Delete selected
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="table-wrap review-table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th class="col-check"></th>
+                                    <th class="col-status">Status</th>
+                                    <th>Input</th>
+                                    <th class="col-type">Type</th>
+                                    <th class="col-confidence">Conf.</th>
+                                    <th class="col-tags">Tags</th>
+                                    <th class="col-time">Updated</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="row in reviews.items" :key="row.id">
+                                    <tr @click="openReview(row)">
+                                        <td class="col-check" @click.stop>
+                                            <input class="check" type="checkbox" :checked="isReviewSelected(row.id)" @change="toggleReview(row)" />
+                                        </td>
+                                        <td><span class="badge" :class="row.status" x-text="row.status"></span></td>
+                                        <td>
+                                            <div class="primary-line" :title="row.input_path" x-text="row.filename || row.display_path"></div>
+                                            <div class="secondary-line" :title="row.input_path" x-text="row.display_path"></div>
+                                        </td>
+                                        <td><span x-text="row.review_type"></span></td>
+                                        <td><span x-text="formatConfidence(row.confidence)"></span></td>
+                                        <td>
+                                            <div class="tags">
+                                                <template x-for="tag in row.tags" :key="tag.kind + tag.label">
+                                                    <span class="tag" :class="tag.kind" x-text="tag.label"></span>
+                                                </template>
+                                            </div>
+                                        </td>
+                                        <td><span x-text="shortDate(row.updated_at)"></span></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                        <div class="empty" x-show="!loading && reviews.items.length === 0">No reviews in this filter</div>
+                    </div>
+                    <div class="action-strip">
+                        <span class="selection-summary" x-text="reviewRangeText()"></span>
+                        <div class="toolbar">
+                            <select class="search" style="width:92px" x-model.number="reviews.limit" @change="reviews.offset = 0; loadReviews(false)">
+                                <option value="40">40</option>
+                                <option value="80">80</option>
+                                <option value="150">150</option>
+                                <option value="250">250</option>
+                            </select>
+                            <button class="btn" @click="pageReviews(-1)" :disabled="reviews.offset === 0">Previous</button>
+                            <button class="btn" @click="pageReviews(1)" :disabled="reviews.offset + reviews.limit >= reviews.total">Next</button>
+                        </div>
+                    </div>
+                </section>
+
+            </div>
+        </div>
+
+        <div class="content" x-show="activeView === 'jobs'">
+            <div class="jobs-page">
+                <section class="panel jobs-list-panel">
+                    <div class="panel-head">
+                        <div class="panel-title">
+                            <strong>Tasks</strong>
+                            <span x-text="jobPanelSubtitle()"></span>
+                        </div>
+                        <div class="toolbar">
+                            <button class="btn" @click="loadJobs()">
+                                <i data-lucide="refresh-cw"></i>
+                                Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div class="job-table-wrap">
+                        <table class="job-table">
+                            <thead>
+                                <tr>
+                                    <th class="job-column">Task</th>
+                                    <th class="state-column">State</th>
+                                    <th class="schedule-column">Schedule</th>
+                                    <th class="runs-column">Latest Runs</th>
+                                    <th class="actions-column">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="job in pagedJobs()" :key="job.name">
+                                    <tr :class="{active: activeJob && activeJob.name === job.name}" @click="selectJob(job.name)">
+                                        <td>
+                                            <div class="primary-line" x-text="job.name"></div>
+                                            <div class="secondary-line" x-text="job.description"></div>
+                                        </td>
+                                        <td><span class="badge" :class="job.health" x-text="job.health"></span></td>
+                                        <td>
+                                            <div class="primary-line" x-text="'Next ' + relativeDate(job.next_run_at)"></div>
+                                            <div class="secondary-line" x-text="'Last ' + relativeDate(job.last_run_at)"></div>
+                                        </td>
+                                        <td>
+                                            <div class="inline-runs">
+                                                <template x-for="run in (job.recent_runs || []).slice(0, 5)" :key="run.id">
+                                                    <button class="badge run-chip" :class="run.status" @click.stop="loadRunDetail(run)" :title="runTitle(run)">
+                                                        <span x-text="runChipLabel(run)"></span>
+                                                    </button>
+                                                </template>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <div class="toolbar">
+                                                <button class="icon-btn" @click.stop="runJob(job)" :disabled="job.launching" title="Run now">
+                                                    <i data-lucide="play"></i>
+                                                </button>
+                                                <button class="icon-btn" @click.stop="toggleJob(job)" :title="job.enabled ? 'Disable' : 'Enable'">
+                                                    <i :data-lucide="job.enabled ? 'pause' : 'power'"></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="action-strip">
+                        <span class="selection-summary" x-text="jobsRangeText()"></span>
+                        <div class="toolbar">
+                            <select class="search" style="width:92px" x-model.number="jobsPerPage" @change="jobsPage = 0">
+                                <option value="8">8</option>
+                                <option value="12">12</option>
+                                <option value="20">20</option>
+                            </select>
+                            <button class="btn" @click="pageJobs(-1)" :disabled="jobsPage === 0">Previous</button>
+                            <button class="btn" @click="pageJobs(1)" :disabled="(jobsPage + 1) * jobsPerPage >= jobs.length">Next</button>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="panel task-form">
+                    <div class="panel-head">
+                        <div class="panel-title">
+                            <strong x-text="activeJob ? activeJob.name : 'Task Details'"></strong>
+                            <span x-text="activeJob ? activeJob.health : 'Select a task'"></span>
+                        </div>
+                    </div>
+                    <div style="padding:14px" x-show="activeJob">
+                        <div class="field">
+                            <label>Description</label>
+                            <textarea readonly x-text="activeJob?.description || ''"></textarea>
+                        </div>
+                        <div class="field">
+                            <label>Cron</label>
+                            <input readonly :value="activeJob?.cron_expression || ''" />
+                        </div>
+                        <div class="field">
+                            <label>Next / Last</label>
+                            <input readonly :value="relativeDate(activeJob?.next_run_at) + ' / ' + relativeDate(activeJob?.last_run_at)" />
+                        </div>
+                        <div class="toolbar" style="margin-bottom:12px">
+                            <button class="btn primary" @click="runJob(activeJob)">
+                                <i data-lucide="play"></i>
+                                Run now
+                            </button>
+                            <button class="btn" @click="toggleJob(activeJob)">
+                                <i data-lucide="power"></i>
+                                Toggle
+                            </button>
+                        </div>
+                        <div class="field">
+                            <label>Recent Runs</label>
+                            <div class="runs">
+                                <template x-for="run in visibleRuns()" :key="run.id">
+                                    <div class="run-row" @click="loadRunDetail(run)">
+                                        <span class="badge" :class="run.status" x-text="run.status"></span>
+                                        <span x-text="'#' + run.id"></span>
+                                        <span class="secondary-line" x-text="run.error_message || run.log_excerpt || run.trigger"></span>
+                                        <span x-text="duration(run.duration_ms)"></span>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="empty" x-show="!activeJob">Select a task from the table</div>
+                </section>
+
+                <section class="panel run-log-panel">
+                    <div class="panel-head">
+                        <div class="panel-title">
+                            <strong>Selected Run Log</strong>
+                            <span x-text="activeRunDetail ? activeRunDetail.run.job_name + ' #' + activeRunDetail.run.id : 'Select a run chip or recent run row'"></span>
+                        </div>
+                        <div class="toolbar" x-show="activeRunDetail">
+                            <span class="badge" :class="activeRunDetail?.run?.status" x-text="activeRunDetail?.run?.status"></span>
+                            <span class="selection-summary" x-text="duration(activeRunDetail?.run?.duration_ms)"></span>
+                        </div>
+                    </div>
+                    <div class="run-log-body">
+                        <pre class="run-log-output" x-show="activeRunDetail" x-text="activeRunDetail?.log_output || activeRunDetail?.run?.log_excerpt || 'No log output captured for this run.'"></pre>
+                        <div class="empty" x-show="!activeRunDetail">No run selected</div>
+                    </div>
+                </section>
+            </div>
+        </div>
+
+        <div class="content" x-show="activeView === 'library'">
+            <div class="library-shell">
+                <section class="panel">
+                    <div class="panel-head">
+                        <div class="panel-title">
+                            <strong>Library Workbench</strong>
+                            <span x-text="librarySubtitle()"></span>
+                        </div>
+                        <div class="toolbar">
+                            <div class="segmented">
+                                <button class="seg-btn" :class="{active: libraryKind === 'artists'}" @click="libraryKind = 'artists'; loadLibrary()">Artists</button>
+                                <button class="seg-btn" :class="{active: libraryKind === 'releases'}" @click="libraryKind = 'releases'; loadLibrary()">Releases</button>
+                                <button class="seg-btn" :class="{active: libraryKind === 'playlists'}" @click="libraryKind = 'playlists'; loadLibrary()">Playlists</button>
+                            </div>
+                            <input class="search" placeholder="Search library" x-model="librarySearch" @input.debounce.350ms="loadLibrary()" />
+                        </div>
+                    </div>
+                    <div class="action-strip">
+                        <div class="toolbar">
+                            <button class="btn" @click="selectVisibleLibrary()">
+                                <i data-lucide="check-square"></i>
+                                Select visible
+                            </button>
+                            <button class="btn" @click="selectLibraryFilter()" :disabled="library.total === 0">
+                                <i data-lucide="list-checks"></i>
+                                Select filter
+                            </button>
+                            <button class="btn" @click="clearLibrarySelection()" :disabled="selectedLibraryCount() === 0">
+                                <i data-lucide="x"></i>
+                                Clear
+                            </button>
+                        </div>
+                        <div class="toolbar">
+                            <span class="selection-summary" x-text="librarySelectionSummary()"></span>
+                            <button class="btn" @click="bulkLibrary('hide')" :disabled="selectedLibraryCount() === 0">
+                                <i data-lucide="eye-off"></i>
+                                Hide
+                            </button>
+                            <button class="btn" @click="bulkLibrary('show')" :disabled="selectedLibraryCount() === 0">
+                                <i data-lucide="eye"></i>
+                                Show
+                            </button>
+                            <button class="btn" @click="openEditor(activeLibraryItem)" :disabled="!activeLibraryItem">
+                                <i data-lucide="square-pen"></i>
+                                Edit
+                            </button>
+                            <button class="btn warn" @click="mockAction('Merge wizard will open from this action slot')">
+                                <i data-lucide="git-merge"></i>
+                                Merge
+                            </button>
+                            <button class="btn danger" @click="bulkLibrary('delete')" :disabled="selectedLibraryCount() === 0">
+                                <i data-lucide="trash-2"></i>
+                                Delete
+                            </button>
+                        </div>
+                    </div>
+                    <div>
+                        <template x-for="item in library.items" :key="item.kind + item.id">
+                            <div class="library-row" :class="{active: activeLibraryItem && activeLibraryItem.id === item.id && activeLibraryItem.kind === item.kind}" @click="openEditor(item)">
+                                <input class="check" type="checkbox" :checked="isLibrarySelected(item)" @click.stop @change="toggleLibrary(item)" />
+                                <div>
+                                    <div class="primary-line" x-text="item.title"></div>
+                                    <div class="secondary-line" x-text="item.subtitle || item.kind"></div>
+                                </div>
+                                <div class="tags">
+                                    <template x-for="tag in item.tags" :key="tag.kind + tag.label">
+                                        <span class="tag" :class="tag.kind" x-text="tag.label"></span>
+                                    </template>
+                                </div>
+                                <span class="badge" :class="item.is_hidden ? 'disabled' : 'ok'" x-text="item.is_hidden ? 'hidden' : 'visible'"></span>
+                            </div>
+                        </template>
+                        <div class="empty" x-show="!libraryLoading && library.items.length === 0">No library rows in this filter</div>
+                    </div>
+                    <div class="action-strip">
+                        <span class="selection-summary" x-text="libraryRangeText()"></span>
+                        <div class="toolbar">
+                            <select class="search" style="width:92px" x-model.number="library.limit" @change="library.offset = 0; loadLibrary(false)">
+                                <option value="25">25</option>
+                                <option value="40">40</option>
+                                <option value="80">80</option>
+                                <option value="120">120</option>
+                            </select>
+                            <button class="btn" @click="pageLibrary(-1)" :disabled="library.offset === 0">Previous</button>
+                            <button class="btn" @click="pageLibrary(1)" :disabled="library.offset + library.limit >= library.total">Next</button>
+                        </div>
+                    </div>
+                </section>
+
+            </div>
+        </div>
+
+        <div class="content" x-show="activeView === 'tools'">
+            <section class="panel">
+                <div class="panel-head">
+                    <div class="panel-title">
+                        <strong>Future Tools</strong>
+                        <span>Reserved operation slots for complex library maintenance</span>
+                    </div>
+                </div>
+                <div style="padding:14px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px">
+                    <button class="btn" style="height:72px" @click="mockAction('Artist merge wizard placeholder')">
+                        <i data-lucide="git-merge"></i>
+                        Artist merge
+                    </button>
+                    <button class="btn" style="height:72px" @click="mockAction('Release split/move tracks placeholder')">
+                        <i data-lucide="scissors"></i>
+                        Split release
+                    </button>
+                    <button class="btn" style="height:72px" @click="mockAction('Metadata enrichment rerun placeholder')">
+                        <i data-lucide="sparkles"></i>
+                        Enrich metadata
+                    </button>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <div class="modal-backdrop" x-show="reviewModalOpen && activeReview" x-transition @click.self="reviewModalOpen = false">
+        <section class="modal">
+            <div class="modal-head">
+                <div class="panel-title">
+                    <strong x-text="activeReview ? 'Review #' + activeReview.id : 'Review'"></strong>
+                    <span x-text="activeReview?.filename || activeReview?.review_type || ''"></span>
+                </div>
+                <button class="icon-btn" @click="reviewModalOpen = false">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <div class="modal-body" x-show="activeReview">
+                <div class="field">
+                    <label>Input</label>
+                    <textarea readonly x-text="activeReview?.input_path || ''"></textarea>
+                </div>
+                <div class="field">
+                    <label>Status</label>
+                    <span class="badge" :class="activeReview?.status" x-text="activeReview?.status"></span>
+                </div>
+                <div class="field">
+                    <label>Agent</label>
+                    <input readonly :value="activeReview?.model_name || 'not processed yet'" />
+                </div>
+                <div class="field" x-show="activeReview?.error_message">
+                    <label>Error</label>
+                    <textarea readonly x-text="activeReview?.error_message || ''"></textarea>
+                </div>
+                <div class="toolbar">
+                    <button class="btn warn" @click="bulkOneReview('requeue', activeReview)">
+                        <i data-lucide="rotate-ccw"></i>
+                        Requeue
+                    </button>
+                    <button class="btn danger" @click="bulkOneReview('delete', activeReview)">
+                        <i data-lucide="trash-2"></i>
+                        Delete
+                    </button>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <div class="modal-backdrop" x-show="editorOpen && activeLibraryItem" x-transition @click.self="editorOpen = false">
+        <section class="modal">
+            <div class="modal-head">
+                <div class="panel-title">
+                    <strong x-text="activeLibraryItem?.title || 'Editor'"></strong>
+                    <span x-text="activeLibraryItem?.kind || 'Library entity'"></span>
+                </div>
+                <button class="icon-btn" @click="editorOpen = false">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <div class="modal-body" x-show="activeLibraryItem">
+                <div class="field">
+                    <label>Title</label>
+                    <input x-model="editorDraft.title" />
+                </div>
+                <div class="field">
+                    <label>Primary Relation Search</label>
+                    <input placeholder="Start typing to attach artist, release, or playlist" />
+                </div>
+                <div class="field">
+                    <label>Visibility</label>
+                    <select class="search" style="width:100%" x-model="editorDraft.hidden">
+                        <option value="false">Visible in player</option>
+                        <option value="true">Hidden from player</option>
+                    </select>
+                </div>
+                <div class="toolbar">
+                    <button class="btn primary" @click="saveLibraryItem()">
+                        <i data-lucide="save"></i>
+                        Save
+                    </button>
+                    <button class="btn danger" @click="deleteLibraryItem(activeLibraryItem)">
+                        <i data-lucide="trash-2"></i>
+                        Delete
+                    </button>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <div class="toast" x-show="toastMessage" x-transition x-text="toastMessage"></div>
+    <div class="loading-mask" x-show="loading">
+        <span class="badge running">Loading</span>
+    </div>
+</div>
+
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js"></script>
+<script>
+function adminV2() {
+    return {
+        apiBase: '/admin/v2/api',
+        activeView: 'reviews',
+        loading: true,
+        libraryLoading: false,
+        toastMessage: '',
+        stats: {},
+        libraryOverview: {},
+        reviews: { items: [], total: 0, limit: 80, offset: 0, status_counts: [] },
+        reviewFilter: { status: null, search: '' },
+        selectedReviewIds: {},
+        reviewSelectionScope: 'ids',
+        activeReview: null,
+        reviewModalOpen: false,
+        reviewStatuses: [
+            { value: null, label: 'All' },
+            { value: 'queued', label: 'Queued' },
+            { value: 'processing', label: 'Processing' },
+            { value: 'pending', label: 'Pending' },
+            { value: 'failed', label: 'Failed' }
+        ],
+        jobs: [],
+        recentRuns: [],
+        activeJobName: null,
+        activeRunDetail: null,
+        jobsPage: 0,
+        jobsPerPage: 12,
+        libraryKind: 'artists',
+        librarySearch: '',
+        library: { items: [], total: 0, limit: 40, offset: 0 },
+        selectedLibraryIds: {},
+        librarySelectionScope: 'ids',
+        activeLibraryItem: null,
+        editorOpen: false,
+        editorDraft: { title: '', hidden: 'false' },
+        poller: null,
+
+        async init() {
+            await this.refreshAll();
+            this.poller = setInterval(() => this.poll(), 6000);
+            this.icons();
+        },
+
+        async request(url, options = {}) {
+            const headers = Object.assign({ 'Accept': 'application/json' }, options.headers || {});
+            if (options.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+            const response = await fetch(url, Object.assign({ credentials: 'same-origin', headers }, options));
+            if (!response.ok) {
+                let message = response.statusText;
+                try {
+                    const body = await response.json();
+                    message = body.error || message;
+                } catch (_) {}
+                throw new Error(message);
+            }
+            return response.json();
+        },
+
+        async refreshAll() {
+            this.loading = true;
+            try {
+                const data = await this.request(`${this.apiBase}/dashboard`);
+                this.stats = data.stats || {};
+                this.libraryOverview = data.library || {};
+                this.reviews = data.reviews || this.reviews;
+                this.jobs = data.jobs || [];
+                this.recentRuns = data.recent_runs || [];
+                if (!this.activeJobName && this.jobs.length) this.activeJobName = this.jobs[0].name;
+                await this.loadLibrary(false);
+            } catch (error) {
+                this.showToast(error.message);
+            } finally {
+                this.loading = false;
+                this.icons();
+            }
+        },
+
+        async poll() {
+            if (this.loading) return;
+            await Promise.allSettled([this.loadJobs(false), this.loadReviews(false)]);
+        },
+
+        async loadReviews(resetOffset = true) {
+            if (resetOffset) this.reviews.offset = 0;
+            const params = new URLSearchParams();
+            if (this.reviewFilter.status) params.set('status', this.reviewFilter.status);
+            if (this.reviewFilter.search) params.set('search', this.reviewFilter.search);
+            params.set('limit', this.reviews.limit || 80);
+            params.set('offset', this.reviews.offset || 0);
+            try {
+                this.reviews = await this.request(`${this.apiBase}/reviews?${params.toString()}`);
+                this.clearReviewSelection();
+            } catch (error) {
+                this.showToast(error.message);
+            } finally {
+                this.icons();
+            }
+        },
+
+        async loadJobs(showErrors = true) {
+            try {
+                this.jobs = await this.request(`${this.apiBase}/jobs`);
+                if (!this.activeJobName && this.jobs.length) this.activeJobName = this.jobs[0].name;
+                if (this.jobsPage * this.jobsPerPage >= this.jobs.length) this.jobsPage = 0;
+            } catch (error) {
+                if (showErrors) this.showToast(error.message);
+            } finally {
+                this.icons();
+            }
+        },
+
+        async loadLibrary(resetOffset = true) {
+            if (this.activeView !== 'library' && resetOffset) return;
+            if (resetOffset) this.library.offset = 0;
+            this.libraryLoading = true;
+            const params = new URLSearchParams();
+            params.set('kind', this.libraryKind);
+            params.set('limit', this.library.limit || 40);
+            params.set('offset', this.library.offset || 0);
+            if (this.librarySearch) params.set('search', this.librarySearch);
+            try {
+                this.library = await this.request(`${this.apiBase}/library?${params.toString()}`);
+                this.clearLibrarySelection();
+            } catch (error) {
+                this.showToast(error.message);
+            } finally {
+                this.libraryLoading = false;
+                this.icons();
+            }
+        },
+
+        setReviewStatus(status) {
+            this.reviewFilter.status = status;
+            this.loadReviews();
+        },
+
+        openReview(row) {
+            this.activeReview = row;
+            this.activeRunDetail = null;
+            this.reviewModalOpen = true;
+        },
+
+        toggleReview(row) {
+            this.reviewSelectionScope = 'ids';
+            if (this.selectedReviewIds[row.id]) {
+                delete this.selectedReviewIds[row.id];
+            } else {
+                this.selectedReviewIds[row.id] = row.status;
+            }
+            this.selectedReviewIds = Object.assign({}, this.selectedReviewIds);
+        },
+
+        isReviewSelected(id) {
+            return this.reviewSelectionScope === 'filter' || Boolean(this.selectedReviewIds[id]);
+        },
+
+        selectVisibleReviews() {
+            this.reviewSelectionScope = 'ids';
+            const selected = {};
+            for (const row of this.reviews.items) selected[row.id] = row.status;
+            this.selectedReviewIds = selected;
+        },
+
+        selectReviewFilter() {
+            this.reviewSelectionScope = 'filter';
+            this.selectedReviewIds = {};
+        },
+
+        clearReviewSelection() {
+            this.reviewSelectionScope = 'ids';
+            this.selectedReviewIds = {};
+        },
+
+        selectedReviewCount() {
+            if (this.reviewSelectionScope === 'filter') return this.reviews.total || 0;
+            return Object.keys(this.selectedReviewIds).length;
+        },
+
+        reviewSelectionSummary() {
+            const total = this.selectedReviewCount();
+            if (!total) return 'Nothing selected';
+            const counts = this.reviewSelectionScope === 'filter'
+                ? this.filterStatusCounts()
+                : Object.values(this.selectedReviewIds).reduce((acc, status) => {
+                    acc[status] = (acc[status] || 0) + 1;
+                    return acc;
+                }, {});
+            const parts = Object.entries(counts).filter(([, count]) => count > 0).map(([status, count]) => `${status}: ${count}`);
+            return `${total} selected · ${parts.join(' · ')}`;
+        },
+
+        filterStatusCounts() {
+            if (this.reviewFilter.status) return { [this.reviewFilter.status]: this.reviews.total || 0 };
+            return (this.reviews.status_counts || []).reduce((acc, row) => {
+                acc[row.status] = row.count;
+                return acc;
+            }, {});
+        },
+
+        async bulkReviews(action) {
+            const count = this.selectedReviewCount();
+            if (!count) return;
+            if (action === 'delete' && !confirm(`Delete ${count} review row(s)?`)) return;
+            const payload = {
+                action,
+                mode: this.reviewSelectionScope,
+                ids: Object.keys(this.selectedReviewIds).map(Number),
+                filter: {
+                    status: this.reviewFilter.status,
+                    search: this.reviewFilter.search || null
+                }
+            };
+            try {
+                const result = await this.request(`${this.apiBase}/reviews/bulk`, {
+                    method: 'POST',
+                    body: JSON.stringify(payload)
+                });
+                this.showToast(`${result.affected} review row(s) updated`);
+                await this.loadReviews(false);
+            } catch (error) {
+                this.showToast(error.message);
+            }
+        },
+
+        async bulkOneReview(action, row) {
+            this.reviewSelectionScope = 'ids';
+            this.selectedReviewIds = { [row.id]: row.status };
+            await this.bulkReviews(action);
+            this.reviewModalOpen = false;
+        },
+
+        async runJob(job) {
+            job.launching = true;
+            try {
+                const result = await this.request(`${this.apiBase}/jobs/${encodeURIComponent(job.name)}/run`, { method: 'POST' });
+                this.showToast(`Run #${result.run_id} started`);
+                this.activeJobName = job.name;
+                await this.loadJobs(false);
+                await this.loadRunsForJob(job.name);
+            } catch (error) {
+                this.showToast(error.message);
+            } finally {
+                job.launching = false;
+                this.icons();
+            }
+        },
+
+        async toggleJob(job) {
+            try {
+                const result = await this.request(`${this.apiBase}/jobs/${encodeURIComponent(job.name)}/toggle`, { method: 'POST' });
+                job.enabled = result.enabled;
+                await this.loadJobs(false);
+            } catch (error) {
+                this.showToast(error.message);
+            }
+        },
+
+        async selectJob(name) {
+            this.activeJobName = name;
+            this.activeReview = null;
+            this.activeRunDetail = null;
+            await this.loadRunsForJob(name);
+        },
+
+        async loadRunsForJob(name) {
+            try {
+                const data = await this.request(`${this.apiBase}/jobs/${encodeURIComponent(name)}/runs`);
+                const job = this.jobs.find(item => item.name === name);
+                if (job) job.recent_runs = data.runs;
+            } catch (error) {
+                this.showToast(error.message);
+            }
+        },
+
+        async loadRunDetail(run) {
+            this.activeReview = null;
+            try {
+                this.activeRunDetail = await this.request(`${this.apiBase}/jobs/${encodeURIComponent(run.job_name)}/runs/${run.id}`);
+                this.activeJobName = run.job_name;
+            } catch (error) {
+                this.showToast(error.message);
+            }
+        },
+
+        visibleRuns() {
+            const job = this.activeJob;
+            return job ? (job.recent_runs || []) : this.recentRuns;
+        },
+
+        get activeJob() {
+            return this.jobs.find(job => job.name === this.activeJobName) || null;
+        },
+
+        selectVisibleLibrary() {
+            this.librarySelectionScope = 'ids';
+            const selected = {};
+            for (const item of this.library.items) selected[`${item.kind}:${item.id}`] = true;
+            this.selectedLibraryIds = selected;
+        },
+
+        selectLibraryFilter() {
+            this.librarySelectionScope = 'filter';
+            this.selectedLibraryIds = {};
+        },
+
+        clearLibrarySelection() {
+            this.librarySelectionScope = 'ids';
+            this.selectedLibraryIds = {};
+        },
+
+        openEditor(item) {
+            if (!item) return;
+            this.activeLibraryItem = item;
+            this.editorDraft = {
+                title: item.title || '',
+                hidden: item.is_hidden ? 'true' : 'false'
+            };
+            this.editorOpen = true;
+        },
+
+        toggleLibrary(item) {
+            this.librarySelectionScope = 'ids';
+            const key = `${item.kind}:${item.id}`;
+            if (this.selectedLibraryIds[key]) delete this.selectedLibraryIds[key];
+            else this.selectedLibraryIds[key] = true;
+            this.selectedLibraryIds = Object.assign({}, this.selectedLibraryIds);
+        },
+
+        isLibrarySelected(item) {
+            return this.librarySelectionScope === 'filter' || Boolean(this.selectedLibraryIds[`${item.kind}:${item.id}`]);
+        },
+
+        selectedLibraryCount() {
+            if (this.librarySelectionScope === 'filter') return this.library.total || 0;
+            return Object.keys(this.selectedLibraryIds).length;
+        },
+
+        async bulkLibrary(action) {
+            const count = this.selectedLibraryCount();
+            if (!count) return;
+            if (action === 'delete' && !confirm(`Delete ${count} ${this.libraryKind}?`)) return;
+            const ids = Object.keys(this.selectedLibraryIds)
+                .map(key => Number(key.split(':')[1]))
+                .filter(Boolean);
+            try {
+                const result = await this.request(`${this.apiBase}/library/bulk`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        action,
+                        kind: this.libraryKind,
+                        mode: this.librarySelectionScope,
+                        ids,
+                        filter: { search: this.librarySearch || null }
+                    })
+                });
+                this.showToast(`${result.affected} ${this.libraryKind} updated`);
+                await this.loadLibrary(false);
+                await this.refreshCountsOnly();
+            } catch (error) {
+                this.showToast(error.message);
+            }
+        },
+
+        async saveLibraryItem() {
+            if (!this.activeLibraryItem) return;
+            try {
+                const updated = await this.request(`${this.apiBase}/library/item`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        kind: this.activeLibraryItem.kind,
+                        id: this.activeLibraryItem.id,
+                        title: this.editorDraft.title,
+                        hidden: this.editorDraft.hidden === 'true'
+                    })
+                });
+                this.replaceLibraryItem(updated);
+                this.activeLibraryItem = updated;
+                this.editorOpen = false;
+                this.showToast('Saved');
+                await this.refreshCountsOnly();
+            } catch (error) {
+                this.showToast(error.message);
+            }
+        },
+
+        async deleteLibraryItem(item) {
+            if (!item) return;
+            if (!confirm(`Delete "${item.title}"?`)) return;
+            this.librarySelectionScope = 'ids';
+            this.selectedLibraryIds = { [`${item.kind}:${item.id}`]: true };
+            await this.bulkLibrary('delete');
+            this.editorOpen = false;
+            this.activeLibraryItem = null;
+        },
+
+        replaceLibraryItem(updated) {
+            this.library.items = this.library.items.map(item =>
+                item.kind === updated.kind && item.id === updated.id ? updated : item
+            );
+        },
+
+        async refreshCountsOnly() {
+            try {
+                const data = await this.request(`${this.apiBase}/dashboard`);
+                this.stats = data.stats || this.stats;
+                this.libraryOverview = data.library || this.libraryOverview;
+            } catch (_) {}
+        },
+
+        pageReviews(delta) {
+            const next = Math.max(0, (this.reviews.offset || 0) + delta * (this.reviews.limit || 80));
+            if (next === this.reviews.offset) return;
+            this.reviews.offset = next;
+            this.loadReviews(false);
+        },
+
+        pageLibrary(delta) {
+            const next = Math.max(0, (this.library.offset || 0) + delta * (this.library.limit || 40));
+            if (next === this.library.offset) return;
+            this.library.offset = next;
+            this.loadLibrary(false);
+        },
+
+        statCells() {
+            return [
+                { label: 'Tracks', value: this.stats.tracks || 0 },
+                { label: 'Releases', value: this.stats.releases || 0 },
+                { label: 'Artists', value: this.stats.artists || 0 },
+                { label: 'Playlists', value: this.stats.playlists || 0 },
+                { label: 'Hidden tracks', value: this.stats.hidden_tracks || 0 },
+                { label: 'Hidden releases', value: this.stats.hidden_releases || 0 },
+                { label: 'Hidden artists', value: this.stats.hidden_artists || 0 }
+            ];
+        },
+
+        pageTitle() {
+            if (this.activeView === 'library') return 'Library Workbench';
+            if (this.activeView === 'jobs') return 'Tasks';
+            if (this.activeView === 'tools') return 'Future Tools';
+            return 'Review Queue';
+        },
+
+        pageSubtitle() {
+            if (this.activeView === 'library') return 'Fast entity control surface for artists, releases, and playlists';
+            if (this.activeView === 'jobs') return 'Scheduler state, recent runs, and manual controls in one place';
+            if (this.activeView === 'tools') return 'Reserved space for merge, split, enrichment, and destructive workflows';
+            return 'Full-screen review triage with filter-aware bulk actions';
+        },
+
+        reviewPanelSubtitle() {
+            return `${this.fmt(this.reviews.total || 0)} rows · ${this.reviewFilter.status || 'all statuses'}`;
+        },
+
+        jobPanelSubtitle() {
+            const running = this.jobs.filter(job => job.is_running).length;
+            return `${this.jobs.length} jobs · ${running} running`;
+        },
+
+        librarySubtitle() {
+            return `${this.libraryKind} · ${this.fmt(this.library.total || 0)} rows`;
+        },
+
+        librarySelectionSummary() {
+            const count = this.selectedLibraryCount();
+            if (!count) return 'Nothing selected';
+            return this.librarySelectionScope === 'filter' ? `${count} selected by filter` : `${count} selected`;
+        },
+
+        reviewRangeText() {
+            if (!this.reviews.total) return '0 rows';
+            const start = (this.reviews.offset || 0) + 1;
+            const end = Math.min((this.reviews.offset || 0) + (this.reviews.limit || 80), this.reviews.total);
+            return `${start}-${end} of ${this.fmt(this.reviews.total)}`;
+        },
+
+        libraryRangeText() {
+            if (!this.library.total) return '0 rows';
+            const start = (this.library.offset || 0) + 1;
+            const end = Math.min((this.library.offset || 0) + (this.library.limit || 40), this.library.total);
+            return `${start}-${end} of ${this.fmt(this.library.total)}`;
+        },
+
+        pagedJobs() {
+            const start = this.jobsPage * this.jobsPerPage;
+            return this.jobs.slice(start, start + this.jobsPerPage);
+        },
+
+        pageJobs(delta) {
+            const maxPage = Math.max(0, Math.ceil(this.jobs.length / this.jobsPerPage) - 1);
+            this.jobsPage = Math.min(maxPage, Math.max(0, this.jobsPage + delta));
+        },
+
+        jobsRangeText() {
+            if (!this.jobs.length) return '0 tasks';
+            const start = this.jobsPage * this.jobsPerPage + 1;
+            const end = Math.min((this.jobsPage + 1) * this.jobsPerPage, this.jobs.length);
+            return `${start}-${end} of ${this.jobs.length}`;
+        },
+
+        statusCount(status) {
+            const row = (this.reviews.status_counts || []).find(item => item.status === status);
+            return row ? row.count : 0;
+        },
+
+        formatConfidence(value) {
+            return typeof value === 'number' ? `${Math.round(value * 100)}%` : '-';
+        },
+
+        duration(ms) {
+            if (!ms && ms !== 0) return '-';
+            return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
+        },
+
+        runChipLabel(run) {
+            const duration = run.duration_ms || run.duration_ms === 0 ? this.duration(run.duration_ms) : this.relativeDate(run.started_at);
+            return `#${run.id} · ${duration}`;
+        },
+
+        runTitle(run) {
+            const parts = [
+                `#${run.id}`,
+                run.status,
+                run.started_at ? `started ${this.shortDate(run.started_at)}` : '',
+                run.duration_ms || run.duration_ms === 0 ? `duration ${this.duration(run.duration_ms)}` : '',
+                run.error_message || run.log_excerpt || ''
+            ];
+            return parts.filter(Boolean).join(' · ');
+        },
+
+        relativeDate(value) {
+            if (!value) return '-';
+            const date = new Date(value);
+            if (Number.isNaN(date.getTime())) return value;
+            const seconds = Math.round((date.getTime() - Date.now()) / 1000);
+            const abs = Math.abs(seconds);
+            if (abs < 60) return seconds >= 0 ? 'now' : 'just now';
+            if (abs < 3600) return `${Math.round(abs / 60)}m ${seconds >= 0 ? 'left' : 'ago'}`;
+            if (abs < 86400) return `${Math.round(abs / 3600)}h ${seconds >= 0 ? 'left' : 'ago'}`;
+            return date.toLocaleDateString();
+        },
+
+        shortDate(value) {
+            if (!value) return '-';
+            const date = new Date(value);
+            if (Number.isNaN(date.getTime())) return value;
+            return date.toLocaleString([], { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+        },
+
+        fmt(value) {
+            return new Intl.NumberFormat().format(value || 0);
+        },
+
+        mockAction(message) {
+            this.showToast(message);
+        },
+
+        showToast(message) {
+            this.toastMessage = message;
+            setTimeout(() => {
+                if (this.toastMessage === message) this.toastMessage = '';
+            }, 3400);
+        },
+
+        icons() {
+            this.$nextTick(() => {
+                if (window.lucide) window.lucide.createIcons();
+            });
+        }
+    };
+}
+</script>
+{% endblock content %}

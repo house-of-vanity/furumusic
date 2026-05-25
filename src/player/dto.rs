@@ -108,6 +108,9 @@ pub(super) struct PlaylistCard {
     pub(super) title: String,
     pub(super) track_count: i64,
     pub(super) is_own: bool,
+    pub(super) owner_name: Option<String>,
+    pub(super) is_public: bool,
+    pub(super) is_saved: bool,
     pub(super) kind: String,
 }
 
@@ -128,6 +131,9 @@ pub(super) struct PlaylistDetail {
     pub(super) title: String,
     pub(super) description: Option<String>,
     pub(super) is_own: bool,
+    pub(super) owner_name: Option<String>,
+    pub(super) is_public: bool,
+    pub(super) is_saved: bool,
     pub(super) kind: String,
     pub(super) tracks: Vec<TrackItem>,
 }
