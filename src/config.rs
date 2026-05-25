@@ -122,6 +122,7 @@ pub struct ConfigSources {
     pub auth_sso_enabled: ConfigSource,
     pub oidc_button_text: ConfigSource,
     pub oidc_admin_groups: ConfigSource,
+    pub oidc_user_groups: ConfigSource,
     pub swagger_enabled: ConfigSource,
     pub agent_enabled: ConfigSource,
     pub agent_inbox_dir: ConfigSource,
@@ -146,6 +147,7 @@ impl Default for ConfigSources {
             auth_sso_enabled: ConfigSource::Default,
             oidc_button_text: ConfigSource::Default,
             oidc_admin_groups: ConfigSource::Default,
+            oidc_user_groups: ConfigSource::Default,
             swagger_enabled: ConfigSource::Default,
             agent_enabled: ConfigSource::Default,
             agent_inbox_dir: ConfigSource::Default,
@@ -238,6 +240,8 @@ pub struct AppConfig {
     pub oidc_button_text: String,
     /// Comma-separated list of OIDC group names that grant admin role.
     pub oidc_admin_groups: String,
+    /// Comma-separated list of OIDC group names that are allowed to use the service.
+    pub oidc_user_groups: String,
     /// Whether the Swagger UI is served at /swagger/.
     pub swagger_enabled: bool,
     /// Whether the AI agent background loop is enabled.
@@ -272,6 +276,7 @@ impl Default for AppConfig {
             auth_sso_enabled: false,
             oidc_button_text: "Sign in with SSO".into(),
             oidc_admin_groups: String::new(),
+            oidc_user_groups: String::new(),
             swagger_enabled: false,
             agent_enabled: false,
             agent_inbox_dir: String::new(),
@@ -297,6 +302,7 @@ impl_env_overrides!(
     auth_sso_enabled,
     oidc_button_text,
     oidc_admin_groups,
+    oidc_user_groups,
     swagger_enabled,
     agent_enabled,
     agent_inbox_dir,
@@ -372,6 +378,7 @@ impl AppConfig {
         apply_db_field!(auth_sso_enabled);
         apply_db_field!(oidc_button_text);
         apply_db_field!(oidc_admin_groups);
+        apply_db_field!(oidc_user_groups);
         apply_db_field!(swagger_enabled);
         apply_db_field!(agent_enabled);
         apply_db_field!(agent_inbox_dir);

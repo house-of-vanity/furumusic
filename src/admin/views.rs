@@ -130,6 +130,11 @@ fn config_display_entries(config: &AppConfig, sources: &ConfigSources) -> Vec<Co
             defaults.oidc_admin_groups.clone()
         ),
         entry!(
+            oidc_user_groups,
+            config.oidc_user_groups.clone(),
+            defaults.oidc_user_groups.clone()
+        ),
+        entry!(
             swagger_enabled,
             config.swagger_enabled.to_string(),
             defaults.swagger_enabled.to_string()
@@ -248,6 +253,8 @@ struct SettingsTemplate {
     oidc_client_secret_source: &'static str,
     oidc_admin_groups: String,
     oidc_admin_groups_source: &'static str,
+    oidc_user_groups: String,
+    oidc_user_groups_source: &'static str,
     swagger_enabled: bool,
     swagger_enabled_source: &'static str,
     agent_enabled: bool,
@@ -298,6 +305,8 @@ pub async fn settings_handler(
         oidc_client_secret_source: sources.oidc_client_secret.code(),
         oidc_admin_groups: config.oidc_admin_groups,
         oidc_admin_groups_source: sources.oidc_admin_groups.code(),
+        oidc_user_groups: config.oidc_user_groups,
+        oidc_user_groups_source: sources.oidc_user_groups.code(),
         swagger_enabled: config.swagger_enabled,
         swagger_enabled_source: sources.swagger_enabled.code(),
         agent_enabled: config.agent_enabled,
@@ -331,6 +340,7 @@ pub struct OidcSettingsForm {
     oidc_client_id: Option<String>,
     oidc_client_secret: Option<String>,
     oidc_admin_groups: Option<String>,
+    oidc_user_groups: Option<String>,
     swagger_enabled: Option<String>,
     agent_enabled: Option<String>,
     agent_inbox_dir: Option<String>,
@@ -378,6 +388,7 @@ pub async fn settings_submit(
             let oidc_client_id = data.oidc_client_id.unwrap_or_default();
             let oidc_client_secret = data.oidc_client_secret.unwrap_or_default();
             let oidc_admin_groups = data.oidc_admin_groups.unwrap_or_default();
+            let oidc_user_groups = data.oidc_user_groups.unwrap_or_default();
             let agent_inbox_dir = data.agent_inbox_dir.unwrap_or_default();
             let agent_storage_dir = data.agent_storage_dir.unwrap_or_default();
             let agent_llm_url = data.agent_llm_url.unwrap_or_default();
@@ -386,7 +397,7 @@ pub async fn settings_submit(
             let agent_confidence_threshold = data.agent_confidence_threshold.unwrap_or_default();
             let agent_context_limit = data.agent_context_limit.unwrap_or_default();
             let agent_concurrency = data.agent_concurrency.unwrap_or_default();
-            let fields: [(&str, &str); 17] = [
+            let fields: [(&str, &str); 18] = [
                 ("auth_password_enabled", pw_enabled),
                 ("auth_sso_enabled", sso_enabled),
                 ("oidc_button_text", &oidc_button_text),
@@ -394,6 +405,7 @@ pub async fn settings_submit(
                 ("oidc_client_id", &oidc_client_id),
                 ("oidc_client_secret", &oidc_client_secret),
                 ("oidc_admin_groups", &oidc_admin_groups),
+                ("oidc_user_groups", &oidc_user_groups),
                 ("swagger_enabled", swagger),
                 ("agent_enabled", agent_en),
                 ("agent_inbox_dir", &agent_inbox_dir),

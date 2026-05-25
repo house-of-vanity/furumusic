@@ -281,6 +281,7 @@ impl Project for FuruProject {
                 "    FURU_OIDC_CLIENT_SECRET      OIDC client secret\n",
                 "    FURU_OIDC_BUTTON_TEXT        SSO button label (default: Sign in with SSO)\n",
                 "    FURU_OIDC_ADMIN_GROUPS       OIDC groups that grant admin role\n",
+                "    FURU_OIDC_USER_GROUPS        OIDC groups allowed to access the service\n",
                 "\n",
                 "  API:\n",
                 "    FURU_SWAGGER_ENABLED   Enable Swagger UI at /swagger/ (default: false)\n",

@@ -435,6 +435,17 @@ button.user-stat:hover {
 .release-meta .release-type { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); }
 .release-meta .release-title { font-size: 36px; font-weight: 900; line-height: 1.2; margin: 4px 0; }
 .release-meta .release-artists { font-size: 14px; color: var(--text-secondary); }
+
+.artist-link {
+    color: inherit;
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.artist-link:hover {
+    color: var(--text-primary);
+    text-decoration: underline;
+}
 .release-meta .release-year { font-size: 14px; color: var(--text-subdued); margin-top: 4px; }
 
 /* Track list table */
@@ -2318,7 +2329,14 @@ button.user-stat:hover {
                                             <span class="track-num" x-text="idx + 1"></span>
                                             <div class="track-info">
                                                 <div class="track-title" x-text="track.title"></div>
-                                                <div class="track-artists-inline" x-text="[...track.artists, ...track.featured_artists.map(a => ({...a, name: 'ft. ' + a.name}))].map(a => a.name).join(', ')"></div>
+                                                <div class="track-artists-inline">
+                                                    <template x-for="(artist, artistIdx) in $store.library.trackArtistLinks(track)" :key="artist.label + '-' + artist.id + '-' + artistIdx">
+                                                        <span>
+                                                            <template x-if="artistIdx > 0"><span>, </span></template>
+                                                            <a class="artist-link" @click.stop="$store.library.openArtist(artist.id)" x-text="artist.label"></a>
+                                                        </span>
+                                                    </template>
+                                                </div>
                                             </div>
                                             <span></span>
                                             <div class="track-actions">
@@ -2433,6 +2451,59 @@ button.user-stat:hover {
                             </div>
                         </section>
                     </template>
+                    <template x-if="$store.library.currentArtist.featured_tracks && $store.library.currentArtist.featured_tracks.length > 0">
+                        <section class="artist-release-group">
+                            <h2 class="artist-release-group-title">Appears on</h2>
+                            <div class="track-list-header">
+                                <span>#</span>
+                                <span>Title</span>
+                                <span></span>
+                                <span></span>
+                                <span style="text-align:right">Duration</span>
+                            </div>
+                            <template x-for="(track, idx) in $store.library.currentArtist.featured_tracks" :key="track.id">
+                                <div class="track-row"
+                                     :class="{ playing: $store.player.currentTrack && $store.player.currentTrack.id === track.id }"
+                                     @dblclick="$store.queue.playRelease($store.library.currentArtist.featured_tracks, idx)">
+                                    <span class="track-num" x-text="idx + 1"></span>
+                                    <div class="track-info">
+                                        <div class="track-title">
+                                            <span x-text="track.title"></span>
+                                            <span style="color:var(--text-subdued)"> · </span>
+                                            <a class="artist-link" @click.stop="$store.library.openRelease(track.release_id)" x-text="track.release_title"></a>
+                                        </div>
+                                        <div class="track-artists-inline">
+                                            <template x-for="(artist, artistIdx) in $store.library.trackArtistLinks(track)" :key="artist.label + '-' + artist.id + '-' + artistIdx">
+                                                <span>
+                                                    <template x-if="artistIdx > 0"><span>, </span></template>
+                                                    <a class="artist-link" @click.stop="$store.library.openArtist(artist.id)" x-text="artist.label"></a>
+                                                </span>
+                                            </template>
+                                        </div>
+                                    </div>
+                                    <span></span>
+                                    <div class="track-actions">
+                                        <button class="track-action-btn play-btn" @click.stop="$store.queue.playRelease($store.library.currentArtist.featured_tracks, idx)" title="Play">
+                                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                                        </button>
+                                        <button class="like-btn" :class="{ liked: $store.likes.has(track.id) }" @click.stop="$store.likes.toggle(track.id)" title="Like">
+                                            <svg viewBox="0 0 24 24" :fill="$store.likes.has(track.id) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z"/></svg>
+                                        </button>
+                                        <button class="track-action-btn" @click.stop="$store.queue.addNextInQueue([track])" title="Play next">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h8M5 18h14"/><path d="M17 10l4 3-4 3" fill="currentColor" stroke="none"/></svg>
+                                        </button>
+                                        <button class="track-action-btn" @click.stop="$store.queue.addToEnd([track])" title="Add to queue">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                        </button>
+                                        <button class="track-action-btn" @click.stop="$store.playlists.showPicker([track.id])" title="Add to playlist">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+                                        </button>
+                                    </div>
+                                    <span class="track-duration" x-text="formatTime(track.duration_seconds)"></span>
+                                </div>
+                            </template>
+                        </section>
+                    </template>
                 </div>
             </template>
 
@@ -2460,7 +2531,14 @@ button.user-stat:hover {
                         <div class="release-meta">
                             <div class="release-type" x-text="$store.library.currentRelease.release_type"></div>
                             <div class="release-title" x-text="$store.library.currentRelease.title"></div>
-                            <div class="release-artists" x-text="$store.library.currentRelease.artists.map(a => a.name).join(', ')"></div>
+                            <div class="release-artists">
+                                <template x-for="(artist, artistIdx) in $store.library.currentRelease.artists" :key="artist.id">
+                                    <span>
+                                        <template x-if="artistIdx > 0"><span>, </span></template>
+                                        <a class="artist-link" @click="$store.library.openArtist(artist.id)" x-text="artist.name"></a>
+                                    </span>
+                                </template>
+                            </div>
                             <div class="release-year" x-text="$store.library.currentRelease.year || ''"></div>
                             <div class="release-actions">
                                 <button class="release-action-btn primary" @click="$store.queue.playRelease($store.library.currentRelease.tracks, 0)">
@@ -2499,7 +2577,14 @@ button.user-stat:hover {
                             <span class="track-num" x-text="track.track_number || (idx + 1)"></span>
                             <div class="track-info">
                                 <div class="track-title" x-text="track.title"></div>
-                                <div class="track-artists-inline" x-text="[...track.artists, ...track.featured_artists.map(a => ({...a, name: 'ft. ' + a.name}))].map(a => a.name).join(', ')"></div>
+                                <div class="track-artists-inline">
+                                    <template x-for="(artist, artistIdx) in $store.library.trackArtistLinks(track)" :key="artist.label + '-' + artist.id + '-' + artistIdx">
+                                        <span>
+                                            <template x-if="artistIdx > 0"><span>, </span></template>
+                                            <a class="artist-link" @click.stop="$store.library.openArtist(artist.id)" x-text="artist.label"></a>
+                                        </span>
+                                    </template>
+                                </div>
                             </div>
                             <span></span>
                             <div class="track-actions">
@@ -2551,7 +2636,14 @@ button.user-stat:hover {
                             <span class="track-num" x-text="idx + 1"></span>
                             <div class="track-info">
                                 <div class="track-title" x-text="track.title"></div>
-                                <div class="track-artists-inline" x-text="[...track.artists, ...track.featured_artists.map(a => ({...a, name: 'ft. ' + a.name}))].map(a => a.name).join(', ')"></div>
+                                <div class="track-artists-inline">
+                                    <template x-for="(artist, artistIdx) in $store.library.trackArtistLinks(track)" :key="artist.label + '-' + artist.id + '-' + artistIdx">
+                                        <span>
+                                            <template x-if="artistIdx > 0"><span>, </span></template>
+                                            <a class="artist-link" @click.stop="$store.library.openArtist(artist.id)" x-text="artist.label"></a>
+                                        </span>
+                                    </template>
+                                </div>
                             </div>
                             <span></span>
                             <div class="track-actions">
@@ -2614,7 +2706,14 @@ button.user-stat:hover {
                         </div>
                         <div class="queue-track-info">
                             <div class="queue-track-title" x-text="track.title"></div>
-                            <div class="queue-track-artist" x-text="track.artists.map(a => a.name).join(', ')"></div>
+                            <div class="queue-track-artist">
+                                <template x-for="(artist, artistIdx) in $store.library.trackArtistLinks(track)" :key="artist.label + '-' + artist.id + '-' + artistIdx">
+                                    <span>
+                                        <template x-if="artistIdx > 0"><span>, </span></template>
+                                        <a class="artist-link" @click.stop="$store.library.openArtist(artist.id)" x-text="artist.label"></a>
+                                    </span>
+                                </template>
+                            </div>
                         </div>
                         <div class="queue-track-actions">
                             <button class="queue-track-remove" @click.stop="$store.queue.remove(idx)" title="Remove">
@@ -2642,7 +2741,14 @@ button.user-stat:hover {
                     </div>
                     <div class="player-track-info">
                         <div class="player-track-title" x-text="$store.player.currentTrack.title"></div>
-                        <div class="player-track-artist" x-text="$store.player.currentTrack.artists.map(a => a.name).join(', ')"></div>
+                        <div class="player-track-artist">
+                            <template x-for="(artist, artistIdx) in $store.library.trackArtistLinks($store.player.currentTrack)" :key="artist.label + '-' + artist.id + '-' + artistIdx">
+                                <span>
+                                    <template x-if="artistIdx > 0"><span>, </span></template>
+                                    <a class="artist-link" @click.stop="$store.library.openArtist(artist.id)" x-text="artist.label"></a>
+                                </span>
+                            </template>
+                        </div>
                     </div>
                 </div>
             </template>
@@ -3308,7 +3414,7 @@ document.addEventListener('alpine:init', () => {
     Alpine.store('queue', {
         tracks: [],
         currentIndex: 0,
-        visible: true,
+        visible: false,
         _dragIdx: null,
 
         add(track) {
@@ -3521,6 +3627,18 @@ document.addEventListener('alpine:init', () => {
                     label: labels[type] || type,
                     releases: groupReleases,
                 }));
+        },
+
+        trackArtistLinks(track) {
+            const main = (track?.artists || []).map(artist => ({
+                id: artist.id,
+                label: artist.name,
+            }));
+            const featured = (track?.featured_artists || []).map(artist => ({
+                id: artist.id,
+                label: 'ft. ' + artist.name,
+            }));
+            return [...main, ...featured];
         },
 
         async openRelease(id) {

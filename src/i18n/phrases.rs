@@ -70,6 +70,8 @@ translations! {
     settings_oidc_issuer_help: "Base URL of the OIDC provider (e.g. https://accounts.google.com)" , "Базовый URL провайдера OIDC (напр. https://accounts.google.com)";
     settings_oidc_admin_groups: "Admin groups"                   , "Группы администраторов";
     settings_oidc_admin_groups_help: "Comma-separated OIDC group names that grant admin role (e.g. /admin,/furumusic-admins)" , "OIDC группы через запятую, дающие роль администратора (напр. /admin,/furumusic-admins)";
+    settings_oidc_user_groups: "User groups"                    , "Группы пользователей";
+    settings_oidc_user_groups_help: "Comma-separated OIDC group names allowed to access the service. If empty, any authenticated SSO user is allowed." , "OIDC группы через запятую, которым разрешён доступ к сервису. Если пусто, разрешён любой SSO пользователь.";
 
     // User management
     nav_users:                "Users"                       , "Пользователи";
@@ -97,6 +99,7 @@ translations! {
     // OIDC login errors
     login_oidc_error:         "SSO login failed. Please try again." , "Ошибка входа через SSO. Попробуйте ещё раз.";
     login_sso_disabled:       "SSO login is not configured." , "Вход через SSO не настроен.";
+    login_access_denied:      "Access denied. Contact your administrator." , "Доступ запрещён. Обратитесь к администратору.";
 
     // Artist management
     nav_artists:              "Artists"                       , "Артисты";

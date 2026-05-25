@@ -87,7 +87,7 @@ Full OpenID Connect authorization code flow with PKCE:
 
 Provider metadata is cached for 1 hour and invalidated when OIDC config changes.
 
-**Group-to-role mapping:** The `oidc_admin_groups` config field lists OIDC group names (comma-separated) that grant the admin role. Groups are extracted from the `groups` claim in the ID token JWT payload.
+**Group access and role mapping:** The `oidc_user_groups` config field lists OIDC group names (comma-separated) allowed to access the service. When it is set, users outside both `oidc_user_groups` and `oidc_admin_groups` are denied before provisioning/login. The `oidc_admin_groups` config field lists OIDC group names that grant the admin role. Groups are extracted from the `groups` claim in the ID token JWT payload.
 
 **User provisioning order:**
 1. Find existing `OidcLink` by issuer+sub → update claims, update role
@@ -197,4 +197,5 @@ All prefixed with `FURU_`. Priority: env var > DB override > compiled default.
 | `FURU_OIDC_CLIENT_SECRET` | OIDC client secret | *(empty)* |
 | `FURU_OIDC_BUTTON_TEXT` | SSO button label | `Sign in with SSO` |
 | `FURU_OIDC_ADMIN_GROUPS` | Comma-separated OIDC groups that grant admin | *(empty)* |
+| `FURU_OIDC_USER_GROUPS` | Comma-separated OIDC groups allowed to access the service. Empty means any authenticated SSO user is allowed. | *(empty)* |
 | `FURU_SWAGGER_ENABLED` | Serve Swagger UI at `/swagger/` | `false` |

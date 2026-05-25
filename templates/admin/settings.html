@@ -67,6 +67,11 @@
     <td><input name="oidc_admin_groups" id="oidc_admin_groups" value="{{ oidc_admin_groups }}" style="width:100%"></td>
     <td><span class="badge badge-{{ oidc_admin_groups_source }}">{{ oidc_admin_groups_source }}</span></td>
   </tr>
+  <tr>
+    <td><label for="oidc_user_groups">{{ t.settings_oidc_user_groups }}</label><br><span style="font-size:.75rem;color:#999;">{{ t.settings_oidc_user_groups_help }}</span></td>
+    <td><input name="oidc_user_groups" id="oidc_user_groups" value="{{ oidc_user_groups }}" style="width:100%"></td>
+    <td><span class="badge badge-{{ oidc_user_groups_source }}">{{ oidc_user_groups_source }}</span></td>
+  </tr>
 </table>
 <h2>{{ t.settings_api }}</h2>
 <table>

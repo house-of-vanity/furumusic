@@ -384,9 +384,23 @@ pub async fn oidc_callback_handler(
     .unwrap_or_default();
 
     tracing::info!(
-        "OIDC login: sub={sub}, groups={groups:?}, admin_groups={:?}",
+        "OIDC login: sub={sub}, groups={groups:?}, admin_groups={:?}, user_groups={:?}",
         config.oidc_admin_groups,
+        config.oidc_user_groups,
     );
+
+    if !is_allowed_by_groups(
+        &groups,
+        &config.oidc_user_groups,
+        &config.oidc_admin_groups,
+    ) {
+        tracing::warn!(
+            "OIDC login denied by group allowlist: sub={sub}, groups={groups:?}, user_groups={:?}, admin_groups={:?}",
+            config.oidc_user_groups,
+            config.oidc_admin_groups,
+        );
+        return redirect_login_with_error(i18n.t.login_access_denied);
+    }
 
     // User provisioning logic.
     let user = match provision_user(
@@ -456,6 +470,27 @@ fn resolve_role(groups: &[String], admin_groups: &str) -> &'static str {
         }
     }
     auth::Role::User.code()
+}
+
+fn parse_group_set(groups: &str) -> std::collections::HashSet<&str> {
+    groups
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn has_any_group(groups: &[String], allowed: &std::collections::HashSet<&str>) -> bool {
+    groups.iter().any(|g| allowed.contains(g.as_str()))
+}
+
+fn is_allowed_by_groups(groups: &[String], user_groups: &str, admin_groups: &str) -> bool {
+    let user_set = parse_group_set(user_groups);
+    if user_set.is_empty() {
+        return true;
+    }
+    let admin_set = parse_group_set(admin_groups);
+    has_any_group(groups, &user_set) || has_any_group(groups, &admin_set)
 }
 
 async fn provision_user(

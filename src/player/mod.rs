@@ -71,6 +71,7 @@ struct ArtistDetail {
     total_track_count: i64,
     total_play_count: i64,
     releases: Vec<ReleaseCard>,
+    featured_tracks: Vec<ArtistAppearanceTrack>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -85,6 +86,19 @@ struct TrackItem {
     title: String,
     track_number: Option<i32>,
     disc_number: Option<i32>,
+    duration_seconds: f64,
+    artists: Vec<ArtistRef>,
+    featured_artists: Vec<ArtistRef>,
+    cover_url: Option<String>,
+    stream_url: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct ArtistAppearanceTrack {
+    id: i64,
+    title: String,
+    release_id: i64,
+    release_title: String,
     duration_seconds: f64,
     artists: Vec<ArtistRef>,
     featured_artists: Vec<ArtistRef>,
@@ -352,6 +366,17 @@ struct PlaylistTrackRow {
     title: String,
     track_number: Option<i32>,
     disc_number: Option<i32>,
+    duration_seconds: f64,
+    cover_file_id: Option<i64>,
+    release_cover_file_id: Option<i64>,
+}
+
+#[derive(sqlx::FromRow)]
+struct AppearanceTrackRow {
+    id: i64,
+    title: String,
+    release_id: i64,
+    release_title: String,
     duration_seconds: f64,
     cover_file_id: Option<i64>,
     release_cover_file_id: Option<i64>,
@@ -633,6 +658,86 @@ async fn artist_detail_handler(
     .await
     .map_err(|e| cot::Error::internal(e.to_string()))?;
 
+    let featured_rows = sqlx::query_as::<_, AppearanceTrackRow>(
+        r#"SELECT DISTINCT t.id,
+                  t.title::text AS title,
+                  r.id AS release_id,
+                  r.title::text AS release_title,
+                  t.duration_seconds,
+                  t.cover_file_id,
+                  r.cover_file_id AS release_cover_file_id
+           FROM furumusic__track_artist ta
+           JOIN furumusic__track t ON t.id = ta.track_id
+           JOIN furumusic__release r ON r.id = t.release_id
+           WHERE ta.artist_id = $1
+             AND ta.role = 'featuring'
+             AND t.is_hidden = false
+             AND r.is_hidden = false
+           ORDER BY r.title::text, t.title::text"#,
+    )
+    .bind(artist_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    let featured_track_ids: Vec<i64> = featured_rows.iter().map(|t| t.id).collect();
+    let featured_track_artists = if featured_track_ids.is_empty() {
+        Vec::new()
+    } else {
+        sqlx::query_as::<_, TrackArtistRow>(
+            r#"SELECT ta.track_id, ta.artist_id, a.name::text as artist_name, ta.role::text as role
+               FROM furumusic__track_artist ta
+               JOIN furumusic__artist a ON a.id = ta.artist_id
+               WHERE ta.track_id = ANY($1)
+               ORDER BY ta.track_id, ta.position"#,
+        )
+        .bind(&featured_track_ids)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?
+    };
+
+    let mut featured_main_artists: std::collections::HashMap<i64, Vec<ArtistRef>> =
+        std::collections::HashMap::new();
+    let mut featured_feat_artists: std::collections::HashMap<i64, Vec<ArtistRef>> =
+        std::collections::HashMap::new();
+
+    for ta in &featured_track_artists {
+        let artist_ref = ArtistRef {
+            id: ta.artist_id,
+            name: ta.artist_name.clone(),
+        };
+        if ta.role == "featuring" {
+            featured_feat_artists
+                .entry(ta.track_id)
+                .or_default()
+                .push(artist_ref);
+        } else {
+            featured_main_artists
+                .entry(ta.track_id)
+                .or_default()
+                .push(artist_ref);
+        }
+    }
+
+    let featured_tracks: Vec<ArtistAppearanceTrack> = featured_rows
+        .into_iter()
+        .map(|t| {
+            let tid = t.id;
+            ArtistAppearanceTrack {
+                id: t.id,
+                title: t.title,
+                release_id: t.release_id,
+                release_title: t.release_title,
+                duration_seconds: t.duration_seconds,
+                artists: featured_main_artists.remove(&tid).unwrap_or_default(),
+                featured_artists: featured_feat_artists.remove(&tid).unwrap_or_default(),
+                cover_url: track_cover_url(t.cover_file_id, t.release_cover_file_id),
+                stream_url: format!("/api/player/stream/{tid}"),
+            }
+        })
+        .collect();
+
     Json(ArtistDetail {
         id: artist.id,
         name: artist.name,
@@ -640,6 +745,7 @@ async fn artist_detail_handler(
         total_track_count,
         total_play_count,
         releases: release_cards,
+        featured_tracks,
     })
     .into_response()
 }
