@@ -273,6 +273,22 @@ body {
 .artist-header .artist-img svg { width: 80px; height: 80px; color: var(--text-subdued); }
 
 .artist-header .artist-name { font-size: 48px; font-weight: 900; line-height: 1.1; }
+.artist-stats {
+    color: var(--text-subdued);
+    margin-top: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 14px;
+}
+.artist-release-group { margin-top: 28px; }
+.artist-release-group:first-of-type { margin-top: 0; }
+.artist-release-group-title {
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 14px;
+    text-transform: capitalize;
+}
 
 /* Release detail header */
 .release-header {
@@ -1355,35 +1371,45 @@ body {
                         </div>
                         <div>
                             <div class="artist-header .artist-name" x-text="$store.library.currentArtist.name" style="font-size:48px;font-weight:900;line-height:1.1"></div>
-                            <div style="color:var(--text-subdued);margin-top:8px" x-text="$store.library.currentArtist.releases.length + ' releases'"></div>
+                            <div class="artist-stats">
+                                <span x-text="$store.library.currentArtist.releases.length + ' releases'"></span>
+                                <span>•</span>
+                                <span x-text="$store.library.currentArtist.total_track_count + ' tracks'"></span>
+                                <span>•</span>
+                                <span x-text="$store.library.currentArtist.total_play_count + ' plays'"></span>
+                            </div>
                         </div>
                     </div>
-                    <h2 class="section-title" style="font-size:20px">Releases</h2>
-                    <div class="card-grid">
-                        <template x-for="release in $store.library.currentArtist.releases" :key="release.id">
-                            <div class="card" @click="$store.library.openRelease(release.id)">
-                                <div class="card-img">
-                                    <template x-if="release.cover_url">
-                                        <img :src="release.cover_url" :alt="release.title" loading="lazy">
-                                    </template>
-                                    <template x-if="!release.cover_url">
-                                        <span class="placeholder-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="12" r="4"/></svg></span>
-                                    </template>
-                                    <button class="card-enqueue-btn" @click.stop="$store.library.enqueueRelease(release.id)" title="Add to queue">
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                                    </button>
-                                    <button class="card-play-btn" @click.stop="$store.library.playRelease(release.id)">
-                                        <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                                    </button>
-                                </div>
-                                <div class="card-title" x-text="release.title"></div>
-                                <div class="card-subtitle">
-                                    <span x-text="release.year || ''"></span>
-                                    <span x-text="release.release_type"></span>
-                                </div>
+                    <template x-for="group in $store.library.artistReleaseGroups()" :key="group.type">
+                        <section class="artist-release-group">
+                            <h2 class="artist-release-group-title" x-text="group.label"></h2>
+                            <div class="card-grid">
+                                <template x-for="release in group.releases" :key="release.id">
+                                    <div class="card" @click="$store.library.openRelease(release.id)">
+                                        <div class="card-img">
+                                            <template x-if="release.cover_url">
+                                                <img :src="release.cover_url" :alt="release.title" loading="lazy">
+                                            </template>
+                                            <template x-if="!release.cover_url">
+                                                <span class="placeholder-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="12" r="4"/></svg></span>
+                                            </template>
+                                            <button class="card-enqueue-btn" @click.stop="$store.library.enqueueRelease(release.id)" title="Add to queue">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                            </button>
+                                            <button class="card-play-btn" @click.stop="$store.library.playRelease(release.id)">
+                                                <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                                            </button>
+                                        </div>
+                                        <div class="card-title" x-text="release.title"></div>
+                                        <div class="card-subtitle">
+                                            <span x-text="release.year || ''"></span>
+                                            <span x-text="release.track_count + ' tracks'"></span>
+                                        </div>
+                                    </div>
+                                </template>
                             </div>
-                        </template>
-                    </div>
+                        </section>
+                    </template>
                 </div>
             </template>
 
@@ -2177,6 +2203,39 @@ document.addEventListener('alpine:init', () => {
                 if (!res.ok) throw new Error('failed');
                 this.currentArtist = await res.json();
             } catch {}
+        },
+
+        artistReleaseGroups() {
+            const releases = this.currentArtist?.releases || [];
+            const order = ['album', 'ep', 'single', 'compilation', 'mixtape', 'live', 'soundtrack'];
+            const labels = {
+                album: 'Albums',
+                ep: 'EPs',
+                single: 'Singles',
+                compilation: 'Compilations',
+                mixtape: 'Mixtapes',
+                live: 'Live releases',
+                soundtrack: 'Soundtracks',
+            };
+            const groups = new Map();
+            for (const release of releases) {
+                const type = (release.release_type || 'other').toLowerCase();
+                if (!groups.has(type)) {
+                    groups.set(type, []);
+                }
+                groups.get(type).push(release);
+            }
+            return Array.from(groups.entries())
+                .sort(([a], [b]) => {
+                    const ai = order.includes(a) ? order.indexOf(a) : order.length;
+                    const bi = order.includes(b) ? order.indexOf(b) : order.length;
+                    return ai === bi ? a.localeCompare(b) : ai - bi;
+                })
+                .map(([type, groupReleases]) => ({
+                    type,
+                    label: labels[type] || type,
+                    releases: groupReleases,
+                }));
         },
 
         async openRelease(id) {

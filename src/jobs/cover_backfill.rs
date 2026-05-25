@@ -87,10 +87,8 @@ impl Job for CoverBackfillJob {
             let folder = first_path.parent().unwrap_or(Path::new("."));
 
             // Collect all audio file paths as PathBuf
-            let audio_files: Vec<PathBuf> = audio_paths
-                .iter()
-                .map(|(p,)| PathBuf::from(p))
-                .collect();
+            let audio_files: Vec<PathBuf> =
+                audio_paths.iter().map(|(p,)| PathBuf::from(p)).collect();
 
             // Try to find cover art
             let cover = match cover_art::find_best_cover(folder, &audio_files).await {
@@ -135,12 +133,9 @@ impl Job for CoverBackfillJob {
             .await
             {
                 Ok(cover_file_id) => {
-                    if let Err(e) = cover_art::assign_cover_to_release(
-                        &ctx.pool,
-                        *release_id,
-                        cover_file_id,
-                    )
-                    .await
+                    if let Err(e) =
+                        cover_art::assign_cover_to_release(&ctx.pool, *release_id, cover_file_id)
+                            .await
                     {
                         log.warn(&format!(
                             "Release {release_id} \"{release_title}\": saved cover but failed to assign: {e}"

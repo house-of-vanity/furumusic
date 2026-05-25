@@ -48,7 +48,9 @@ impl Job for ArtistImageBackfillJob {
 
         let count = result.rows_affected();
         if count > 0 {
-            log.info(&format!("Assigned images to {count} artists from release covers"));
+            log.info(&format!(
+                "Assigned images to {count} artists from release covers"
+            ));
         } else {
             log.info("All artists already have images (or no covers available)");
         }

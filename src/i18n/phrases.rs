@@ -187,6 +187,11 @@ translations! {
     jobs_back_to_list:        "Back to jobs"                     , "Назад к заданиям";
     jobs_run_detail:          "Run detail"                       , "Детали запуска";
     jobs_back_to_job:         "Back to job"                      , "Назад к заданию";
+    jobs_metadata_backfill_options: "Metadata backfill options"   , "Параметры обновления метадаты";
+    jobs_metadata_backfill_fields: "Fields to update"             , "Поля для обновления";
+    jobs_metadata_backfill_fill_missing: "Fill missing only"      , "Заполнить только пустые";
+    jobs_metadata_backfill_overwrite: "Overwrite existing values" , "Перезаписать существующие";
+    jobs_metadata_backfill_run: "Run metadata backfill"           , "Запустить обновление метадаты";
 
     // Review management
     reviews_heading:          "Pending Reviews"                  , "Ожидающие проверки";
@@ -194,6 +199,7 @@ translations! {
     reviews_status:           "Status"                           , "Статус";
     reviews_type:             "Type"                             , "Тип";
     reviews_input_path:       "Input"                            , "Файл";
+    reviews_tags:             "Tags"                             , "Теги";
     reviews_confidence:       "Confidence"                       , "Уверенность";
     reviews_approve:          "Approve"                          , "Подтвердить";
     reviews_reject:           "Reject"                           , "Отклонить";
@@ -204,6 +210,15 @@ translations! {
     reviews_clear_all:        "Clear all"                        , "Очистить все";
     reviews_clear_filtered:   "Clear shown"                      , "Очистить показанные";
     reviews_clear_confirm:    "Are you sure? This will delete the selected reviews." , "Вы уверены? Выбранные проверки будут удалены.";
+    reviews_select_all:       "Select shown"                     , "Выбрать показанные";
+    reviews_clear_selection:  "Clear selection"                  , "Снять выбор";
+    reviews_delete_selected:  "Delete selected"                  , "Удалить выбранные";
+    reviews_requeue_selected: "Re-queue selected"                , "В очередь выбранные";
+    reviews_selected_none:    "Selected: 0"                      , "Выбрано: 0";
+    reviews_selected_prefix:  "Selected"                         , "Выбрано";
+    reviews_none_selected_confirm: "Select at least one review."  , "Выберите хотя бы одну проверку.";
+    reviews_delete_selected_confirm: "Delete selected reviews?"   , "Удалить выбранные проверки?";
+    reviews_requeue_selected_confirm: "Re-queue selected reviews?" , "Поставить выбранные проверки в очередь?";
     reviews_back_to_list:     "Back to reviews"                  , "Назад к проверкам";
     reviews_filter_all:       "All"                              , "Все";
     reviews_filter_pending:   "Pending"                          , "Ожидают";

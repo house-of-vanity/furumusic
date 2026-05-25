@@ -30,7 +30,10 @@ impl Job for InboxDiscoverJob {
 
     async fn run(&self, ctx: &JobContext, log: &mut JobLog) -> anyhow::Result<()> {
         // Prevent overlapping discover runs
-        if DISCOVER_RUNNING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+        if DISCOVER_RUNNING
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
             log.info("Another inbox_discover is already running, skipping");
             return Ok(());
         }
@@ -82,31 +85,38 @@ impl Job for InboxDiscoverJob {
                     }
                     Ok(false) => {}
                     Err(e) => {
-                        log.warn(&format!("Error checking existing review for {}: {e}", input_path_str));
+                        log.warn(&format!(
+                            "Error checking existing review for {}: {e}",
+                            input_path_str
+                        ));
                         continue;
                     }
                 }
 
                 // Compute SHA-256 hash
                 let path_clone = file_path.to_path_buf();
-                let (hash, file_size) = match tokio::task::spawn_blocking(move || -> anyhow::Result<(String, i64)> {
-                    let data = std::fs::read(&path_clone)?;
-                    let digest = Sha256::digest(&data);
-                    let hash = format!("{:x}", digest);
-                    let size = data.len() as i64;
-                    Ok((hash, size))
-                })
-                .await?
-                {
-                    Ok(v) => v,
-                    Err(e) => {
-                        log.warn(&format!("Failed to hash {}: {e}", file_path.display()));
-                        continue;
-                    }
-                };
+                let (hash, file_size) =
+                    match tokio::task::spawn_blocking(move || -> anyhow::Result<(String, i64)> {
+                        let data = std::fs::read(&path_clone)?;
+                        let digest = Sha256::digest(&data);
+                        let hash = format!("{:x}", digest);
+                        let size = data.len() as i64;
+                        Ok((hash, size))
+                    })
+                    .await?
+                    {
+                        Ok(v) => v,
+                        Err(e) => {
+                            log.warn(&format!("Failed to hash {}: {e}", file_path.display()));
+                            continue;
+                        }
+                    };
 
                 // Skip if hash already in media_files
-                if crate::agent::rag::file_hash_exists(&ctx.pool, &hash).await.unwrap_or(false) {
+                if crate::agent::rag::file_hash_exists(&ctx.pool, &hash)
+                    .await
+                    .unwrap_or(false)
+                {
                     skipped_hash += 1;
                     continue;
                 }
@@ -120,7 +130,10 @@ impl Job for InboxDiscoverJob {
                 {
                     Ok(m) => m,
                     Err(e) => {
-                        log.warn(&format!("Failed to extract metadata from {}: {e}", file_path.display()));
+                        log.warn(&format!(
+                            "Failed to extract metadata from {}: {e}",
+                            file_path.display()
+                        ));
                         continue;
                     }
                 };
@@ -140,6 +153,9 @@ impl Job for InboxDiscoverJob {
                     "raw_year": raw_meta.year,
                     "raw_genre": raw_meta.genre,
                     "duration_secs": raw_meta.duration_secs,
+                    "audio_bitrate": raw_meta.audio_bitrate,
+                    "audio_sample_rate": raw_meta.audio_sample_rate,
+                    "audio_bit_depth": raw_meta.audio_bit_depth,
                     "path_title": hints.title,
                     "path_artist": hints.artist,
                     "path_album": hints.album,
@@ -172,7 +188,9 @@ impl Job for InboxDiscoverJob {
         // and no orchestrator is already running
         if discovered > 0 {
             if crate::jobs::inbox_process::is_orchestrator_running() {
-                log.info("New files discovered but inbox_process already running, it will pick them up");
+                log.info(
+                    "New files discovered but inbox_process already running, it will pick them up",
+                );
             } else {
                 log.info("Spawning inbox_process in background...");
                 let config = ctx.config.clone();
@@ -181,11 +199,15 @@ impl Job for InboxDiscoverJob {
                 let registry = ctx.registry.clone();
                 tokio::spawn(async move {
                     if let Err(e) = crate::scheduler::trigger_job_now(
-                        &config, &db, &pool, &registry, "inbox_process",
+                        &config,
+                        &db,
+                        &pool,
+                        &registry,
+                        "inbox_process",
                     )
                     .await
                     {
-                            tracing::error!("Background inbox_process trigger failed: {e}");
+                        tracing::error!("Background inbox_process trigger failed: {e}");
                     }
                 });
             }
@@ -214,10 +236,7 @@ pub fn group_by_folder(files: &[PathBuf]) -> Vec<(PathBuf, Vec<PathBuf>)> {
     groups
 }
 
-pub async fn collect_audio_files(
-    dir: &Path,
-    audio: &mut Vec<PathBuf>,
-) -> anyhow::Result<()> {
+pub async fn collect_audio_files(dir: &Path, audio: &mut Vec<PathBuf>) -> anyhow::Result<()> {
     let mut entries = tokio::fs::read_dir(dir).await?;
     while let Some(entry) = entries.next_entry().await? {
         let name = entry.file_name().to_string_lossy().into_owned();

@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use cot::db::Database;
-use cot::http::header::{ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, RANGE};
 use cot::http::StatusCode;
+use cot::http::header::{ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, RANGE};
 use cot::json::Json;
 use cot::request::extractors::Path;
 use cot::response::IntoResponse;
@@ -65,6 +65,8 @@ struct ArtistDetail {
     id: i64,
     name: String,
     image_url: Option<String>,
+    total_track_count: i64,
+    total_play_count: i64,
     releases: Vec<ReleaseCard>,
 }
 
@@ -177,7 +179,6 @@ struct LikeStatus {
 struct LikedIds {
     track_ids: Vec<i64>,
 }
-
 
 // ---------------------------------------------------------------------------
 // Query helpers
@@ -455,13 +456,12 @@ async fn artist_detail_handler(
         return Ok(json_error(StatusCode::NOT_FOUND, "artist not found"));
     };
 
-    let image_file_id: Option<i64> = sqlx::query_scalar(
-        "SELECT image_file_id FROM furumusic__artist WHERE id = $1",
-    )
-    .bind(artist_id)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let image_file_id: Option<i64> =
+        sqlx::query_scalar("SELECT image_file_id FROM furumusic__artist WHERE id = $1")
+            .bind(artist_id)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
 
     let releases = sqlx::query_as::<_, ReleaseRow>(
         r#"SELECT r.id, r.title::text as title, r.release_type::text as release_type,
@@ -489,10 +489,26 @@ async fn artist_detail_handler(
         })
         .collect();
 
+    let total_track_count = release_cards.iter().map(|r| r.track_count).sum();
+    let total_play_count: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*)
+           FROM furumusic__play_history ph
+           JOIN furumusic__track t ON t.id = ph.track_id
+           JOIN furumusic__release_artist ra ON ra.release_id = t.release_id
+           JOIN furumusic__release r ON r.id = t.release_id
+           WHERE ra.artist_id = $1 AND t.is_hidden = false AND r.is_hidden = false"#,
+    )
+    .bind(artist_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
     Json(ArtistDetail {
         id: artist.id,
         name: artist.name,
         image_url: cover_url(image_file_id),
+        total_track_count,
+        total_play_count,
         releases: release_cards,
     })
     .into_response()
@@ -648,13 +664,12 @@ async fn playlists_handler(
     };
 
     // Count liked tracks for the virtual Likes playlist
-    let likes_count: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM furumusic__user_liked_track WHERE user_id = $1",
-    )
-    .bind(user.id)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let likes_count: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM furumusic__user_liked_track WHERE user_id = $1")
+            .bind(user.id)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
 
     let mut cards = vec![PlaylistCard {
         id: -1,
@@ -909,10 +924,7 @@ async fn stream_handler(
                 .status(StatusCode::PARTIAL_CONTENT)
                 .header(CONTENT_TYPE, media.mime_type.as_str())
                 .header(ACCEPT_RANGES, "bytes")
-                .header(
-                    CONTENT_RANGE,
-                    format!("bytes {start}-{end}/{file_size}"),
-                )
+                .header(CONTENT_RANGE, format!("bytes {start}-{end}/{file_size}"))
                 .header(CONTENT_LENGTH, chunk_size.to_string())
                 .body(Body::fixed(data))
                 .expect("valid response");
@@ -969,11 +981,7 @@ fn parse_range(header: &str, file_size: u64) -> Option<(u64, u64)> {
     Some((start, end))
 }
 
-async fn read_file_range(
-    path: &std::path::Path,
-    start: u64,
-    length: u64,
-) -> cot::Result<Vec<u8>> {
+async fn read_file_range(path: &std::path::Path, start: u64, length: u64) -> cot::Result<Vec<u8>> {
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
     let mut file = tokio::fs::File::open(path)
@@ -1066,8 +1074,7 @@ async fn get_state_handler(
 
     let dto = match state {
         Some(s) => {
-            let queue: Vec<i64> =
-                serde_json::from_str(&s.queue_json).unwrap_or_default();
+            let queue: Vec<i64> = serde_json::from_str(&s.queue_json).unwrap_or_default();
             PlaybackStateDto {
                 current_track_id: s.current_track_id,
                 position_ms: s.position_ms,
@@ -1106,8 +1113,8 @@ async fn put_state_handler(
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
 
-    let queue_json = serde_json::to_string(&dto.queue)
-        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let queue_json =
+        serde_json::to_string(&dto.queue).map_err(|e| cot::Error::internal(e.to_string()))?;
 
     let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
@@ -1452,13 +1459,12 @@ async fn update_playlist_handler(
     };
     let playlist_id = path.0.id;
     // Verify ownership
-    let owner: Option<(i64,)> = sqlx::query_as(
-        "SELECT owner_id FROM furumusic__playlist WHERE id = $1",
-    )
-    .bind(playlist_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let owner: Option<(i64,)> =
+        sqlx::query_as("SELECT owner_id FROM furumusic__playlist WHERE id = $1")
+            .bind(playlist_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
     let Some(owner) = owner else {
         return Ok(json_error(StatusCode::NOT_FOUND, "playlist not found"));
     };
@@ -1479,13 +1485,15 @@ async fn update_playlist_handler(
         }
     }
     if let Some(desc) = &body.description {
-        sqlx::query("UPDATE furumusic__playlist SET description = $1, updated_at = $2 WHERE id = $3")
-            .bind(desc)
-            .bind(&now)
-            .bind(playlist_id)
-            .execute(pool)
-            .await
-            .map_err(|e| cot::Error::internal(e.to_string()))?;
+        sqlx::query(
+            "UPDATE furumusic__playlist SET description = $1, updated_at = $2 WHERE id = $3",
+        )
+        .bind(desc)
+        .bind(&now)
+        .bind(playlist_id)
+        .execute(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
     }
     Json(serde_json::json!({"ok": true})).into_response()
 }
@@ -1504,13 +1512,12 @@ async fn delete_playlist_handler(
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let playlist_id = path.0.id;
-    let owner: Option<(i64,)> = sqlx::query_as(
-        "SELECT owner_id FROM furumusic__playlist WHERE id = $1",
-    )
-    .bind(playlist_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let owner: Option<(i64,)> =
+        sqlx::query_as("SELECT owner_id FROM furumusic__playlist WHERE id = $1")
+            .bind(playlist_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
     let Some(owner) = owner else {
         return Ok(json_error(StatusCode::NOT_FOUND, "playlist not found"));
     };
@@ -1550,13 +1557,12 @@ async fn add_tracks_to_playlist_handler(
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let playlist_id = path.0.id;
-    let owner: Option<(i64,)> = sqlx::query_as(
-        "SELECT owner_id FROM furumusic__playlist WHERE id = $1",
-    )
-    .bind(playlist_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let owner: Option<(i64,)> =
+        sqlx::query_as("SELECT owner_id FROM furumusic__playlist WHERE id = $1")
+            .bind(playlist_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
     let Some(owner) = owner else {
         return Ok(json_error(StatusCode::NOT_FOUND, "playlist not found"));
     };
@@ -1617,13 +1623,12 @@ async fn remove_track_from_playlist_handler(
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let playlist_id = path.0.id;
-    let owner: Option<(i64,)> = sqlx::query_as(
-        "SELECT owner_id FROM furumusic__playlist WHERE id = $1",
-    )
-    .bind(playlist_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let owner: Option<(i64,)> =
+        sqlx::query_as("SELECT owner_id FROM furumusic__playlist WHERE id = $1")
+            .bind(playlist_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
     let Some(owner) = owner else {
         return Ok(json_error(StatusCode::NOT_FOUND, "playlist not found"));
     };
@@ -1631,14 +1636,12 @@ async fn remove_track_from_playlist_handler(
         return Ok(json_error(StatusCode::FORBIDDEN, "not your playlist"));
     }
 
-    sqlx::query(
-        "DELETE FROM furumusic__playlist_track WHERE playlist_id = $1 AND track_id = $2",
-    )
-    .bind(playlist_id)
-    .bind(body.track_id)
-    .execute(pool)
-    .await
-    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    sqlx::query("DELETE FROM furumusic__playlist_track WHERE playlist_id = $1 AND track_id = $2")
+        .bind(playlist_id)
+        .bind(body.track_id)
+        .execute(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
 
     // Re-number positions
     sqlx::query(
@@ -1682,14 +1685,12 @@ async fn toggle_like_track_handler(
     .map_err(|e| cot::Error::internal(e.to_string()))?;
 
     if existing.is_some() {
-        sqlx::query(
-            "DELETE FROM furumusic__user_liked_track WHERE user_id = $1 AND track_id = $2",
-        )
-        .bind(user.id)
-        .bind(track_id)
-        .execute(pool)
-        .await
-        .map_err(|e| cot::Error::internal(e.to_string()))?;
+        sqlx::query("DELETE FROM furumusic__user_liked_track WHERE user_id = $1 AND track_id = $2")
+            .bind(user.id)
+            .bind(track_id)
+            .execute(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
         Json(LikeStatus { liked: false }).into_response()
     } else {
         let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
@@ -1790,13 +1791,12 @@ async fn liked_ids_handler(
     let Some(user) = auth::get_session_user(&session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
-    let rows: Vec<(i64,)> = sqlx::query_as(
-        "SELECT track_id FROM furumusic__user_liked_track WHERE user_id = $1",
-    )
-    .bind(user.id)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let rows: Vec<(i64,)> =
+        sqlx::query_as("SELECT track_id FROM furumusic__user_liked_track WHERE user_id = $1")
+            .bind(user.id)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
 
     Json(LikedIds {
         track_ids: rows.into_iter().map(|r| r.0).collect(),
@@ -1883,24 +1883,24 @@ async fn tracks_by_ids_handler(
     let mut track_map: std::collections::HashMap<i64, TrackItem> = std::collections::HashMap::new();
     for t in tracks {
         let tid = t.id;
-        track_map.insert(tid, TrackItem {
-            id: t.id,
-            title: t.title,
-            track_number: t.track_number,
-            disc_number: t.disc_number,
-            duration_seconds: t.duration_seconds,
-            artists: track_main_artists.remove(&tid).unwrap_or_default(),
-            featured_artists: track_feat_artists.remove(&tid).unwrap_or_default(),
-            cover_url: track_cover_url(t.cover_file_id, t.release_cover_file_id),
-            stream_url: format!("/api/player/stream/{tid}"),
-        });
+        track_map.insert(
+            tid,
+            TrackItem {
+                id: t.id,
+                title: t.title,
+                track_number: t.track_number,
+                disc_number: t.disc_number,
+                duration_seconds: t.duration_seconds,
+                artists: track_main_artists.remove(&tid).unwrap_or_default(),
+                featured_artists: track_feat_artists.remove(&tid).unwrap_or_default(),
+                cover_url: track_cover_url(t.cover_file_id, t.release_cover_file_id),
+                stream_url: format!("/api/player/stream/{tid}"),
+            },
+        );
     }
 
     // Reorder results to match input order
-    let result: Vec<TrackItem> = ids
-        .iter()
-        .filter_map(|id| track_map.remove(id))
-        .collect();
+    let result: Vec<TrackItem> = ids.iter().filter_map(|id| track_map.remove(id)).collect();
 
     Json(result).into_response()
 }
@@ -1926,8 +1926,7 @@ impl App for PlayerApp {
 
     fn router(&self) -> Router {
         let pool_config = Arc::clone(&self.config);
-        let pool: Arc<tokio::sync::OnceCell<sqlx::PgPool>> =
-            Arc::new(tokio::sync::OnceCell::new());
+        let pool: Arc<tokio::sync::OnceCell<sqlx::PgPool>> = Arc::new(tokio::sync::OnceCell::new());
 
         Router::with_urls([
             // -- Artists (paginated) --
@@ -2077,7 +2076,10 @@ impl App for PlayerApp {
                 .put({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database, path: Path<PathId>, json: Json<UpdatePlaylistRequest>| {
+                    move |session: Session,
+                          db: Database,
+                          path: Path<PathId>,
+                          json: Json<UpdatePlaylistRequest>| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -2122,7 +2124,10 @@ impl App for PlayerApp {
                 post({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database, path: Path<PathId>, json: Json<AddTracksRequest>| {
+                    move |session: Session,
+                          db: Database,
+                          path: Path<PathId>,
+                          json: Json<AddTracksRequest>| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -2142,7 +2147,10 @@ impl App for PlayerApp {
                 .delete({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database, path: Path<PathId>, json: Json<RemoveTrackRequest>| {
+                    move |session: Session,
+                          db: Database,
+                          path: Path<PathId>,
+                          json: Json<RemoveTrackRequest>| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -2155,7 +2163,8 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            remove_track_from_playlist_handler(session, db, pg_pool, path, json).await
+                            remove_track_from_playlist_handler(session, db, pg_pool, path, json)
+                                .await
                         }
                     }
                 }),
@@ -2243,25 +2252,28 @@ impl App for PlayerApp {
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
                     let config = Arc::clone(&self.config);
-                    get(move |session: Session, db: Database,
+                    get(
+                        move |session: Session,
+                              db: Database,
                               path: Path<PathTrackId>,
                               request: cot::request::Request| {
-                        let pool = Arc::clone(&pool);
-                        let pool_config = Arc::clone(&pool_config);
-                        let config = Arc::clone(&config);
-                        async move {
-                            let pg_pool = pool
-                                .get_or_init(|| async {
-                                    sqlx::postgres::PgPoolOptions::new()
-                                        .max_connections(5)
-                                        .connect(&pool_config.database_url)
-                                        .await
-                                        .expect("player pool")
-                                })
-                                .await;
-                            stream_handler(session, db, pg_pool, &config, &request, path).await
-                        }
-                    })
+                            let pool = Arc::clone(&pool);
+                            let pool_config = Arc::clone(&pool_config);
+                            let config = Arc::clone(&config);
+                            async move {
+                                let pg_pool = pool
+                                    .get_or_init(|| async {
+                                        sqlx::postgres::PgPoolOptions::new()
+                                            .max_connections(5)
+                                            .connect(&pool_config.database_url)
+                                            .await
+                                            .expect("player pool")
+                                    })
+                                    .await;
+                                stream_handler(session, db, pg_pool, &config, &request, path).await
+                            }
+                        },
+                    )
                 },
                 "player_stream",
             ),
@@ -2272,24 +2284,25 @@ impl App for PlayerApp {
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
                     let config = Arc::clone(&self.config);
-                    get(move |session: Session, db: Database,
-                              path: Path<PathMediaFileId>| {
-                        let pool = Arc::clone(&pool);
-                        let pool_config = Arc::clone(&pool_config);
-                        let config = Arc::clone(&config);
-                        async move {
-                            let pg_pool = pool
-                                .get_or_init(|| async {
-                                    sqlx::postgres::PgPoolOptions::new()
-                                        .max_connections(5)
-                                        .connect(&pool_config.database_url)
-                                        .await
-                                        .expect("player pool")
-                                })
-                                .await;
-                            cover_handler(session, db, pg_pool, &config, path).await
-                        }
-                    })
+                    get(
+                        move |session: Session, db: Database, path: Path<PathMediaFileId>| {
+                            let pool = Arc::clone(&pool);
+                            let pool_config = Arc::clone(&pool_config);
+                            let config = Arc::clone(&config);
+                            async move {
+                                let pg_pool = pool
+                                    .get_or_init(|| async {
+                                        sqlx::postgres::PgPoolOptions::new()
+                                            .max_connections(5)
+                                            .connect(&pool_config.database_url)
+                                            .await
+                                            .expect("player pool")
+                                    })
+                                    .await;
+                                cover_handler(session, db, pg_pool, &config, path).await
+                            }
+                        },
+                    )
                 },
                 "player_cover",
             ),

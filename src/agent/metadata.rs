@@ -18,7 +18,10 @@ use super::dto::RawMetadata;
 /// Must be called from a blocking context (`spawn_blocking`).
 pub fn extract(path: &Path) -> anyhow::Result<RawMetadata> {
     match extract_via_symphonia(path) {
-        Ok(meta) => Ok(meta),
+        Ok(mut meta) => {
+            fill_average_bitrate(path, &mut meta);
+            Ok(meta)
+        }
         Err(e) => {
             let is_mp3 = path
                 .extension()
@@ -27,11 +30,29 @@ pub fn extract(path: &Path) -> anyhow::Result<RawMetadata> {
                 .unwrap_or(false);
             if is_mp3 {
                 tracing::debug!(error = %e, "Symphonia failed on MP3, falling back to id3 crate");
-                extract_mp3_via_id3(path)
+                let mut meta = extract_mp3_via_id3(path)?;
+                fill_average_bitrate(path, &mut meta);
+                Ok(meta)
             } else {
                 Err(e)
             }
         }
+    }
+}
+
+fn fill_average_bitrate(path: &Path, meta: &mut RawMetadata) {
+    if meta.audio_bitrate.is_some() {
+        return;
+    }
+    let Some(duration_secs) = meta.duration_secs.filter(|duration| *duration > 0.0) else {
+        return;
+    };
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return;
+    };
+    let kbps = ((metadata.len() as f64 * 8.0) / duration_secs / 1000.0).round();
+    if kbps.is_finite() && kbps > 0.0 && kbps <= i32::MAX as f64 {
+        meta.audio_bitrate = Some(kbps as i32);
     }
 }
 
@@ -68,17 +89,24 @@ fn extract_via_symphonia(path: &Path) -> anyhow::Result<RawMetadata> {
         }
     }
 
-    // Duration
-    meta.duration_secs = probed
+    let audio_track = probed
         .format
         .tracks()
         .iter()
-        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-        .and_then(|t| {
-            let n_frames = t.codec_params.n_frames?;
-            let tb = t.codec_params.time_base?;
+        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL);
+
+    if let Some(track) = audio_track {
+        let params = &track.codec_params;
+        meta.duration_secs = params.n_frames.and_then(|n_frames| {
+            let tb = params.time_base?;
             Some(n_frames as f64 * tb.numer as f64 / tb.denom as f64)
         });
+        meta.audio_sample_rate = params.sample_rate.and_then(|rate| i32::try_from(rate).ok());
+        meta.audio_bit_depth = params
+            .bits_per_sample
+            .or(params.bits_per_coded_sample)
+            .and_then(|bits| i32::try_from(bits).ok());
+    }
 
     Ok(meta)
 }

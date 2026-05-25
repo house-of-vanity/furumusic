@@ -10,8 +10,5 @@ fn main() {
         .output()
         .expect("failed to run rustc --version");
     let version = String::from_utf8_lossy(&output.stdout);
-    println!(
-        "cargo::rustc-env=FURU_RUSTC_VERSION={}",
-        version.trim()
-    );
+    println!("cargo::rustc-env=FURU_RUSTC_VERSION={}", version.trim());
 }

@@ -2,9 +2,15 @@ mod phrases;
 
 pub use phrases::Translations;
 
-use cot::request::extractors::FromRequestHead;
 use cot::request::RequestHead;
+use cot::request::extractors::FromRequestHead;
 use serde::{Deserialize, Serialize};
+
+impl Translations {
+    pub fn app_version(&self) -> &'static str {
+        env!("CARGO_PKG_VERSION")
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Lang enum
@@ -77,7 +83,10 @@ const COOKIE_NAME: &str = "furu_lang";
 
 /// Build a `Set-Cookie` header value that persists the language choice for 1 year.
 pub fn lang_cookie(lang: Lang) -> String {
-    format!("{COOKIE_NAME}={}; Path=/; SameSite=Lax; Max-Age=31536000", lang.code())
+    format!(
+        "{COOKIE_NAME}={}; Path=/; SameSite=Lax; Max-Age=31536000",
+        lang.code()
+    )
 }
 
 /// Parse `furu_lang` from the `Cookie` request header.
@@ -203,10 +212,7 @@ mod tests {
 
     #[test]
     fn parse_unknown_falls_through() {
-        assert_eq!(
-            parse_accept_language("de;q=1.0,ru;q=0.5"),
-            Some(Lang::Ru)
-        );
+        assert_eq!(parse_accept_language("de;q=1.0,ru;q=0.5"), Some(Lang::Ru));
         assert_eq!(parse_accept_language("de,fr,ja"), None);
     }
 

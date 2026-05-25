@@ -34,10 +34,7 @@ struct MeResponse {
     role: String,
 }
 
-async fn me_handler(
-    session: Session,
-    db: Database,
-) -> cot::Result<cot::response::Response> {
+async fn me_handler(session: Session, db: Database) -> cot::Result<cot::response::Response> {
     let Some(user) = auth::get_session_user(&session, &db).await else {
         return Ok(json_error(
             cot::http::StatusCode::UNAUTHORIZED,
@@ -65,8 +62,10 @@ impl App for ApiApp {
     }
 
     fn router(&self) -> Router {
-        Router::with_urls([
-            Route::with_api_handler_and_name("/me", api_get(me_handler), "api_me"),
-        ])
+        Router::with_urls([Route::with_api_handler_and_name(
+            "/me",
+            api_get(me_handler),
+            "api_me",
+        )])
     }
 }

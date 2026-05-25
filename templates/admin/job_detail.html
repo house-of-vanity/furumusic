@@ -13,9 +13,12 @@
 </table>
 
 <div style="margin: 1rem 0; display: flex; gap: .5rem; align-items: flex-end;">
+    {% if job.name_str() != "metadata_backfill" %}
     <form method="post" action="/admin/jobs/{{ job.name_str() }}/run" style="margin:0;">
         <button type="submit" style="padding:.4rem 1rem; background:#007bff; color:#fff; border:none; border-radius:4px; cursor:pointer;">{{ t.jobs_run_now }}</button>
     </form>
+    {% endif %}
+    {% if job.name_str() != "metadata_backfill" %}
     <form method="post" action="/admin/jobs/{{ job.name_str() }}/toggle" style="margin:0;">
         {% if job.enabled() %}
         <button type="submit" style="padding:.4rem 1rem; background:#dc3545; color:#fff; border:none; border-radius:4px; cursor:pointer;">{{ t.jobs_disable }}</button>
@@ -23,14 +26,47 @@
         <button type="submit" style="padding:.4rem 1rem; background:#28a745; color:#fff; border:none; border-radius:4px; cursor:pointer;">{{ t.jobs_enable }}</button>
         {% endif %}
     </form>
+    {% endif %}
 </div>
 
-<h2>{{ t.jobs_cron }}</h2>
-<p style="font-size:.85rem;color:#666;margin-bottom:.5rem;">{{ t.jobs_cron_help }}</p>
-<form method="post" action="/admin/jobs/{{ job.name_str() }}/cron" style="display:flex;gap:.5rem;align-items:center;margin-bottom:1.5rem;">
-    <input name="cron_expression" value="{{ job.cron_expression_str() }}" style="width:20em;font-family:monospace;">
-    <button type="submit" style="padding:.4rem 1rem; background:#6c757d; color:#fff; border:none; border-radius:4px; cursor:pointer;">{{ t.jobs_cron_update }}</button>
+{% if job.name_str() == "metadata_backfill" %}
+<h2>{{ t.jobs_metadata_backfill_options }}</h2>
+<form method="post" action="/admin/jobs/metadata_backfill/run-options" style="margin:0 0 1.5rem; padding:1rem; background:#fff; border:1px solid #e0e0e0; border-radius:6px;">
+    <fieldset style="border:0; margin:0 0 .75rem; padding:0;">
+        <legend style="font-weight:600; margin-bottom:.5rem;">{{ t.jobs_metadata_backfill_fields }}</legend>
+        <label style="display:inline-flex; gap:.35rem; align-items:center; margin-right:1rem; margin-bottom:.4rem;">
+            <input type="checkbox" name="audio_bitrate" checked> audio_bitrate
+        </label>
+        <label style="display:inline-flex; gap:.35rem; align-items:center; margin-right:1rem; margin-bottom:.4rem;">
+            <input type="checkbox" name="audio_sample_rate" checked> audio_sample_rate
+        </label>
+        <label style="display:inline-flex; gap:.35rem; align-items:center; margin-right:1rem; margin-bottom:.4rem;">
+            <input type="checkbox" name="audio_bit_depth" checked> audio_bit_depth
+        </label>
+        <label style="display:inline-flex; gap:.35rem; align-items:center; margin-right:1rem; margin-bottom:.4rem;">
+            <input type="checkbox" name="duration_seconds" checked> duration_seconds
+        </label>
+    </fieldset>
+    <div style="display:flex; gap:1rem; align-items:center; margin-bottom:.9rem;">
+        <label style="display:inline-flex; gap:.35rem; align-items:center;">
+            <input type="radio" name="mode" value="fill_missing" checked> {{ t.jobs_metadata_backfill_fill_missing }}
+        </label>
+        <label style="display:inline-flex; gap:.35rem; align-items:center;">
+            <input type="radio" name="mode" value="overwrite"> {{ t.jobs_metadata_backfill_overwrite }}
+        </label>
+    </div>
+    <button type="submit" style="padding:.45rem 1rem; background:#007bff; color:#fff; border:none; border-radius:4px; cursor:pointer;">{{ t.jobs_metadata_backfill_run }}</button>
 </form>
+{% endif %}
+
+{% if job.name_str() != "metadata_backfill" %}
+    <h2>{{ t.jobs_cron }}</h2>
+    <p style="font-size:.85rem;color:#666;margin-bottom:.5rem;">{{ t.jobs_cron_help }}</p>
+    <form method="post" action="/admin/jobs/{{ job.name_str() }}/cron" style="display:flex;gap:.5rem;align-items:center;margin-bottom:1.5rem;">
+        <input name="cron_expression" value="{{ job.cron_expression_str() }}" style="width:20em;font-family:monospace;">
+        <button type="submit" style="padding:.4rem 1rem; background:#6c757d; color:#fff; border:none; border-radius:4px; cursor:pointer;">{{ t.jobs_cron_update }}</button>
+    </form>
+{% endif %}
 
 <h2>{{ t.jobs_run_history }}</h2>
 {% if runs.is_empty() %}

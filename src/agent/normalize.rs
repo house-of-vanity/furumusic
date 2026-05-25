@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use super::dto::{FolderContext, NormalizedFields, PathHints, RawMetadata, SimilarArtist, SimilarRelease};
+use super::dto::{
+    FolderContext, NormalizedFields, PathHints, RawMetadata, SimilarArtist, SimilarRelease,
+};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -171,18 +173,40 @@ fn estimate_batch_tokens(
     let mut per_file_tokens: u64 = 0;
     for f in files {
         let mut chars: u64 = 40 + f.filename.len() as u64; // header
-        if let Some(v) = &f.raw.title { chars += 10 + v.len() as u64; }
-        if let Some(v) = &f.raw.artist { chars += 12 + v.len() as u64; }
-        if let Some(v) = &f.raw.album { chars += 12 + v.len() as u64; }
-        if f.raw.year.is_some() { chars += 12; }
-        if f.raw.track_number.is_some() { chars += 18; }
-        if let Some(v) = &f.raw.genre { chars += 10 + v.len() as u64; }
+        if let Some(v) = &f.raw.title {
+            chars += 10 + v.len() as u64;
+        }
+        if let Some(v) = &f.raw.artist {
+            chars += 12 + v.len() as u64;
+        }
+        if let Some(v) = &f.raw.album {
+            chars += 12 + v.len() as u64;
+        }
+        if f.raw.year.is_some() {
+            chars += 12;
+        }
+        if f.raw.track_number.is_some() {
+            chars += 18;
+        }
+        if let Some(v) = &f.raw.genre {
+            chars += 10 + v.len() as u64;
+        }
         // hints
-        if let Some(v) = &f.hints.artist { chars += 16 + v.len() as u64; }
-        if let Some(v) = &f.hints.album { chars += 16 + v.len() as u64; }
-        if let Some(v) = &f.hints.title { chars += 15 + v.len() as u64; }
-        if f.hints.year.is_some() { chars += 14; }
-        if f.hints.track_number.is_some() { chars += 20; }
+        if let Some(v) = &f.hints.artist {
+            chars += 16 + v.len() as u64;
+        }
+        if let Some(v) = &f.hints.album {
+            chars += 16 + v.len() as u64;
+        }
+        if let Some(v) = &f.hints.title {
+            chars += 15 + v.len() as u64;
+        }
+        if f.hints.year.is_some() {
+            chars += 14;
+        }
+        if f.hints.track_number.is_some() {
+            chars += 20;
+        }
         per_file_tokens += chars / 4;
         // Expected response per file (~150 tokens)
         per_file_tokens += 150;
@@ -210,7 +234,10 @@ fn build_batch_user_message(
     if !similar_artists.is_empty() {
         msg.push_str("## Existing artists in database\n");
         for a in similar_artists {
-            msg.push_str(&format!("- \"{}\" (similarity: {:.2})\n", a.name, a.similarity));
+            msg.push_str(&format!(
+                "- \"{}\" (similarity: {:.2})\n",
+                a.name, a.similarity
+            ));
         }
         msg.push('\n');
     }
@@ -219,7 +246,10 @@ fn build_batch_user_message(
         msg.push_str("## Existing releases in database\n");
         for r in similar_releases {
             let year_str = r.year.map(|y| format!(", year: {y}")).unwrap_or_default();
-            msg.push_str(&format!("- \"{}\" (similarity: {:.2}{})\n", r.title, r.similarity, year_str));
+            msg.push_str(&format!(
+                "- \"{}\" (similarity: {:.2}{})\n",
+                r.title, r.similarity, year_str
+            ));
         }
         msg.push('\n');
     }
@@ -230,12 +260,24 @@ fn build_batch_user_message(
     for f in files {
         msg.push_str(&format!("### {}\n", f.filename));
 
-        if let Some(v) = &f.raw.title { msg.push_str(&format!("Title: \"{v}\"\n")); }
-        if let Some(v) = &f.raw.artist { msg.push_str(&format!("Artist: \"{v}\"\n")); }
-        if let Some(v) = &f.raw.album { msg.push_str(&format!("Release: \"{v}\"\n")); }
-        if let Some(v) = f.raw.year { msg.push_str(&format!("Year: {v}\n")); }
-        if let Some(v) = f.raw.track_number { msg.push_str(&format!("Track: {v}\n")); }
-        if let Some(v) = &f.raw.genre { msg.push_str(&format!("Genre: \"{v}\"\n")); }
+        if let Some(v) = &f.raw.title {
+            msg.push_str(&format!("Title: \"{v}\"\n"));
+        }
+        if let Some(v) = &f.raw.artist {
+            msg.push_str(&format!("Artist: \"{v}\"\n"));
+        }
+        if let Some(v) = &f.raw.album {
+            msg.push_str(&format!("Release: \"{v}\"\n"));
+        }
+        if let Some(v) = f.raw.year {
+            msg.push_str(&format!("Year: {v}\n"));
+        }
+        if let Some(v) = f.raw.track_number {
+            msg.push_str(&format!("Track: {v}\n"));
+        }
+        if let Some(v) = &f.raw.genre {
+            msg.push_str(&format!("Genre: \"{v}\"\n"));
+        }
 
         // Path hints (only if different from tag metadata)
         let has_hints = f.hints.artist.is_some()
@@ -244,11 +286,21 @@ fn build_batch_user_message(
             || f.hints.year.is_some()
             || f.hints.track_number.is_some();
         if has_hints {
-            if let Some(v) = &f.hints.artist { msg.push_str(&format!("Path artist: \"{v}\"\n")); }
-            if let Some(v) = &f.hints.album { msg.push_str(&format!("Path release: \"{v}\"\n")); }
-            if let Some(v) = &f.hints.title { msg.push_str(&format!("Path title: \"{v}\"\n")); }
-            if let Some(v) = f.hints.year { msg.push_str(&format!("Path year: {v}\n")); }
-            if let Some(v) = f.hints.track_number { msg.push_str(&format!("Path track: {v}\n")); }
+            if let Some(v) = &f.hints.artist {
+                msg.push_str(&format!("Path artist: \"{v}\"\n"));
+            }
+            if let Some(v) = &f.hints.album {
+                msg.push_str(&format!("Path release: \"{v}\"\n"));
+            }
+            if let Some(v) = &f.hints.title {
+                msg.push_str(&format!("Path title: \"{v}\"\n"));
+            }
+            if let Some(v) = f.hints.year {
+                msg.push_str(&format!("Path year: {v}\n"));
+            }
+            if let Some(v) = f.hints.track_number {
+                msg.push_str(&format!("Path track: {v}\n"));
+            }
         }
         msg.push('\n');
     }
@@ -272,7 +324,11 @@ pub async fn normalize_batch(
 ) -> anyhow::Result<BatchNormalizeResult> {
     // Estimate tokens
     let estimated = estimate_batch_tokens(
-        system_prompt, &files, similar_artists, similar_releases, folder_ctx,
+        system_prompt,
+        &files,
+        similar_artists,
+        similar_releases,
+        folder_ctx,
     );
 
     // If over 80% of context limit and more than 1 file, split
@@ -290,14 +346,30 @@ pub async fn normalize_batch(
         let left = files_vec;
 
         let left_result = Box::pin(normalize_batch(
-            llm_url, llm_model, llm_auth, system_prompt, context_limit,
-            left, similar_artists, similar_releases, folder_ctx,
-        )).await?;
+            llm_url,
+            llm_model,
+            llm_auth,
+            system_prompt,
+            context_limit,
+            left,
+            similar_artists,
+            similar_releases,
+            folder_ctx,
+        ))
+        .await?;
 
         let right_result = Box::pin(normalize_batch(
-            llm_url, llm_model, llm_auth, system_prompt, context_limit,
-            right, similar_artists, similar_releases, folder_ctx,
-        )).await?;
+            llm_url,
+            llm_model,
+            llm_auth,
+            system_prompt,
+            context_limit,
+            right,
+            similar_artists,
+            similar_releases,
+            folder_ctx,
+        ))
+        .await?;
 
         // Merge results
         let mut results = left_result.results;
@@ -312,20 +384,32 @@ pub async fn normalize_batch(
     }
 
     // Build and send
-    let user_message = build_batch_user_message(
-        &files, similar_artists, similar_releases, folder_ctx,
-    );
+    let user_message =
+        build_batch_user_message(&files, similar_artists, similar_releases, folder_ctx);
 
     let messages = vec![
-        ChatMessage { role: "system".into(), content: system_prompt.to_owned() },
-        ChatMessage { role: "user".into(), content: user_message },
+        ChatMessage {
+            role: "system".into(),
+            content: system_prompt.to_owned(),
+        },
+        ChatMessage {
+            role: "user".into(),
+            content: user_message,
+        },
     ];
 
     let start = std::time::Instant::now();
     let call_result = call_llm_chat(
-        llm_url, llm_model, &messages,
-        if llm_auth.is_empty() { None } else { Some(llm_auth) },
-    ).await;
+        llm_url,
+        llm_model,
+        &messages,
+        if llm_auth.is_empty() {
+            None
+        } else {
+            Some(llm_auth)
+        },
+    )
+    .await;
     let duration_ms = start.elapsed().as_millis() as u64;
 
     // If LLM error and batch > 1, try splitting (handles context overflow errors)
@@ -349,13 +433,29 @@ pub async fn normalize_batch(
                 let left = files_vec;
 
                 let left_result = Box::pin(normalize_batch(
-                    llm_url, llm_model, llm_auth, system_prompt, context_limit,
-                    left, similar_artists, similar_releases, folder_ctx,
-                )).await?;
+                    llm_url,
+                    llm_model,
+                    llm_auth,
+                    system_prompt,
+                    context_limit,
+                    left,
+                    similar_artists,
+                    similar_releases,
+                    folder_ctx,
+                ))
+                .await?;
                 let right_result = Box::pin(normalize_batch(
-                    llm_url, llm_model, llm_auth, system_prompt, context_limit,
-                    right, similar_artists, similar_releases, folder_ctx,
-                )).await?;
+                    llm_url,
+                    llm_model,
+                    llm_auth,
+                    system_prompt,
+                    context_limit,
+                    right,
+                    similar_artists,
+                    similar_releases,
+                    folder_ctx,
+                ))
+                .await?;
 
                 let mut results = left_result.results;
                 results.extend(right_result.results);
@@ -363,7 +463,8 @@ pub async fn normalize_batch(
                     results,
                     model: left_result.model,
                     prompt_tokens: left_result.prompt_tokens + right_result.prompt_tokens,
-                    completion_tokens: left_result.completion_tokens + right_result.completion_tokens,
+                    completion_tokens: left_result.completion_tokens
+                        + right_result.completion_tokens,
                     duration_ms: left_result.duration_ms + right_result.duration_ms,
                 });
             }
@@ -398,9 +499,7 @@ fn parse_batch_response(
 
     // Strip markdown code fences if present
     let json_str = if cleaned.starts_with("```") {
-        let start = cleaned.find('[')
-            .or_else(|| cleaned.find('{'))
-            .unwrap_or(0);
+        let start = cleaned.find('[').or_else(|| cleaned.find('{')).unwrap_or(0);
         let end_bracket = cleaned.rfind(']').map(|i| i + 1);
         let end_brace = cleaned.rfind('}').map(|i| i + 1);
         let end = end_bracket.or(end_brace).unwrap_or(cleaned.len());

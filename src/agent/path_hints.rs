@@ -113,11 +113,8 @@ fn parse_album_with_year(dir: &str) -> (String, Option<i32>) {
                 let inside = &dir[start + 1..start + end];
                 if let Ok(year) = inside.trim().parse::<i32>() {
                     if (1900..=2100).contains(&year) {
-                        let album = format!(
-                            "{}{}",
-                            &dir[..start].trim(),
-                            &dir[start + end + 1..].trim()
-                        );
+                        let album =
+                            format!("{}{}", &dir[..start].trim(), &dir[start + end + 1..].trim());
                         let album = album.trim().to_owned();
                         return (album, Some(year));
                     }

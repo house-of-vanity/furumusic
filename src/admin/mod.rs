@@ -2,6 +2,7 @@ pub mod views;
 
 use std::sync::Arc;
 
+use cot::App;
 use cot::db::Database;
 use cot::db::migrations::SyncDynMigration;
 use cot::json::Json;
@@ -10,7 +11,6 @@ use cot::response::IntoResponse;
 use cot::router::method::get;
 use cot::router::{Route, Router};
 use cot::session::Session;
-use cot::App;
 use serde::Deserialize;
 
 use crate::auth;
@@ -18,7 +18,10 @@ use crate::config::AppConfig;
 use crate::i18n::I18n;
 use crate::scheduler::{JobRegistry, SchedulerHandle};
 use crate::user::User;
-use views::{ArtistForm, CronForm, OidcSettingsForm, ReleaseForm, SetImageBody, SetupForm, UploadImageBody, UserForm};
+use views::{
+    ArtistForm, CronForm, MetadataBackfillForm, OidcSettingsForm, ReleaseForm, ReviewsBulkForm,
+    SetImageBody, SetupForm, UploadImageBody, UserForm,
+};
 
 #[derive(Debug, Deserialize)]
 struct ReviewsQuery {
@@ -59,7 +62,11 @@ impl AdminApp {
         registry: Arc<JobRegistry>,
         scheduler_handle: Arc<tokio::sync::OnceCell<Arc<SchedulerHandle>>>,
     ) -> Self {
-        Self { config, registry, scheduler_handle }
+        Self {
+            config,
+            registry,
+            scheduler_handle,
+        }
     }
 }
 
@@ -537,6 +544,33 @@ impl App for AdminApp {
                 "admin_jobs",
             ),
             Route::with_handler_and_name(
+                "/jobs/metadata_backfill/run-options",
+                cot::router::method::post({
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    move |session: Session, db: Database,
+                          form: RequestForm<MetadataBackfillForm>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let admin = match auth::require_admin_or_redirect(&session, &db).await {
+                                Ok(u) => u,
+                                Err(resp) => return Ok(resp),
+                            };
+                            let pg_pool = pool.get_or_init(|| async {
+                                sqlx::postgres::PgPoolOptions::new()
+                                    .max_connections(3)
+                                    .connect(&pool_config.database_url)
+                                    .await
+                                    .expect("admin pool")
+                            }).await;
+                            views::metadata_backfill_run(admin, &db, pg_pool, form).await
+                        }
+                    }
+                }),
+                "admin_metadata_backfill_run",
+            ),
+            Route::with_handler_and_name(
                 "/jobs/{name}/run",
                 cot::router::method::post({
                     let handle = Arc::clone(&self.scheduler_handle);
@@ -650,6 +684,21 @@ impl App for AdminApp {
                     },
                 ),
                 "admin_reviews_clear",
+            ),
+            Route::with_handler_and_name(
+                "/reviews/bulk",
+                cot::router::method::post(
+                    |session: Session, db: Database,
+                     form: RequestForm<ReviewsBulkForm>| async move {
+                        let admin =
+                            match auth::require_admin_or_redirect(&session, &db).await {
+                                Ok(u) => u,
+                                Err(resp) => return Ok(resp),
+                            };
+                        views::reviews_bulk(admin, &db, form).await
+                    },
+                ),
+                "admin_reviews_bulk",
             ),
             // -- Reviews ------------------------------------------------------
             Route::with_handler_and_name(

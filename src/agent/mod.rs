@@ -27,11 +27,7 @@ pub struct AgentProbeResult {
 
 /// Send a lightweight "introduce yourself" prompt to the LLM and return the
 /// response together with timing / usage statistics when available.
-pub async fn probe_llm(
-    llm_url: &str,
-    llm_model: &str,
-    llm_auth: &str,
-) -> AgentProbeResult {
+pub async fn probe_llm(llm_url: &str, llm_model: &str, llm_auth: &str) -> AgentProbeResult {
     let start = std::time::Instant::now();
 
     let client = match reqwest::Client::builder()
@@ -85,7 +81,10 @@ pub async fn probe_llm(
         let body_text = resp.text().await.unwrap_or_default();
         return AgentProbeResult {
             latency_ms,
-            error: format!("HTTP {status}: {}", body_text.chars().take(300).collect::<String>()),
+            error: format!(
+                "HTTP {status}: {}",
+                body_text.chars().take(300).collect::<String>()
+            ),
             ..Default::default()
         };
     }

@@ -4,7 +4,6 @@
 /// content (files, artists, releases, tracks, genres), user interactions
 /// (likes, follows, playlists, play history, playback state), and the
 /// AI-agent processing queue.
-
 use cot::db::{Auto, Database, LimitedString, Model};
 
 // ---------------------------------------------------------------------------
@@ -99,11 +98,7 @@ impl Artist {
         Ok(artist)
     }
 
-    pub async fn update_name(
-        &mut self,
-        db: &Database,
-        name: &str,
-    ) -> cot::db::Result<()> {
+    pub async fn update_name(&mut self, db: &Database, name: &str) -> cot::db::Result<()> {
         self.name = LimitedString::new(name).unwrap();
         self.name_sort = LimitedString::new(&normalize_name(name)).unwrap();
         self.updated_at = now_iso();
@@ -711,37 +706,67 @@ pub mod db_migrations {
     impl migrations::Migration for M0006CreateMediaFile {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0006_create_media_file";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration(
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
                 "furumusic",
                 "m_0005_oidc_link_indexes",
-            ),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::create_model()
-                .table_name(Identifier::new("furumusic__media_file"))
-                .fields(&[
-                    Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
-                        .primary_key()
-                        .auto(),
-                    Field::new(Identifier::new("file_type"), <LimitedString<32> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("file_path"), <String as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("original_filename"), <LimitedString<255> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("mime_type"), <LimitedString<100> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("file_size_bytes"), <i64 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("sha256_hash"), <LimitedString<64> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("audio_format"), <LimitedString<32> as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("audio_bitrate"), <i32 as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("audio_sample_rate"), <i32 as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("audio_bit_depth"), <i32 as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("created_at"), <LimitedString<32> as DatabaseField>::TYPE),
-                ])
-                .build(),
-        ];
+            )];
+        const OPERATIONS: &'static [Operation] = &[Operation::create_model()
+            .table_name(Identifier::new("furumusic__media_file"))
+            .fields(&[
+                Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
+                    .primary_key()
+                    .auto(),
+                Field::new(
+                    Identifier::new("file_type"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("file_path"),
+                    <String as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("original_filename"),
+                    <LimitedString<255> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("mime_type"),
+                    <LimitedString<100> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("file_size_bytes"),
+                    <i64 as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("sha256_hash"),
+                    <LimitedString<64> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("audio_format"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(
+                    Identifier::new("audio_bitrate"),
+                    <i32 as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(
+                    Identifier::new("audio_sample_rate"),
+                    <i32 as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(
+                    Identifier::new("audio_bit_depth"),
+                    <i32 as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(
+                    Identifier::new("created_at"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+            ])
+            .build()];
     }
 
     // -- M0007: create furumusic__artist --------------------------------------
@@ -752,29 +777,41 @@ pub mod db_migrations {
     impl migrations::Migration for M0007CreateArtist {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0007_create_artist";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration(
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
                 "furumusic",
                 "m_0006_create_media_file",
-            ),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::create_model()
-                .table_name(Identifier::new("furumusic__artist"))
-                .fields(&[
-                    Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
-                        .primary_key()
-                        .auto(),
-                    Field::new(Identifier::new("name"), <LimitedString<255> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("name_sort"), <LimitedString<255> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("image_file_id"), <i64 as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("is_hidden"), <bool as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("created_at"), <LimitedString<32> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("updated_at"), <LimitedString<32> as DatabaseField>::TYPE),
-                ])
-                .build(),
-        ];
+            )];
+        const OPERATIONS: &'static [Operation] = &[Operation::create_model()
+            .table_name(Identifier::new("furumusic__artist"))
+            .fields(&[
+                Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
+                    .primary_key()
+                    .auto(),
+                Field::new(
+                    Identifier::new("name"),
+                    <LimitedString<255> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("name_sort"),
+                    <LimitedString<255> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("image_file_id"),
+                    <i64 as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(Identifier::new("is_hidden"), <bool as DatabaseField>::TYPE),
+                Field::new(
+                    Identifier::new("created_at"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("updated_at"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+            ])
+            .build()];
     }
 
     // -- M0008: create furumusic__release -------------------------------------
@@ -785,36 +822,53 @@ pub mod db_migrations {
     impl migrations::Migration for M0008CreateRelease {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0008_create_release";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration(
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
                 "furumusic",
                 "m_0007_create_artist",
-            ),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::create_model()
-                .table_name(Identifier::new("furumusic__release"))
-                .fields(&[
-                    Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
-                        .primary_key()
-                        .auto(),
-                    Field::new(Identifier::new("title"), <LimitedString<255> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("title_sort"), <LimitedString<255> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("release_type"), <LimitedString<32> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("year"), <i32 as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("cover_file_id"), <i64 as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("total_tracks"), <i32 as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("total_discs"), <i32 as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("is_hidden"), <bool as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("created_at"), <LimitedString<32> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("updated_at"), <LimitedString<32> as DatabaseField>::TYPE),
-                ])
-                .build(),
-        ];
+            )];
+        const OPERATIONS: &'static [Operation] = &[Operation::create_model()
+            .table_name(Identifier::new("furumusic__release"))
+            .fields(&[
+                Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
+                    .primary_key()
+                    .auto(),
+                Field::new(
+                    Identifier::new("title"),
+                    <LimitedString<255> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("title_sort"),
+                    <LimitedString<255> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("release_type"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+                Field::new(Identifier::new("year"), <i32 as DatabaseField>::TYPE).set_null(true),
+                Field::new(
+                    Identifier::new("cover_file_id"),
+                    <i64 as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(
+                    Identifier::new("total_tracks"),
+                    <i32 as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(Identifier::new("total_discs"), <i32 as DatabaseField>::TYPE)
+                    .set_null(true),
+                Field::new(Identifier::new("is_hidden"), <bool as DatabaseField>::TYPE),
+                Field::new(
+                    Identifier::new("created_at"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("updated_at"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+            ])
+            .build()];
     }
 
     // -- M0009: create furumusic__release_artist ------------------------------
@@ -825,25 +879,22 @@ pub mod db_migrations {
     impl migrations::Migration for M0009CreateReleaseArtist {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0009_create_release_artist";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration(
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
                 "furumusic",
                 "m_0008_create_release",
-            ),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::create_model()
-                .table_name(Identifier::new("furumusic__release_artist"))
-                .fields(&[
-                    Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
-                        .primary_key()
-                        .auto(),
-                    Field::new(Identifier::new("release_id"), <i64 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("artist_id"), <i64 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("position"), <i32 as DatabaseField>::TYPE),
-                ])
-                .build(),
-        ];
+            )];
+        const OPERATIONS: &'static [Operation] = &[Operation::create_model()
+            .table_name(Identifier::new("furumusic__release_artist"))
+            .fields(&[
+                Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
+                    .primary_key()
+                    .auto(),
+                Field::new(Identifier::new("release_id"), <i64 as DatabaseField>::TYPE),
+                Field::new(Identifier::new("artist_id"), <i64 as DatabaseField>::TYPE),
+                Field::new(Identifier::new("position"), <i32 as DatabaseField>::TYPE),
+            ])
+            .build()];
     }
 
     // -- M0010: create furumusic__track ---------------------------------------
@@ -854,38 +905,58 @@ pub mod db_migrations {
     impl migrations::Migration for M0010CreateTrack {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0010_create_track";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration(
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
                 "furumusic",
                 "m_0009_create_release_artist",
-            ),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::create_model()
-                .table_name(Identifier::new("furumusic__track"))
-                .fields(&[
-                    Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
-                        .primary_key()
-                        .auto(),
-                    Field::new(Identifier::new("title"), <LimitedString<255> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("title_sort"), <LimitedString<255> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("release_id"), <i64 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("track_number"), <i32 as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("disc_number"), <i32 as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("duration_seconds"), <f64 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("audio_file_id"), <i64 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("cover_file_id"), <i64 as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("year"), <i32 as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("is_hidden"), <bool as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("created_at"), <LimitedString<32> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("updated_at"), <LimitedString<32> as DatabaseField>::TYPE),
-                ])
-                .build(),
-        ];
+            )];
+        const OPERATIONS: &'static [Operation] = &[Operation::create_model()
+            .table_name(Identifier::new("furumusic__track"))
+            .fields(&[
+                Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
+                    .primary_key()
+                    .auto(),
+                Field::new(
+                    Identifier::new("title"),
+                    <LimitedString<255> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("title_sort"),
+                    <LimitedString<255> as DatabaseField>::TYPE,
+                ),
+                Field::new(Identifier::new("release_id"), <i64 as DatabaseField>::TYPE),
+                Field::new(
+                    Identifier::new("track_number"),
+                    <i32 as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(Identifier::new("disc_number"), <i32 as DatabaseField>::TYPE)
+                    .set_null(true),
+                Field::new(
+                    Identifier::new("duration_seconds"),
+                    <f64 as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("audio_file_id"),
+                    <i64 as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("cover_file_id"),
+                    <i64 as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(Identifier::new("year"), <i32 as DatabaseField>::TYPE).set_null(true),
+                Field::new(Identifier::new("is_hidden"), <bool as DatabaseField>::TYPE),
+                Field::new(
+                    Identifier::new("created_at"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("updated_at"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+            ])
+            .build()];
     }
 
     // -- M0011: create furumusic__track_artist --------------------------------
@@ -896,26 +967,26 @@ pub mod db_migrations {
     impl migrations::Migration for M0011CreateTrackArtist {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0011_create_track_artist";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration(
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
                 "furumusic",
                 "m_0010_create_track",
-            ),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::create_model()
-                .table_name(Identifier::new("furumusic__track_artist"))
-                .fields(&[
-                    Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
-                        .primary_key()
-                        .auto(),
-                    Field::new(Identifier::new("track_id"), <i64 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("artist_id"), <i64 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("role"), <LimitedString<32> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("position"), <i32 as DatabaseField>::TYPE),
-                ])
-                .build(),
-        ];
+            )];
+        const OPERATIONS: &'static [Operation] = &[Operation::create_model()
+            .table_name(Identifier::new("furumusic__track_artist"))
+            .fields(&[
+                Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
+                    .primary_key()
+                    .auto(),
+                Field::new(Identifier::new("track_id"), <i64 as DatabaseField>::TYPE),
+                Field::new(Identifier::new("artist_id"), <i64 as DatabaseField>::TYPE),
+                Field::new(
+                    Identifier::new("role"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+                Field::new(Identifier::new("position"), <i32 as DatabaseField>::TYPE),
+            ])
+            .build()];
     }
 
     // -- M0012: create furumusic__genre + furumusic__track_genre ---------------
@@ -926,12 +997,11 @@ pub mod db_migrations {
     impl migrations::Migration for M0012CreateGenreTables {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0012_create_genre_tables";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration(
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
                 "furumusic",
                 "m_0011_create_track_artist",
-            ),
-        ];
+            )];
         const OPERATIONS: &'static [Operation] = &[
             Operation::create_model()
                 .table_name(Identifier::new("furumusic__genre"))
@@ -939,9 +1009,15 @@ pub mod db_migrations {
                     Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
                         .primary_key()
                         .auto(),
-                    Field::new(Identifier::new("name"), <LimitedString<100> as DatabaseField>::TYPE)
-                        .unique(),
-                    Field::new(Identifier::new("name_normalized"), <LimitedString<100> as DatabaseField>::TYPE),
+                    Field::new(
+                        Identifier::new("name"),
+                        <LimitedString<100> as DatabaseField>::TYPE,
+                    )
+                    .unique(),
+                    Field::new(
+                        Identifier::new("name_normalized"),
+                        <LimitedString<100> as DatabaseField>::TYPE,
+                    ),
                 ])
                 .build(),
             Operation::create_model()
@@ -965,25 +1041,25 @@ pub mod db_migrations {
     impl migrations::Migration for M0013CreateUserLikedTrack {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0013_create_user_liked_track";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration(
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
                 "furumusic",
                 "m_0012_create_genre_tables",
-            ),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::create_model()
-                .table_name(Identifier::new("furumusic__user_liked_track"))
-                .fields(&[
-                    Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
-                        .primary_key()
-                        .auto(),
-                    Field::new(Identifier::new("user_id"), <i64 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("track_id"), <i64 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("created_at"), <LimitedString<32> as DatabaseField>::TYPE),
-                ])
-                .build(),
-        ];
+            )];
+        const OPERATIONS: &'static [Operation] = &[Operation::create_model()
+            .table_name(Identifier::new("furumusic__user_liked_track"))
+            .fields(&[
+                Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
+                    .primary_key()
+                    .auto(),
+                Field::new(Identifier::new("user_id"), <i64 as DatabaseField>::TYPE),
+                Field::new(Identifier::new("track_id"), <i64 as DatabaseField>::TYPE),
+                Field::new(
+                    Identifier::new("created_at"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+            ])
+            .build()];
     }
 
     // -- M0014: create furumusic__user_followed_artist ------------------------
@@ -994,25 +1070,25 @@ pub mod db_migrations {
     impl migrations::Migration for M0014CreateUserFollowedArtist {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0014_create_user_followed_artist";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration(
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
                 "furumusic",
                 "m_0013_create_user_liked_track",
-            ),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::create_model()
-                .table_name(Identifier::new("furumusic__user_followed_artist"))
-                .fields(&[
-                    Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
-                        .primary_key()
-                        .auto(),
-                    Field::new(Identifier::new("user_id"), <i64 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("artist_id"), <i64 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("created_at"), <LimitedString<32> as DatabaseField>::TYPE),
-                ])
-                .build(),
-        ];
+            )];
+        const OPERATIONS: &'static [Operation] = &[Operation::create_model()
+            .table_name(Identifier::new("furumusic__user_followed_artist"))
+            .fields(&[
+                Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
+                    .primary_key()
+                    .auto(),
+                Field::new(Identifier::new("user_id"), <i64 as DatabaseField>::TYPE),
+                Field::new(Identifier::new("artist_id"), <i64 as DatabaseField>::TYPE),
+                Field::new(
+                    Identifier::new("created_at"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+            ])
+            .build()];
     }
 
     // -- M0015: create playlist tables ----------------------------------------
@@ -1023,12 +1099,11 @@ pub mod db_migrations {
     impl migrations::Migration for M0015CreatePlaylistTables {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0015_create_playlist_tables";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration(
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
                 "furumusic",
                 "m_0014_create_user_followed_artist",
-            ),
-        ];
+            )];
         const OPERATIONS: &'static [Operation] = &[
             Operation::create_model()
                 .table_name(Identifier::new("furumusic__playlist"))
@@ -1037,16 +1112,34 @@ pub mod db_migrations {
                         .primary_key()
                         .auto(),
                     Field::new(Identifier::new("owner_id"), <i64 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("title"), <LimitedString<255> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("description"), <String as DatabaseField>::TYPE)
-                        .set_null(true),
+                    Field::new(
+                        Identifier::new("title"),
+                        <LimitedString<255> as DatabaseField>::TYPE,
+                    ),
+                    Field::new(
+                        Identifier::new("description"),
+                        <String as DatabaseField>::TYPE,
+                    )
+                    .set_null(true),
                     Field::new(Identifier::new("is_public"), <bool as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("cover_file_id"), <i64 as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("forked_from_id"), <i64 as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("created_at"), <LimitedString<32> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("updated_at"), <LimitedString<32> as DatabaseField>::TYPE),
+                    Field::new(
+                        Identifier::new("cover_file_id"),
+                        <i64 as DatabaseField>::TYPE,
+                    )
+                    .set_null(true),
+                    Field::new(
+                        Identifier::new("forked_from_id"),
+                        <i64 as DatabaseField>::TYPE,
+                    )
+                    .set_null(true),
+                    Field::new(
+                        Identifier::new("created_at"),
+                        <LimitedString<32> as DatabaseField>::TYPE,
+                    ),
+                    Field::new(
+                        Identifier::new("updated_at"),
+                        <LimitedString<32> as DatabaseField>::TYPE,
+                    ),
                 ])
                 .build(),
             Operation::create_model()
@@ -1058,8 +1151,14 @@ pub mod db_migrations {
                     Field::new(Identifier::new("playlist_id"), <i64 as DatabaseField>::TYPE),
                     Field::new(Identifier::new("track_id"), <i64 as DatabaseField>::TYPE),
                     Field::new(Identifier::new("position"), <i32 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("added_at"), <LimitedString<32> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("added_by_user_id"), <i64 as DatabaseField>::TYPE),
+                    Field::new(
+                        Identifier::new("added_at"),
+                        <LimitedString<32> as DatabaseField>::TYPE,
+                    ),
+                    Field::new(
+                        Identifier::new("added_by_user_id"),
+                        <i64 as DatabaseField>::TYPE,
+                    ),
                 ])
                 .build(),
             Operation::create_model()
@@ -1070,7 +1169,10 @@ pub mod db_migrations {
                         .auto(),
                     Field::new(Identifier::new("user_id"), <i64 as DatabaseField>::TYPE),
                     Field::new(Identifier::new("playlist_id"), <i64 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("saved_at"), <LimitedString<32> as DatabaseField>::TYPE),
+                    Field::new(
+                        Identifier::new("saved_at"),
+                        <LimitedString<32> as DatabaseField>::TYPE,
+                    ),
                 ])
                 .build(),
         ];
@@ -1084,28 +1186,31 @@ pub mod db_migrations {
     impl migrations::Migration for M0016CreatePlayHistory {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0016_create_play_history";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration(
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
                 "furumusic",
                 "m_0015_create_playlist_tables",
-            ),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::create_model()
-                .table_name(Identifier::new("furumusic__play_history"))
-                .fields(&[
-                    Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
-                        .primary_key()
-                        .auto(),
-                    Field::new(Identifier::new("user_id"), <i64 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("track_id"), <i64 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("played_at"), <LimitedString<32> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("duration_listened"), <i32 as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("completed"), <bool as DatabaseField>::TYPE),
-                ])
-                .build(),
-        ];
+            )];
+        const OPERATIONS: &'static [Operation] = &[Operation::create_model()
+            .table_name(Identifier::new("furumusic__play_history"))
+            .fields(&[
+                Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
+                    .primary_key()
+                    .auto(),
+                Field::new(Identifier::new("user_id"), <i64 as DatabaseField>::TYPE),
+                Field::new(Identifier::new("track_id"), <i64 as DatabaseField>::TYPE),
+                Field::new(
+                    Identifier::new("played_at"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("duration_listened"),
+                    <i32 as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(Identifier::new("completed"), <bool as DatabaseField>::TYPE),
+            ])
+            .build()];
     }
 
     // -- M0017: create furumusic__playback_state ------------------------------
@@ -1116,31 +1221,43 @@ pub mod db_migrations {
     impl migrations::Migration for M0017CreatePlaybackState {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0017_create_playback_state";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration(
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
                 "furumusic",
                 "m_0016_create_play_history",
-            ),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::create_model()
-                .table_name(Identifier::new("furumusic__playback_state"))
-                .fields(&[
-                    Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
-                        .primary_key()
-                        .auto(),
-                    Field::new(Identifier::new("user_id"), <i64 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("current_track_id"), <i64 as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("position_ms"), <i32 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("queue_json"), <String as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("queue_position"), <i32 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("shuffle"), <bool as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("repeat_mode"), <LimitedString<16> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("updated_at"), <LimitedString<32> as DatabaseField>::TYPE),
-                ])
-                .build(),
-        ];
+            )];
+        const OPERATIONS: &'static [Operation] = &[Operation::create_model()
+            .table_name(Identifier::new("furumusic__playback_state"))
+            .fields(&[
+                Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
+                    .primary_key()
+                    .auto(),
+                Field::new(Identifier::new("user_id"), <i64 as DatabaseField>::TYPE),
+                Field::new(
+                    Identifier::new("current_track_id"),
+                    <i64 as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(Identifier::new("position_ms"), <i32 as DatabaseField>::TYPE),
+                Field::new(
+                    Identifier::new("queue_json"),
+                    <String as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("queue_position"),
+                    <i32 as DatabaseField>::TYPE,
+                ),
+                Field::new(Identifier::new("shuffle"), <bool as DatabaseField>::TYPE),
+                Field::new(
+                    Identifier::new("repeat_mode"),
+                    <LimitedString<16> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("updated_at"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+            ])
+            .build()];
     }
 
     // -- M0018: create furumusic__processing_task -----------------------------
@@ -1151,110 +1268,123 @@ pub mod db_migrations {
     impl migrations::Migration for M0018CreateProcessingTask {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0018_create_processing_task";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration(
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
                 "furumusic",
                 "m_0017_create_playback_state",
-            ),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::create_model()
-                .table_name(Identifier::new("furumusic__processing_task"))
-                .fields(&[
-                    Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
-                        .primary_key()
-                        .auto(),
-                    Field::new(Identifier::new("status"), <LimitedString<32> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("task_type"), <LimitedString<64> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("input_path"), <String as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("context_json"), <String as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("result_json"), <String as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("error_message"), <String as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("attempts"), <i32 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("max_attempts"), <i32 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("created_at"), <LimitedString<32> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("updated_at"), <LimitedString<32> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("started_at"), <LimitedString<32> as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("completed_at"), <LimitedString<32> as DatabaseField>::TYPE)
-                        .set_null(true),
-                ])
-                .build(),
-        ];
+            )];
+        const OPERATIONS: &'static [Operation] = &[Operation::create_model()
+            .table_name(Identifier::new("furumusic__processing_task"))
+            .fields(&[
+                Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
+                    .primary_key()
+                    .auto(),
+                Field::new(
+                    Identifier::new("status"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("task_type"),
+                    <LimitedString<64> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("input_path"),
+                    <String as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(
+                    Identifier::new("context_json"),
+                    <String as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(
+                    Identifier::new("result_json"),
+                    <String as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(
+                    Identifier::new("error_message"),
+                    <String as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(Identifier::new("attempts"), <i32 as DatabaseField>::TYPE),
+                Field::new(
+                    Identifier::new("max_attempts"),
+                    <i32 as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("created_at"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("updated_at"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("started_at"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(
+                    Identifier::new("completed_at"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+            ])
+            .build()];
     }
 
     // -- M0019: indexes for all music tables ----------------------------------
 
     #[cot::db::migrations::migration_op]
-    async fn create_music_indexes(
-        ctx: migrations::MigrationContext<'_>,
-    ) -> cot::db::Result<()> {
+    async fn create_music_indexes(ctx: migrations::MigrationContext<'_>) -> cot::db::Result<()> {
         let stmts = [
             // media_file: lookup by hash for dedup
             "CREATE INDEX idx_media_file_sha256 ON furumusic__media_file (sha256_hash)",
             // media_file: filter by type
             "CREATE INDEX idx_media_file_type ON furumusic__media_file (file_type)",
-
             // artist: search by normalized name
             "CREATE INDEX idx_artist_name_sort ON furumusic__artist (name_sort)",
-
             // release: search by normalized title
             "CREATE INDEX idx_release_title_sort ON furumusic__release (title_sort)",
             // release: filter by type
             "CREATE INDEX idx_release_type ON furumusic__release (release_type)",
-
             // release_artist: unique pair + lookup
             "CREATE UNIQUE INDEX idx_release_artist_uniq ON furumusic__release_artist (release_id, artist_id)",
             "CREATE INDEX idx_release_artist_artist ON furumusic__release_artist (artist_id)",
-
             // track: search by normalized title
             "CREATE INDEX idx_track_title_sort ON furumusic__track (title_sort)",
             // track: FK to release
             "CREATE INDEX idx_track_release ON furumusic__track (release_id)",
             // track: FK to audio file
             "CREATE INDEX idx_track_audio_file ON furumusic__track (audio_file_id)",
-
             // track_artist: unique triple + lookups
             "CREATE UNIQUE INDEX idx_track_artist_uniq ON furumusic__track_artist (track_id, artist_id, role)",
             "CREATE INDEX idx_track_artist_artist ON furumusic__track_artist (artist_id)",
-
             // track_genre: unique pair + lookup
             "CREATE UNIQUE INDEX idx_track_genre_uniq ON furumusic__track_genre (track_id, genre_id)",
             "CREATE INDEX idx_track_genre_genre ON furumusic__track_genre (genre_id)",
-
             // genre: lookup by normalized name
             "CREATE INDEX idx_genre_normalized ON furumusic__genre (name_normalized)",
-
             // user_liked_track: unique pair + lookup by track
             "CREATE UNIQUE INDEX idx_user_liked_track_uniq ON furumusic__user_liked_track (user_id, track_id)",
             "CREATE INDEX idx_user_liked_track_track ON furumusic__user_liked_track (track_id)",
-
             // user_followed_artist: unique pair + lookup by artist
             "CREATE UNIQUE INDEX idx_user_followed_artist_uniq ON furumusic__user_followed_artist (user_id, artist_id)",
             "CREATE INDEX idx_user_followed_artist_artist ON furumusic__user_followed_artist (artist_id)",
-
             // playlist: owner lookup
             "CREATE INDEX idx_playlist_owner ON furumusic__playlist (owner_id)",
-
             // playlist_track: ordered tracks in playlist + lookup by track
             "CREATE INDEX idx_playlist_track_playlist ON furumusic__playlist_track (playlist_id, position)",
             "CREATE INDEX idx_playlist_track_track ON furumusic__playlist_track (track_id)",
-
             // saved_playlist: unique pair + lookup by playlist
             "CREATE UNIQUE INDEX idx_saved_playlist_uniq ON furumusic__saved_playlist (user_id, playlist_id)",
             "CREATE INDEX idx_saved_playlist_playlist ON furumusic__saved_playlist (playlist_id)",
-
             // play_history: user timeline + lookup by track
             "CREATE INDEX idx_play_history_user ON furumusic__play_history (user_id, played_at)",
             "CREATE INDEX idx_play_history_track ON furumusic__play_history (track_id)",
-
             // playback_state: one per user
             "CREATE UNIQUE INDEX idx_playback_state_user ON furumusic__playback_state (user_id)",
-
             // processing_task: queue polling (status + created_at)
             "CREATE INDEX idx_processing_task_status ON furumusic__processing_task (status, created_at)",
         ];
@@ -1272,15 +1402,12 @@ pub mod db_migrations {
     impl migrations::Migration for M0019CreateMusicIndexes {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0019_create_music_indexes";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration(
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
                 "furumusic",
                 "m_0018_create_processing_task",
-            ),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::custom(create_music_indexes).build(),
-        ];
+            )];
+        const OPERATIONS: &'static [Operation] = &[Operation::custom(create_music_indexes).build()];
     }
 
     // -- M0020: enable pg_trgm extension --------------------------------------
@@ -1297,15 +1424,12 @@ pub mod db_migrations {
     impl migrations::Migration for M0020EnablePgTrgm {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0020_enable_pg_trgm";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration(
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
                 "furumusic",
                 "m_0019_create_music_indexes",
-            ),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::custom(enable_pg_trgm).build(),
-        ];
+            )];
+        const OPERATIONS: &'static [Operation] = &[Operation::custom(enable_pg_trgm).build()];
     }
 
     // -- M0021: GIN trigram indexes for fuzzy search --------------------------
@@ -1323,15 +1447,12 @@ pub mod db_migrations {
     impl migrations::Migration for M0021CreateTrgmIndexes {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0021_create_trgm_indexes";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration(
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
                 "furumusic",
                 "m_0020_enable_pg_trgm",
-            ),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::custom(create_trgm_indexes).build(),
-        ];
+            )];
+        const OPERATIONS: &'static [Operation] = &[Operation::custom(create_trgm_indexes).build()];
     }
 
     // -- M0022: GIN trigram index on track.title_sort ---------------------------
@@ -1348,15 +1469,13 @@ pub mod db_migrations {
     impl migrations::Migration for M0022CreateTrackTrgmIndex {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0022_create_track_trgm_index";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration(
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
                 "furumusic",
                 "m_0021_create_trgm_indexes",
-            ),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::custom(create_track_trgm_index).build(),
-        ];
+            )];
+        const OPERATIONS: &'static [Operation] =
+            &[Operation::custom(create_track_trgm_index).build()];
     }
 
     // -- M0028: add model_name to artist, release, track -----------------------
@@ -1381,15 +1500,13 @@ pub mod db_migrations {
     impl migrations::Migration for M0028AddModelNameColumns {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0028_add_model_name_columns";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration(
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
                 "furumusic",
                 "m_0027_create_processing_stats",
-            ),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::custom(add_model_name_columns).build(),
-        ];
+            )];
+        const OPERATIONS: &'static [Operation] =
+            &[Operation::custom(add_model_name_columns).build()];
     }
 
     // -- M0029: add volume column to playback_state ----------------------------
@@ -1408,15 +1525,12 @@ pub mod db_migrations {
     impl migrations::Migration for M0029AddPlaybackVolume {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0029_add_playback_volume";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration(
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
                 "furumusic",
                 "m_0028_add_model_name_columns",
-            ),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::custom(add_playback_volume).build(),
-        ];
+            )];
+        const OPERATIONS: &'static [Operation] = &[Operation::custom(add_playback_volume).build()];
     }
 
     pub const MIGRATIONS: &[&SyncDynMigration] = &[

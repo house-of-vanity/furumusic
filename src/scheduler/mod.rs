@@ -1,5 +1,4 @@
 /// Job scheduler: models, migrations, Job trait, JobRegistry, and scheduler loop.
-
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -74,7 +73,12 @@ impl ScheduledJob {
         Self::get_by_primary_key(db, name.to_owned()).await
     }
 
-    pub async fn upsert(db: &Database, name: &str, description: &str, cron_expression: &str) -> cot::db::Result<Self> {
+    pub async fn upsert(
+        db: &Database,
+        name: &str,
+        description: &str,
+        cron_expression: &str,
+    ) -> cot::db::Result<Self> {
         if let Some(mut existing) = Self::get_by_name(db, name).await? {
             // Update cron expression and description if they changed
             let mut changed = false;
@@ -170,7 +174,11 @@ pub struct JobRun {
 
 #[allow(dead_code)]
 impl JobRun {
-    pub async fn create_running(db: &Database, job_name: &str, trigger: &str) -> cot::db::Result<Self> {
+    pub async fn create_running(
+        db: &Database,
+        job_name: &str,
+        trigger: &str,
+    ) -> cot::db::Result<Self> {
         let mut run = Self {
             id: Auto::auto(),
             job_name: limited_string(job_name),
@@ -186,7 +194,12 @@ impl JobRun {
         Ok(run)
     }
 
-    pub async fn set_completed(&mut self, db: &Database, duration_ms: i64, log: &str) -> cot::db::Result<()> {
+    pub async fn set_completed(
+        &mut self,
+        db: &Database,
+        duration_ms: i64,
+        log: &str,
+    ) -> cot::db::Result<()> {
         self.status = LimitedString::new("completed").unwrap();
         self.finished_at = Some(now_iso().to_string());
         self.duration_ms = Some(duration_ms);
@@ -194,7 +207,13 @@ impl JobRun {
         self.save(db).await
     }
 
-    pub async fn set_failed(&mut self, db: &Database, duration_ms: i64, log: &str, error: &str) -> cot::db::Result<()> {
+    pub async fn set_failed(
+        &mut self,
+        db: &Database,
+        duration_ms: i64,
+        log: &str,
+        error: &str,
+    ) -> cot::db::Result<()> {
         self.status = LimitedString::new("failed").unwrap();
         self.finished_at = Some(now_iso().to_string());
         self.duration_ms = Some(duration_ms);
@@ -207,7 +226,11 @@ impl JobRun {
         Self::get_by_primary_key(db, Auto::Fixed(id)).await
     }
 
-    pub async fn list_by_job(pool: &sqlx::PgPool, job_name: &str, limit: i64) -> anyhow::Result<Vec<Self>> {
+    pub async fn list_by_job(
+        pool: &sqlx::PgPool,
+        job_name: &str,
+        limit: i64,
+    ) -> anyhow::Result<Vec<Self>> {
         let rows = sqlx::query_as::<_, JobRunRow>(
             "SELECT id, job_name, status, started_at, finished_at, duration_ms, log_output, error_message, trigger \
              FROM furumusic__job_run WHERE job_name = $1 ORDER BY id DESC LIMIT $2"
@@ -229,7 +252,7 @@ impl JobRun {
              SET status = 'failed', \
                  finished_at = $1, \
                  error_message = 'Process restarted while job was running' \
-             WHERE status = 'running'"
+             WHERE status = 'running'",
         )
         .bind(&now)
         .execute(pool)
@@ -472,7 +495,7 @@ impl PendingReview {
              SET status = 'failed', \
                  error_message = 'Process restarted while review was being processed', \
                  updated_at = $1 \
-             WHERE status = 'processing'"
+             WHERE status = 'processing'",
         )
         .bind(&now)
         .execute(pool)
@@ -494,6 +517,46 @@ impl PendingReview {
         cot::db::query!(PendingReview, $status == status_val)
             .delete(db)
             .await?;
+        Ok(())
+    }
+
+    pub async fn delete_by_ids(db: &Database, ids: &[i64]) -> cot::db::Result<()> {
+        for chunk in ids.chunks(1000) {
+            if chunk.is_empty() {
+                continue;
+            }
+            let id_list = chunk
+                .iter()
+                .map(i64::to_string)
+                .collect::<Vec<_>>()
+                .join(",");
+            db.raw(&format!(
+                "DELETE FROM furumusic__pending_review WHERE id IN ({id_list})"
+            ))
+            .await?;
+        }
+        Ok(())
+    }
+
+    pub async fn requeue_by_ids(db: &Database, ids: &[i64]) -> cot::db::Result<()> {
+        let now = now_iso().to_string();
+        for chunk in ids.chunks(1000) {
+            if chunk.is_empty() {
+                continue;
+            }
+            let id_list = chunk
+                .iter()
+                .map(i64::to_string)
+                .collect::<Vec<_>>()
+                .join(",");
+            db.raw(&format!(
+                "UPDATE furumusic__pending_review \
+                 SET status = 'queued', error_message = NULL, updated_at = '{}' \
+                 WHERE id IN ({id_list})",
+                now.replace('\'', "''")
+            ))
+            .await?;
+        }
         Ok(())
     }
 
@@ -589,12 +652,19 @@ impl ProcessingStats {
         Ok(all.into_iter().next())
     }
 
-    pub async fn list_by_review_ids(pool: &sqlx::PgPool, ids: &[i64]) -> anyhow::Result<HashMap<i64, ProcessingStatsRow>> {
+    pub async fn list_by_review_ids(
+        pool: &sqlx::PgPool,
+        ids: &[i64],
+    ) -> anyhow::Result<HashMap<i64, ProcessingStatsRow>> {
         if ids.is_empty() {
             return Ok(HashMap::new());
         }
         // Build comma-separated ID list
-        let id_list: String = ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(",");
+        let id_list: String = ids
+            .iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
         let query = format!(
             "SELECT pending_review_id, model_name, llm_duration_ms, prompt_tokens, completion_tokens \
              FROM furumusic__processing_stats WHERE pending_review_id IN ({id_list})"
@@ -659,28 +729,46 @@ pub mod db_migrations {
     impl migrations::Migration for M0022CreateScheduledJob {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0022_create_scheduled_job";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration("furumusic", "m_0021_create_trgm_indexes"),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::create_model()
-                .table_name(Identifier::new("furumusic__scheduled_job"))
-                .fields(&[
-                    Field::new(Identifier::new("name"), <String as DatabaseField>::TYPE)
-                        .primary_key()
-                        .set_null(<String as DatabaseField>::NULLABLE),
-                    Field::new(Identifier::new("description"), <String as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("cron_expression"), <LimitedString<100> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("enabled"), <bool as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("last_run_at"), <LimitedString<32> as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("next_run_at"), <LimitedString<32> as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("created_at"), <LimitedString<32> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("updated_at"), <LimitedString<32> as DatabaseField>::TYPE),
-                ])
-                .build(),
-        ];
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
+                "furumusic",
+                "m_0021_create_trgm_indexes",
+            )];
+        const OPERATIONS: &'static [Operation] = &[Operation::create_model()
+            .table_name(Identifier::new("furumusic__scheduled_job"))
+            .fields(&[
+                Field::new(Identifier::new("name"), <String as DatabaseField>::TYPE)
+                    .primary_key()
+                    .set_null(<String as DatabaseField>::NULLABLE),
+                Field::new(
+                    Identifier::new("description"),
+                    <String as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("cron_expression"),
+                    <LimitedString<100> as DatabaseField>::TYPE,
+                ),
+                Field::new(Identifier::new("enabled"), <bool as DatabaseField>::TYPE),
+                Field::new(
+                    Identifier::new("last_run_at"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(
+                    Identifier::new("next_run_at"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(
+                    Identifier::new("created_at"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("updated_at"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+            ])
+            .build()];
     }
 
     #[derive(Debug, Copy, Clone)]
@@ -689,31 +777,52 @@ pub mod db_migrations {
     impl migrations::Migration for M0023CreateJobRun {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0023_create_job_run";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration("furumusic", "m_0022_create_scheduled_job"),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::create_model()
-                .table_name(Identifier::new("furumusic__job_run"))
-                .fields(&[
-                    Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
-                        .primary_key()
-                        .auto(),
-                    Field::new(Identifier::new("job_name"), <LimitedString<100> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("status"), <LimitedString<32> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("started_at"), <LimitedString<32> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("finished_at"), <LimitedString<32> as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("duration_ms"), <i64 as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("log_output"), <String as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("error_message"), <String as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("trigger"), <LimitedString<32> as DatabaseField>::TYPE),
-                ])
-                .build(),
-        ];
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
+                "furumusic",
+                "m_0022_create_scheduled_job",
+            )];
+        const OPERATIONS: &'static [Operation] = &[Operation::create_model()
+            .table_name(Identifier::new("furumusic__job_run"))
+            .fields(&[
+                Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
+                    .primary_key()
+                    .auto(),
+                Field::new(
+                    Identifier::new("job_name"),
+                    <LimitedString<100> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("status"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("started_at"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("finished_at"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(Identifier::new("duration_ms"), <i64 as DatabaseField>::TYPE)
+                    .set_null(true),
+                Field::new(
+                    Identifier::new("log_output"),
+                    <String as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(
+                    Identifier::new("error_message"),
+                    <String as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(
+                    Identifier::new("trigger"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+            ])
+            .build()];
     }
 
     #[derive(Debug, Copy, Clone)]
@@ -722,34 +831,57 @@ pub mod db_migrations {
     impl migrations::Migration for M0024CreatePendingReview {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0024_create_pending_review";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration("furumusic", "m_0023_create_job_run"),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::create_model()
-                .table_name(Identifier::new("furumusic__pending_review"))
-                .fields(&[
-                    Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
-                        .primary_key()
-                        .auto(),
-                    Field::new(Identifier::new("job_run_id"), <i64 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("review_type"), <LimitedString<64> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("input_path"), <String as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("context_json"), <String as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("result_json"), <String as DatabaseField>::TYPE)
-                        .set_null(true),
-                    Field::new(Identifier::new("status"), <LimitedString<32> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("created_at"), <LimitedString<32> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("updated_at"), <LimitedString<32> as DatabaseField>::TYPE),
-                ])
-                .build(),
-        ];
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
+                "furumusic",
+                "m_0023_create_job_run",
+            )];
+        const OPERATIONS: &'static [Operation] = &[Operation::create_model()
+            .table_name(Identifier::new("furumusic__pending_review"))
+            .fields(&[
+                Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
+                    .primary_key()
+                    .auto(),
+                Field::new(Identifier::new("job_run_id"), <i64 as DatabaseField>::TYPE),
+                Field::new(
+                    Identifier::new("review_type"),
+                    <LimitedString<64> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("input_path"),
+                    <String as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(
+                    Identifier::new("context_json"),
+                    <String as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(
+                    Identifier::new("result_json"),
+                    <String as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(
+                    Identifier::new("status"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("created_at"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("updated_at"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+            ])
+            .build()];
     }
 
     #[cot::db::migrations::migration_op]
-    async fn create_scheduler_indexes(ctx: migrations::MigrationContext<'_>) -> cot::db::Result<()> {
+    async fn create_scheduler_indexes(
+        ctx: migrations::MigrationContext<'_>,
+    ) -> cot::db::Result<()> {
         let stmts = [
             "CREATE INDEX idx_job_run_job_name ON furumusic__job_run (job_name, id DESC)",
             "CREATE INDEX idx_job_run_status ON furumusic__job_run (status)",
@@ -768,16 +900,19 @@ pub mod db_migrations {
     impl migrations::Migration for M0025CreateSchedulerIndexes {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0025_create_scheduler_indexes";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration("furumusic", "m_0024_create_pending_review"),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::custom(create_scheduler_indexes).build(),
-        ];
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
+                "furumusic",
+                "m_0024_create_pending_review",
+            )];
+        const OPERATIONS: &'static [Operation] =
+            &[Operation::custom(create_scheduler_indexes).build()];
     }
 
     #[cot::db::migrations::migration_op]
-    async fn add_pending_review_error_message(ctx: migrations::MigrationContext<'_>) -> cot::db::Result<()> {
+    async fn add_pending_review_error_message(
+        ctx: migrations::MigrationContext<'_>,
+    ) -> cot::db::Result<()> {
         ctx.db
             .raw("ALTER TABLE furumusic__pending_review ADD COLUMN error_message TEXT")
             .await?;
@@ -790,12 +925,13 @@ pub mod db_migrations {
     impl migrations::Migration for M0026AddPendingReviewErrorMessage {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0026_add_pending_review_error_message";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration("furumusic", "m_0025_create_scheduler_indexes"),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::custom(add_pending_review_error_message).build(),
-        ];
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
+                "furumusic",
+                "m_0025_create_scheduler_indexes",
+            )];
+        const OPERATIONS: &'static [Operation] =
+            &[Operation::custom(add_pending_review_error_message).build()];
     }
 
     #[derive(Debug, Copy, Clone)]
@@ -804,25 +940,43 @@ pub mod db_migrations {
     impl migrations::Migration for M0027CreateProcessingStats {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0027_create_processing_stats";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration("furumusic", "m_0026_add_pending_review_error_message"),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::create_model()
-                .table_name(Identifier::new("furumusic__processing_stats"))
-                .fields(&[
-                    Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
-                        .primary_key()
-                        .auto(),
-                    Field::new(Identifier::new("pending_review_id"), <i64 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("model_name"), <LimitedString<128> as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("llm_duration_ms"), <i64 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("prompt_tokens"), <i64 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("completion_tokens"), <i64 as DatabaseField>::TYPE),
-                    Field::new(Identifier::new("created_at"), <LimitedString<32> as DatabaseField>::TYPE),
-                ])
-                .build(),
-        ];
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
+                "furumusic",
+                "m_0026_add_pending_review_error_message",
+            )];
+        const OPERATIONS: &'static [Operation] = &[Operation::create_model()
+            .table_name(Identifier::new("furumusic__processing_stats"))
+            .fields(&[
+                Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
+                    .primary_key()
+                    .auto(),
+                Field::new(
+                    Identifier::new("pending_review_id"),
+                    <i64 as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("model_name"),
+                    <LimitedString<128> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("llm_duration_ms"),
+                    <i64 as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("prompt_tokens"),
+                    <i64 as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("completion_tokens"),
+                    <i64 as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("created_at"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+            ])
+            .build()];
     }
 
     pub const MIGRATIONS: &[&SyncDynMigration] = &[
@@ -856,11 +1010,19 @@ pub struct JobLog {
 #[allow(dead_code)]
 impl JobLog {
     pub fn new() -> Self {
-        Self { lines: Vec::new(), pool: None, run_id: 0 }
+        Self {
+            lines: Vec::new(),
+            pool: None,
+            run_id: 0,
+        }
     }
 
     pub fn with_live_flush(pool: sqlx::PgPool, run_id: i64) -> Self {
-        Self { lines: Vec::new(), pool: Some(pool), run_id }
+        Self {
+            lines: Vec::new(),
+            pool: Some(pool),
+            run_id,
+        }
     }
 
     pub fn info(&mut self, msg: &str) {
@@ -894,13 +1056,11 @@ impl JobLog {
             let run_id = self.run_id;
             let pool = pool.clone();
             tokio::spawn(async move {
-                let _ = sqlx::query(
-                    "UPDATE furumusic__job_run SET log_output = $1 WHERE id = $2"
-                )
-                .bind(&output)
-                .bind(run_id)
-                .execute(&pool)
-                .await;
+                let _ = sqlx::query("UPDATE furumusic__job_run SET log_output = $1 WHERE id = $2")
+                    .bind(&output)
+                    .bind(run_id)
+                    .execute(&pool)
+                    .await;
             });
         }
     }
@@ -997,7 +1157,9 @@ impl SchedulerHandle {
             }
             Err(e) => {
                 let duration_ms = start.elapsed().as_millis() as i64;
-                let _ = run.set_failed(db, duration_ms, &log.output(), &e.to_string()).await;
+                let _ = run
+                    .set_failed(db, duration_ms, &log.output(), &e.to_string())
+                    .await;
             }
         }
 
@@ -1025,7 +1187,8 @@ impl SchedulerHandle {
         self.add_cron_job(job_name, new_cron).await?;
 
         // Update DB
-        if let Ok(Some(mut sched_job)) = ScheduledJob::get_by_name(&self.shared_db, job_name).await {
+        if let Ok(Some(mut sched_job)) = ScheduledJob::get_by_name(&self.shared_db, job_name).await
+        {
             sched_job.cron_expression = LimitedString::new(new_cron).unwrap();
             sched_job.next_run_at = compute_next_run(new_cron);
             sched_job.updated_at = now_iso();
@@ -1083,7 +1246,10 @@ impl SchedulerHandle {
         })?;
 
         let uuid = self.scheduler.add(cron_job).await?;
-        self.job_uuids.write().await.insert(job_name.to_owned(), uuid);
+        self.job_uuids
+            .write()
+            .await
+            .insert(job_name.to_owned(), uuid);
 
         Ok(())
     }
@@ -1161,7 +1327,9 @@ async fn run_scheduled_job(
         Err(e) => {
             let duration_ms = start.elapsed().as_millis() as i64;
             tracing::error!(job = job_name, duration_ms, "Job failed: {e}");
-            let _ = run.set_failed(db, duration_ms, &log.output(), &e.to_string()).await;
+            let _ = run
+                .set_failed(db, duration_ms, &log.output(), &e.to_string())
+                .await;
         }
     }
 
@@ -1264,12 +1432,12 @@ pub async fn start_scheduler(
                     // Update next_run_at in DB
                     if let Some(next) = compute_next_run(cron_expr) {
                         let _ = sqlx::query(
-                            "UPDATE furumusic__scheduled_job SET next_run_at = $1 WHERE name = $2"
+                            "UPDATE furumusic__scheduled_job SET next_run_at = $1 WHERE name = $2",
                         )
-                            .bind(&next)
-                            .bind(sched_job.name_str())
-                            .execute(&pool)
-                            .await;
+                        .bind(&next)
+                        .bind(sched_job.name_str())
+                        .execute(&pool)
+                        .await;
                     }
                 }
                 Err(e) => {
@@ -1339,7 +1507,9 @@ pub async fn trigger_job_now(
         }
         Err(e) => {
             let duration_ms = start.elapsed().as_millis() as i64;
-            let _ = run.set_failed(db, duration_ms, &log.output(), &e.to_string()).await;
+            let _ = run
+                .set_failed(db, duration_ms, &log.output(), &e.to_string())
+                .await;
         }
     }
 

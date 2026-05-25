@@ -108,7 +108,9 @@ impl User {
 
     /// Delete this user by primary key.
     pub async fn delete_by_id(db: &Database, user_id: i64) -> cot::db::Result<()> {
-        cot::db::query!(User, $id == Auto::Fixed(user_id)).delete(db).await?;
+        cot::db::query!(User, $id == Auto::Fixed(user_id))
+            .delete(db)
+            .await?;
         Ok(())
     }
 
@@ -120,10 +122,16 @@ impl User {
         &self.username
     }
     pub fn email_str(&self) -> String {
-        self.email.as_ref().map(|e| e.to_string()).unwrap_or_default()
+        self.email
+            .as_ref()
+            .map(|e| e.to_string())
+            .unwrap_or_default()
     }
     pub fn display_name_str(&self) -> String {
-        self.display_name.as_ref().map(|d| d.to_string()).unwrap_or_default()
+        self.display_name
+            .as_ref()
+            .map(|d| d.to_string())
+            .unwrap_or_default()
     }
     pub fn role_str(&self) -> &str {
         &self.role
@@ -162,7 +170,9 @@ impl User {
 
     /// Find a user by email address.
     pub async fn get_by_email(db: &Database, email: &str) -> cot::db::Result<Option<Self>> {
-        cot::db::query!(User, $email == Some(email.to_owned())).get(db).await
+        cot::db::query!(User, $email == Some(email.to_owned()))
+            .get(db)
+            .await
     }
 }
 
@@ -257,9 +267,9 @@ impl OidcLink {
 // ---------------------------------------------------------------------------
 
 pub mod db_migrations {
+    use cot::auth::PasswordHash;
     use cot::db::migrations::{self, Field, Operation, SyncDynMigration};
     use cot::db::{DatabaseField, Identifier, LimitedString};
-    use cot::auth::PasswordHash;
 
     // -- M0003: create furumusic__user -------------------------------------
 
@@ -269,58 +279,49 @@ pub mod db_migrations {
     impl migrations::Migration for M0003CreateUser {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0003_create_user";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration(
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
                 "furumusic",
                 "m_0002_rename_config_table",
-            ),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::create_model()
-                .table_name(Identifier::new("furumusic__user"))
-                .fields(&[
-                    Field::new(
-                        Identifier::new("id"),
-                        <i64 as DatabaseField>::TYPE,
-                    )
+            )];
+        const OPERATIONS: &'static [Operation] = &[Operation::create_model()
+            .table_name(Identifier::new("furumusic__user"))
+            .fields(&[
+                Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
                     .primary_key()
                     .auto(),
-                    Field::new(
-                        Identifier::new("username"),
-                        <LimitedString<255> as DatabaseField>::TYPE,
-                    )
-                    .unique(),
-                    Field::new(
-                        Identifier::new("password"),
-                        <PasswordHash as DatabaseField>::TYPE,
-                    )
-                    .set_null(true),
-                    Field::new(
-                        Identifier::new("email"),
-                        <LimitedString<255> as DatabaseField>::TYPE,
-                    )
-                    .set_null(true),
-                    Field::new(
-                        Identifier::new("display_name"),
-                        <LimitedString<255> as DatabaseField>::TYPE,
-                    )
-                    .set_null(true),
-                    Field::new(
-                        Identifier::new("avatar_url"),
-                        <String as DatabaseField>::TYPE,
-                    )
-                    .set_null(true),
-                    Field::new(
-                        Identifier::new("role"),
-                        <LimitedString<32> as DatabaseField>::TYPE,
-                    ),
-                    Field::new(
-                        Identifier::new("is_active"),
-                        <bool as DatabaseField>::TYPE,
-                    ),
-                ])
-                .build(),
-        ];
+                Field::new(
+                    Identifier::new("username"),
+                    <LimitedString<255> as DatabaseField>::TYPE,
+                )
+                .unique(),
+                Field::new(
+                    Identifier::new("password"),
+                    <PasswordHash as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(
+                    Identifier::new("email"),
+                    <LimitedString<255> as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(
+                    Identifier::new("display_name"),
+                    <LimitedString<255> as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(
+                    Identifier::new("avatar_url"),
+                    <String as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(
+                    Identifier::new("role"),
+                    <LimitedString<32> as DatabaseField>::TYPE,
+                ),
+                Field::new(Identifier::new("is_active"), <bool as DatabaseField>::TYPE),
+            ])
+            .build()];
     }
 
     // -- M0004: create furumusic__oidc_link --------------------------------
@@ -331,52 +332,43 @@ pub mod db_migrations {
     impl migrations::Migration for M0004CreateOidcLink {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0004_create_oidc_link";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration(
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
                 "furumusic",
                 "m_0003_create_user",
-            ),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::create_model()
-                .table_name(Identifier::new("furumusic__oidc_link"))
-                .fields(&[
-                    Field::new(
-                        Identifier::new("id"),
-                        <i64 as DatabaseField>::TYPE,
-                    )
+            )];
+        const OPERATIONS: &'static [Operation] = &[Operation::create_model()
+            .table_name(Identifier::new("furumusic__oidc_link"))
+            .fields(&[
+                Field::new(Identifier::new("id"), <i64 as DatabaseField>::TYPE)
                     .primary_key()
                     .auto(),
-                    Field::new(
-                        Identifier::new("user_id"),
-                        <i64 as DatabaseField>::TYPE,
-                    ),
-                    Field::new(
-                        Identifier::new("issuer"),
-                        <LimitedString<255> as DatabaseField>::TYPE,
-                    ),
-                    Field::new(
-                        Identifier::new("sub"),
-                        <LimitedString<255> as DatabaseField>::TYPE,
-                    ),
-                    Field::new(
-                        Identifier::new("email"),
-                        <LimitedString<255> as DatabaseField>::TYPE,
-                    )
-                    .set_null(true),
-                    Field::new(
-                        Identifier::new("name"),
-                        <LimitedString<255> as DatabaseField>::TYPE,
-                    )
-                    .set_null(true),
-                    Field::new(
-                        Identifier::new("avatar_url"),
-                        <String as DatabaseField>::TYPE,
-                    )
-                    .set_null(true),
-                ])
-                .build(),
-        ];
+                Field::new(Identifier::new("user_id"), <i64 as DatabaseField>::TYPE),
+                Field::new(
+                    Identifier::new("issuer"),
+                    <LimitedString<255> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("sub"),
+                    <LimitedString<255> as DatabaseField>::TYPE,
+                ),
+                Field::new(
+                    Identifier::new("email"),
+                    <LimitedString<255> as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(
+                    Identifier::new("name"),
+                    <LimitedString<255> as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+                Field::new(
+                    Identifier::new("avatar_url"),
+                    <String as DatabaseField>::TYPE,
+                )
+                .set_null(true),
+            ])
+            .build()];
     }
 
     // -- M0005: indexes on furumusic__oidc_link ----------------------------
@@ -406,15 +398,13 @@ pub mod db_migrations {
     impl migrations::Migration for M0005OidcLinkIndexes {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0005_oidc_link_indexes";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration(
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
                 "furumusic",
                 "m_0004_create_oidc_link",
-            ),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::custom(create_oidc_link_indexes).build(),
-        ];
+            )];
+        const OPERATIONS: &'static [Operation] =
+            &[Operation::custom(create_oidc_link_indexes).build()];
     }
 
     pub const MIGRATIONS: &[&SyncDynMigration] = &[

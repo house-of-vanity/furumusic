@@ -118,10 +118,7 @@ fn cover_name_priority(path: &Path) -> usize {
 /// 2. Try to extract embedded cover art from each audio file.
 ///
 /// Returns the first usable image found, or None.
-pub async fn find_best_cover(
-    folder: &Path,
-    audio_files: &[PathBuf],
-) -> Option<CoverImage> {
+pub async fn find_best_cover(folder: &Path, audio_files: &[PathBuf]) -> Option<CoverImage> {
     // Strategy 1: folder images
     let folder_images = find_folder_images(folder);
     for img_path in &folder_images {

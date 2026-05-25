@@ -1,7 +1,7 @@
+use cot::Body;
 use cot::db::Database;
 use cot::response::IntoResponse;
 use cot::session::Session;
-use cot::Body;
 
 use crate::user::User;
 
@@ -78,12 +78,10 @@ pub async fn require_admin_or_redirect(
         return Err(redirect("/login"));
     };
     if user.role != Role::Admin {
-        return Err(
-            "Forbidden"
-                .with_status(cot::http::StatusCode::FORBIDDEN)
-                .into_response()
-                .expect("valid response"),
-        );
+        return Err("Forbidden"
+            .with_status(cot::http::StatusCode::FORBIDDEN)
+            .into_response()
+            .expect("valid response"));
     }
     Ok(user)
 }

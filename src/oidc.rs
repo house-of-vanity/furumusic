@@ -131,8 +131,7 @@ async fn get_or_refresh_provider(
         .unwrap_or(config.oidc_issuer.trim_end_matches('/'))
         .to_owned();
 
-    let issuer_url = IssuerUrl::new(issuer)
-        .map_err(|e| format!("invalid issuer URL: {e}"))?;
+    let issuer_url = IssuerUrl::new(issuer).map_err(|e| format!("invalid issuer URL: {e}"))?;
 
     let metadata = CoreProviderMetadata::discover_async(issuer_url, http)
         .await
@@ -250,7 +249,9 @@ pub async fn oidc_callback_handler(
     i18n: I18n,
     db: Database,
     session: Session,
-    cot::request::extractors::UrlQuery(query): cot::request::extractors::UrlQuery<OidcCallbackQuery>,
+    cot::request::extractors::UrlQuery(query): cot::request::extractors::UrlQuery<
+        OidcCallbackQuery,
+    >,
 ) -> cot::Result<cot::response::Response> {
     let (config, _) = AppConfig::load_with_db(&db).await;
 
@@ -313,9 +314,7 @@ pub async fn oidc_callback_handler(
     };
 
     // Exchange code for tokens.
-    let token_request = match client
-        .exchange_code(AuthorizationCode::new(query.code.clone()))
-    {
+    let token_request = match client.exchange_code(AuthorizationCode::new(query.code.clone())) {
         Ok(req) => req,
         Err(e) => {
             tracing::error!("OIDC token endpoint not configured: {e}");

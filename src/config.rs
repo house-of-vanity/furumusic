@@ -66,24 +66,19 @@ pub mod db_migrations {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0001_create_config";
         const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::create_model()
-                .table_name(Identifier::new("furu__config"))
-                .fields(&[
-                    Field::new(
-                        Identifier::new("key"),
-                        <LimitedString<255> as DatabaseField>::TYPE,
-                    )
-                    .primary_key()
-                    .set_null(<LimitedString<255> as DatabaseField>::NULLABLE),
-                    Field::new(
-                        Identifier::new("value"),
-                        <String as DatabaseField>::TYPE,
-                    )
+        const OPERATIONS: &'static [Operation] = &[Operation::create_model()
+            .table_name(Identifier::new("furu__config"))
+            .fields(&[
+                Field::new(
+                    Identifier::new("key"),
+                    <LimitedString<255> as DatabaseField>::TYPE,
+                )
+                .primary_key()
+                .set_null(<LimitedString<255> as DatabaseField>::NULLABLE),
+                Field::new(Identifier::new("value"), <String as DatabaseField>::TYPE)
                     .set_null(<String as DatabaseField>::NULLABLE),
-                ])
-                .build(),
-        ];
+            ])
+            .build()];
     }
 
     // -- M0002: rename furu__config → furumusic__config_entry ---------------
@@ -102,12 +97,12 @@ pub mod db_migrations {
     impl migrations::Migration for M0002RenameConfigTable {
         const APP_NAME: &'static str = "furumusic";
         const MIGRATION_NAME: &'static str = "m_0002_rename_config_table";
-        const DEPENDENCIES: &'static [migrations::MigrationDependency] = &[
-            migrations::MigrationDependency::migration("furumusic", "m_0001_create_config"),
-        ];
-        const OPERATIONS: &'static [Operation] = &[
-            Operation::custom(rename_config_table).build(),
-        ];
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
+                "furumusic",
+                "m_0001_create_config",
+            )];
+        const OPERATIONS: &'static [Operation] = &[Operation::custom(rename_config_table).build()];
     }
 
     pub const MIGRATIONS: &[&SyncDynMigration] = &[&M0001CreateConfig, &M0002RenameConfigTable];
@@ -402,35 +397,51 @@ mod tests {
     }
 
     // SAFETY: tests run with --test-threads=1 so no concurrent env access.
-    unsafe fn set(k: &str, v: &str) { unsafe { std::env::set_var(k, v) }; }
-    unsafe fn unset(k: &str) { unsafe { std::env::remove_var(k) }; }
+    unsafe fn set(k: &str, v: &str) {
+        unsafe { std::env::set_var(k, v) };
+    }
+    unsafe fn unset(k: &str) {
+        unsafe { std::env::remove_var(k) };
+    }
 
     #[test]
     fn env_override_string_field() {
-        unsafe { set("FURU_OIDC_ISSUER", "https://example.com"); }
+        unsafe {
+            set("FURU_OIDC_ISSUER", "https://example.com");
+        }
         let cfg = AppConfig::load();
         assert_eq!(cfg.oidc_issuer, "https://example.com");
-        unsafe { unset("FURU_OIDC_ISSUER"); }
+        unsafe {
+            unset("FURU_OIDC_ISSUER");
+        }
     }
 
     #[test]
     fn env_override_bool_field() {
-        unsafe { set("FURU_AUTH_SSO_ENABLED", "true"); }
+        unsafe {
+            set("FURU_AUTH_SSO_ENABLED", "true");
+        }
         let cfg = AppConfig::load();
         assert!(cfg.auth_sso_enabled);
-        unsafe { unset("FURU_AUTH_SSO_ENABLED"); }
+        unsafe {
+            unset("FURU_AUTH_SSO_ENABLED");
+        }
     }
 
     #[test]
     fn source_tracking_env() {
-        unsafe { set("FURU_OIDC_ISSUER", "https://tracked.example.com"); }
+        unsafe {
+            set("FURU_OIDC_ISSUER", "https://tracked.example.com");
+        }
         let mut cfg = AppConfig::default();
         let mut sources = ConfigSources::default();
         cfg.apply_env_overrides_tracked(&mut sources);
         assert_eq!(cfg.oidc_issuer, "https://tracked.example.com");
         assert_eq!(sources.oidc_issuer, ConfigSource::Env);
         assert_eq!(sources.database_url, ConfigSource::Default);
-        unsafe { unset("FURU_OIDC_ISSUER"); }
+        unsafe {
+            unset("FURU_OIDC_ISSUER");
+        }
     }
 
     #[test]

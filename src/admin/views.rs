@@ -9,14 +9,14 @@ use cot::{Body, Template};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::auth::{self, AuthenticatedUser};
+use super::BUILD_INFO;
 use crate::agent;
+use crate::auth::{self, AuthenticatedUser};
 use crate::config::{AppConfig, ConfigEntry, ConfigSources};
 use crate::i18n::{I18n, Translations};
-use crate::music::{Artist, MediaFile, Release, ReleaseArtist, Track, TrackArtist, RELEASE_TYPES};
+use crate::music::{Artist, MediaFile, RELEASE_TYPES, Release, ReleaseArtist, Track, TrackArtist};
 use crate::scheduler::{self, JobRegistry, JobRun, PendingReview, ScheduledJob};
 use crate::user::User;
-use super::BUILD_INFO;
 
 use crate::agent::AgentProbeResult;
 
@@ -31,10 +31,7 @@ pub struct ConfigDisplayEntry {
 }
 
 /// Secret field names that should be redacted in the debug view.
-const SECRET_FIELDS: &[&str] = &[
-    "database_url",
-    "oidc_client_secret",
-];
+const SECRET_FIELDS: &[&str] = &["database_url", "oidc_client_secret"];
 
 fn is_secret(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
@@ -66,44 +63,122 @@ fn config_display_entries(config: &AppConfig, sources: &ConfigSources) -> Vec<Co
     let defaults = AppConfig::default();
 
     macro_rules! entry {
-        ($field:ident, $value:expr, $default:expr) => {
-            {
-                let raw = $value;
-                let default_raw = $default;
-                let secret = is_secret(stringify!($field));
-                let display = if secret { redact(&raw) } else { raw };
-                let default_display = if secret { redact(&default_raw) } else { default_raw };
-                ConfigDisplayEntry {
-                    key: stringify!($field).into(),
-                    env_var: format!("FURU_{}", stringify!($field).to_ascii_uppercase()),
-                    value: display,
-                    default_value: default_display,
-                    source: sources.$field.code(),
-                }
+        ($field:ident, $value:expr, $default:expr) => {{
+            let raw = $value;
+            let default_raw = $default;
+            let secret = is_secret(stringify!($field));
+            let display = if secret { redact(&raw) } else { raw };
+            let default_display = if secret {
+                redact(&default_raw)
+            } else {
+                default_raw
+            };
+            ConfigDisplayEntry {
+                key: stringify!($field).into(),
+                env_var: format!("FURU_{}", stringify!($field).to_ascii_uppercase()),
+                value: display,
+                default_value: default_display,
+                source: sources.$field.code(),
             }
-        };
+        }};
     }
 
     vec![
-        entry!(database_url, config.database_url.clone(), defaults.database_url.clone()),
-        entry!(oidc_issuer, config.oidc_issuer.clone(), defaults.oidc_issuer.clone()),
-        entry!(oidc_client_id, config.oidc_client_id.clone(), defaults.oidc_client_id.clone()),
-        entry!(oidc_client_secret, config.oidc_client_secret.clone(), defaults.oidc_client_secret.clone()),
-        entry!(log_level, config.log_level.clone(), defaults.log_level.clone()),
-        entry!(auth_password_enabled, config.auth_password_enabled.to_string(), defaults.auth_password_enabled.to_string()),
-        entry!(auth_sso_enabled, config.auth_sso_enabled.to_string(), defaults.auth_sso_enabled.to_string()),
-        entry!(oidc_button_text, config.oidc_button_text.clone(), defaults.oidc_button_text.clone()),
-        entry!(oidc_admin_groups, config.oidc_admin_groups.clone(), defaults.oidc_admin_groups.clone()),
-        entry!(swagger_enabled, config.swagger_enabled.to_string(), defaults.swagger_enabled.to_string()),
-        entry!(agent_enabled, config.agent_enabled.to_string(), defaults.agent_enabled.to_string()),
-        entry!(agent_inbox_dir, config.agent_inbox_dir.clone(), defaults.agent_inbox_dir.clone()),
-        entry!(agent_storage_dir, config.agent_storage_dir.clone(), defaults.agent_storage_dir.clone()),
-        entry!(agent_llm_url, config.agent_llm_url.clone(), defaults.agent_llm_url.clone()),
-        entry!(agent_llm_model, config.agent_llm_model.clone(), defaults.agent_llm_model.clone()),
-        entry!(agent_llm_auth, config.agent_llm_auth.clone(), defaults.agent_llm_auth.clone()),
-        entry!(agent_confidence_threshold, config.agent_confidence_threshold.to_string(), defaults.agent_confidence_threshold.to_string()),
-        entry!(agent_context_limit, config.agent_context_limit.to_string(), defaults.agent_context_limit.to_string()),
-        entry!(agent_concurrency, config.agent_concurrency.to_string(), defaults.agent_concurrency.to_string()),
+        entry!(
+            database_url,
+            config.database_url.clone(),
+            defaults.database_url.clone()
+        ),
+        entry!(
+            oidc_issuer,
+            config.oidc_issuer.clone(),
+            defaults.oidc_issuer.clone()
+        ),
+        entry!(
+            oidc_client_id,
+            config.oidc_client_id.clone(),
+            defaults.oidc_client_id.clone()
+        ),
+        entry!(
+            oidc_client_secret,
+            config.oidc_client_secret.clone(),
+            defaults.oidc_client_secret.clone()
+        ),
+        entry!(
+            log_level,
+            config.log_level.clone(),
+            defaults.log_level.clone()
+        ),
+        entry!(
+            auth_password_enabled,
+            config.auth_password_enabled.to_string(),
+            defaults.auth_password_enabled.to_string()
+        ),
+        entry!(
+            auth_sso_enabled,
+            config.auth_sso_enabled.to_string(),
+            defaults.auth_sso_enabled.to_string()
+        ),
+        entry!(
+            oidc_button_text,
+            config.oidc_button_text.clone(),
+            defaults.oidc_button_text.clone()
+        ),
+        entry!(
+            oidc_admin_groups,
+            config.oidc_admin_groups.clone(),
+            defaults.oidc_admin_groups.clone()
+        ),
+        entry!(
+            swagger_enabled,
+            config.swagger_enabled.to_string(),
+            defaults.swagger_enabled.to_string()
+        ),
+        entry!(
+            agent_enabled,
+            config.agent_enabled.to_string(),
+            defaults.agent_enabled.to_string()
+        ),
+        entry!(
+            agent_inbox_dir,
+            config.agent_inbox_dir.clone(),
+            defaults.agent_inbox_dir.clone()
+        ),
+        entry!(
+            agent_storage_dir,
+            config.agent_storage_dir.clone(),
+            defaults.agent_storage_dir.clone()
+        ),
+        entry!(
+            agent_llm_url,
+            config.agent_llm_url.clone(),
+            defaults.agent_llm_url.clone()
+        ),
+        entry!(
+            agent_llm_model,
+            config.agent_llm_model.clone(),
+            defaults.agent_llm_model.clone()
+        ),
+        entry!(
+            agent_llm_auth,
+            config.agent_llm_auth.clone(),
+            defaults.agent_llm_auth.clone()
+        ),
+        entry!(
+            agent_confidence_threshold,
+            config.agent_confidence_threshold.to_string(),
+            defaults.agent_confidence_threshold.to_string()
+        ),
+        entry!(
+            agent_context_limit,
+            config.agent_context_limit.to_string(),
+            defaults.agent_context_limit.to_string()
+        ),
+        entry!(
+            agent_concurrency,
+            config.agent_concurrency.to_string(),
+            defaults.agent_concurrency.to_string()
+        ),
     ]
 }
 
@@ -278,10 +353,26 @@ pub async fn settings_submit(
     let RequestForm(result) = form;
     match result {
         FormResult::Ok(data) => {
-            let pw_enabled = if data.auth_password_enabled.is_some() { "true" } else { "false" };
-            let sso_enabled = if data.auth_sso_enabled.is_some() { "true" } else { "false" };
-            let swagger = if data.swagger_enabled.is_some() { "true" } else { "false" };
-            let agent_en = if data.agent_enabled.is_some() { "true" } else { "false" };
+            let pw_enabled = if data.auth_password_enabled.is_some() {
+                "true"
+            } else {
+                "false"
+            };
+            let sso_enabled = if data.auth_sso_enabled.is_some() {
+                "true"
+            } else {
+                "false"
+            };
+            let swagger = if data.swagger_enabled.is_some() {
+                "true"
+            } else {
+                "false"
+            };
+            let agent_en = if data.agent_enabled.is_some() {
+                "true"
+            } else {
+                "false"
+            };
             let oidc_button_text = data.oidc_button_text.unwrap_or_default();
             let oidc_issuer = data.oidc_issuer.unwrap_or_default();
             let oidc_client_id = data.oidc_client_id.unwrap_or_default();
@@ -353,7 +444,12 @@ pub async fn settings_probe_handler(
     let (config, _sources) = AppConfig::load_with_db(db).await;
 
     let probe = if config.agent_enabled && !config.agent_llm_url.is_empty() {
-        agent::probe_llm(&config.agent_llm_url, &config.agent_llm_model, &config.agent_llm_auth).await
+        agent::probe_llm(
+            &config.agent_llm_url,
+            &config.agent_llm_model,
+            &config.agent_llm_auth,
+        )
+        .await
     } else {
         AgentProbeResult::default()
     };
@@ -437,15 +533,29 @@ pub async fn users_create(
     let RequestForm(result) = form;
     match result {
         FormResult::Ok(data) => {
-            let email = if data.email.is_empty() { None } else { Some(data.email.as_str()) };
-            let display_name = if data.display_name.is_empty() { None } else { Some(data.display_name.as_str()) };
-            User::create(db, &data.username, email, display_name, &data.password, &data.role).await
-                .map_err(|e| cot::Error::internal(format!("failed to create user: {e}")))?;
+            let email = if data.email.is_empty() {
+                None
+            } else {
+                Some(data.email.as_str())
+            };
+            let display_name = if data.display_name.is_empty() {
+                None
+            } else {
+                Some(data.display_name.as_str())
+            };
+            User::create(
+                db,
+                &data.username,
+                email,
+                display_name,
+                &data.password,
+                &data.role,
+            )
+            .await
+            .map_err(|e| cot::Error::internal(format!("failed to create user: {e}")))?;
             Ok(auth::redirect("/admin/users"))
         }
-        FormResult::ValidationError(_) => {
-            Ok(auth::redirect("/admin/users/new"))
-        }
+        FormResult::ValidationError(_) => Ok(auth::redirect("/admin/users/new")),
     }
 }
 
@@ -455,7 +565,8 @@ pub async fn users_edit(
     db: &Database,
     user_id: i64,
 ) -> cot::Result<Html> {
-    let target = User::get_by_id(db, user_id).await
+    let target = User::get_by_id(db, user_id)
+        .await
         .map_err(|e| cot::Error::internal(format!("db error: {e}")))?
         .ok_or_else(|| cot::Error::internal("user not found"))?;
     let template = UserFormTemplate {
@@ -481,13 +592,35 @@ pub async fn users_update(
     let RequestForm(result) = form;
     match result {
         FormResult::Ok(data) => {
-            let mut target = User::get_by_id(db, user_id).await
+            let mut target = User::get_by_id(db, user_id)
+                .await
                 .map_err(|e| cot::Error::internal(format!("db error: {e}")))?
                 .ok_or_else(|| cot::Error::internal("user not found"))?;
-            let email = if data.email.is_empty() { None } else { Some(data.email.as_str()) };
-            let display_name = if data.display_name.is_empty() { None } else { Some(data.display_name.as_str()) };
-            let new_password = if data.password.is_empty() { None } else { Some(data.password.as_str()) };
-            target.update_fields(db, &data.username, email, display_name, new_password, &data.role).await
+            let email = if data.email.is_empty() {
+                None
+            } else {
+                Some(data.email.as_str())
+            };
+            let display_name = if data.display_name.is_empty() {
+                None
+            } else {
+                Some(data.display_name.as_str())
+            };
+            let new_password = if data.password.is_empty() {
+                None
+            } else {
+                Some(data.password.as_str())
+            };
+            target
+                .update_fields(
+                    db,
+                    &data.username,
+                    email,
+                    display_name,
+                    new_password,
+                    &data.role,
+                )
+                .await
                 .map_err(|e| cot::Error::internal(format!("failed to update user: {e}")))?;
             Ok(auth::redirect("/admin/users"))
         }
@@ -502,7 +635,8 @@ pub async fn users_delete(
     db: &Database,
     user_id: i64,
 ) -> cot::Result<cot::http::Response<Body>> {
-    User::delete_by_id(db, user_id).await
+    User::delete_by_id(db, user_id)
+        .await
         .map_err(|e| cot::Error::internal(format!("failed to delete user: {e}")))?;
     Ok(auth::redirect("/admin/users"))
 }
@@ -519,10 +653,7 @@ struct SetupTemplate {
 }
 
 pub async fn setup_page(i18n: I18n, message: String) -> cot::Result<Html> {
-    let template = SetupTemplate {
-        t: i18n.t,
-        message,
-    };
+    let template = SetupTemplate { t: i18n.t, message };
     Ok(Html::new(template.render()?))
 }
 
@@ -581,13 +712,25 @@ struct ArtistsTemplate {
     rows: Vec<ArtistRow>,
 }
 
-pub async fn artists_list(admin: AuthenticatedUser, i18n: I18n, db: &Database) -> cot::Result<Html> {
+pub async fn artists_list(
+    admin: AuthenticatedUser,
+    i18n: I18n,
+    db: &Database,
+) -> cot::Result<Html> {
     let artists = Artist::list_all(db).await.unwrap_or_default();
     let mut rows = Vec::with_capacity(artists.len());
     for artist in artists {
-        let release_count = ReleaseArtist::count_by_artist(db, artist.id_val()).await.unwrap_or(0);
-        let track_count = TrackArtist::count_by_artist(db, artist.id_val()).await.unwrap_or(0);
-        rows.push(ArtistRow { artist, release_count, track_count });
+        let release_count = ReleaseArtist::count_by_artist(db, artist.id_val())
+            .await
+            .unwrap_or(0);
+        let track_count = TrackArtist::count_by_artist(db, artist.id_val())
+            .await
+            .unwrap_or(0);
+        rows.push(ArtistRow {
+            artist,
+            release_count,
+            track_count,
+        });
     }
     let template = ArtistsTemplate {
         t: i18n.t,
@@ -657,13 +800,11 @@ pub async fn artists_edit(
         .ok_or_else(|| cot::Error::internal("artist not found"))?;
 
     let current_image_url = match artist.image_file_id {
-        Some(fid) => {
-            MediaFile::get_by_id(db, fid)
-                .await
-                .ok()
-                .flatten()
-                .map(|mf| format!("/api/player/cover/{}", mf.id_val()))
-        }
+        Some(fid) => MediaFile::get_by_id(db, fid)
+            .await
+            .ok()
+            .flatten()
+            .map(|mf| format!("/api/player/cover/{}", mf.id_val())),
         None => None,
     };
 
@@ -830,9 +971,9 @@ pub async fn artists_upload_image(
     let cover = crate::agent::cover_art::CoverImage {
         data: image_data,
         mime_type: parsed.mime_type.clone(),
-        source: crate::agent::cover_art::CoverSource::FolderFile(
-            std::path::PathBuf::from(&parsed.filename),
-        ),
+        source: crate::agent::cover_art::CoverSource::FolderFile(std::path::PathBuf::from(
+            &parsed.filename,
+        )),
     };
 
     let cover_file_id = crate::agent::cover_art::save_cover_to_storage(
@@ -922,7 +1063,9 @@ pub async fn releases_list(
     // If filtering by artist, find the set of release_ids for that artist
     let filtered_release_ids: Option<Vec<i64>> = match filter_artist_id {
         Some(aid) => {
-            let links = ReleaseArtist::find_by_artist(db, aid).await.unwrap_or_default();
+            let links = ReleaseArtist::find_by_artist(db, aid)
+                .await
+                .unwrap_or_default();
             Some(links.iter().map(|l| l.release_id()).collect())
         }
         None => None,
@@ -936,7 +1079,10 @@ pub async fn releases_list(
             }
         }
         let artist_names = resolve_artist_names(db, release.id_val(), &names).await;
-        rows.push(ReleaseRow { release, artist_names });
+        rows.push(ReleaseRow {
+            release,
+            artist_names,
+        });
     }
 
     let template = ReleasesTemplate {
@@ -967,7 +1113,11 @@ struct ReleaseFormTemplate {
     lang_code: &'static str,
 }
 
-pub async fn releases_new(admin: AuthenticatedUser, i18n: I18n, db: &Database) -> cot::Result<Html> {
+pub async fn releases_new(
+    admin: AuthenticatedUser,
+    i18n: I18n,
+    db: &Database,
+) -> cot::Result<Html> {
     let artists = Artist::list_all(db).await.unwrap_or_default();
     let template = ReleaseFormTemplate {
         t: i18n.t,
@@ -1084,9 +1234,9 @@ pub async fn releases_update(
                 .map_err(|e| cot::Error::internal(format!("failed to update artists: {e}")))?;
             Ok(auth::redirect("/admin/releases"))
         }
-        FormResult::ValidationError(_) => {
-            Ok(auth::redirect(&format!("/admin/releases/{release_id}/edit")))
-        }
+        FormResult::ValidationError(_) => Ok(auth::redirect(&format!(
+            "/admin/releases/{release_id}/edit"
+        ))),
     }
 }
 
@@ -1137,10 +1287,7 @@ pub async fn media_files_list(
     let rows: Vec<MediaFileRow> = files
         .into_iter()
         .map(|mf| {
-            let track_title = track_map
-                .get(&mf.id_val())
-                .cloned()
-                .unwrap_or_default();
+            let track_title = track_map.get(&mf.id_val()).cloned().unwrap_or_default();
             MediaFileRow {
                 media_file: mf,
                 track_title,
@@ -1204,17 +1351,16 @@ pub async fn jobs_list(
 /// rows for jobs that are no longer registered.
 async fn sync_registered_jobs(db: &Database, registry: &JobRegistry) {
     for job in registry.all_jobs() {
-        if let Err(e) = ScheduledJob::upsert(db, job.name(), job.description(), job.default_cron()).await {
+        if let Err(e) =
+            ScheduledJob::upsert(db, job.name(), job.description(), job.default_cron()).await
+        {
             tracing::error!("failed to upsert scheduled job {}: {e}", job.name());
         }
     }
     if let Ok(all) = ScheduledJob::list_all(db).await {
         for sched_job in all {
             if registry.get(sched_job.name_str()).is_none() {
-                tracing::warn!(
-                    "Removing orphaned scheduled job '{}'",
-                    sched_job.name_str()
-                );
+                tracing::warn!("Removing orphaned scheduled job '{}'", sched_job.name_str());
                 let _ = ScheduledJob::delete_by_name(db, sched_job.name_str()).await;
             }
         }
@@ -1229,6 +1375,15 @@ struct JobDetailTemplate {
     user_role: String,
     job: ScheduledJob,
     runs: Vec<JobRun>,
+}
+
+#[derive(Debug, Form)]
+pub struct MetadataBackfillForm {
+    audio_bitrate: Option<String>,
+    audio_sample_rate: Option<String>,
+    audio_bit_depth: Option<String>,
+    duration_seconds: Option<String>,
+    mode: Option<String>,
 }
 
 pub async fn job_detail(
@@ -1275,12 +1430,76 @@ pub async fn job_run_now(
     Ok(auth::redirect(&format!("/admin/jobs/{job_name}")))
 }
 
+pub async fn metadata_backfill_run(
+    _admin: AuthenticatedUser,
+    db: &Database,
+    pool: &sqlx::PgPool,
+    form: RequestForm<MetadataBackfillForm>,
+) -> cot::Result<cot::http::Response<Body>> {
+    let RequestForm(result) = form;
+    let data = match result {
+        FormResult::Ok(data) => data,
+        FormResult::ValidationError(_) => {
+            return Ok(auth::redirect("/admin/jobs/metadata_backfill"));
+        }
+    };
+
+    let options = crate::jobs::metadata_backfill::MetadataBackfillOptions {
+        audio_bitrate: data.audio_bitrate.is_some(),
+        audio_sample_rate: data.audio_sample_rate.is_some(),
+        audio_bit_depth: data.audio_bit_depth.is_some(),
+        duration_seconds: data.duration_seconds.is_some(),
+        overwrite: data.mode.as_deref() == Some("overwrite"),
+    };
+
+    let mut run = JobRun::create_running(db, "metadata_backfill", "manual")
+        .await
+        .map_err(|e| cot::Error::internal(format!("failed to create job run: {e}")))?;
+    let run_id = run.id_val();
+    let db = db.clone();
+    let pool = pool.clone();
+    let (live_config, _) = AppConfig::load_with_db(&db).await;
+
+    tokio::spawn(async move {
+        let start = std::time::Instant::now();
+        let ctx = scheduler::JobContext {
+            config: Arc::new(live_config),
+            db: db.clone(),
+            pool: pool.clone(),
+            run_id,
+            registry: Arc::new(JobRegistry::new()),
+        };
+        let mut log = scheduler::JobLog::with_live_flush(pool.clone(), run_id);
+        let result =
+            crate::jobs::metadata_backfill::run_with_options(&ctx, &mut log, options).await;
+        let duration_ms = start.elapsed().as_millis() as i64;
+        match result {
+            Ok(()) => {
+                let _ = run.set_completed(&db, duration_ms, &log.output()).await;
+            }
+            Err(e) => {
+                let _ = run
+                    .set_failed(&db, duration_ms, &log.output(), &e.to_string())
+                    .await;
+            }
+        }
+    });
+
+    Ok(auth::redirect(&format!(
+        "/admin/jobs/metadata_backfill/runs/{run_id}"
+    )))
+}
+
 pub async fn job_toggle_enabled(
     _admin: AuthenticatedUser,
     db: &Database,
     handle_cell: &Arc<tokio::sync::OnceCell<Arc<scheduler::SchedulerHandle>>>,
     job_name: &str,
 ) -> cot::Result<cot::http::Response<Body>> {
+    if job_name == "metadata_backfill" {
+        return Ok(auth::redirect("/admin/jobs/metadata_backfill"));
+    }
+
     let job = ScheduledJob::get_by_name(db, job_name)
         .await
         .map_err(|e| cot::Error::internal(format!("db error: {e}")))?
@@ -1311,6 +1530,10 @@ pub async fn job_update_cron(
     job_name: &str,
     form: RequestForm<CronForm>,
 ) -> cot::Result<cot::http::Response<Body>> {
+    if job_name == "metadata_backfill" {
+        return Ok(auth::redirect("/admin/jobs/metadata_backfill"));
+    }
+
     let RequestForm(result) = form;
     if let FormResult::Ok(data) = result {
         if let Some(handle) = handle_cell.get() {
@@ -1366,9 +1589,162 @@ struct ReviewsTemplate {
     t: &'static Translations,
     user_name: String,
     user_role: String,
-    reviews: Vec<PendingReview>,
+    rows: Vec<ReviewListRow>,
     stats_map: HashMap<i64, scheduler::ProcessingStatsRow>,
     status_filter: String,
+}
+
+#[derive(Debug)]
+struct ReviewListRow {
+    review: PendingReview,
+    display_input_path: String,
+    media_tags: Vec<ReviewMediaTag>,
+}
+
+#[derive(Debug, Clone)]
+struct ReviewMediaTag {
+    label: String,
+    kind: &'static str,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct ReviewMediaTagRow {
+    sha256_hash: String,
+    original_filename: String,
+    file_size_bytes: i64,
+    audio_format: Option<String>,
+    audio_bitrate: Option<i32>,
+    audio_sample_rate: Option<i32>,
+    audio_bit_depth: Option<i32>,
+}
+
+fn compact_path_tail(path: &str, max_chars: usize) -> String {
+    let normalized = path.replace('\\', "/");
+    if normalized.chars().count() <= max_chars {
+        return normalized;
+    }
+
+    let segments = normalized.split('/').collect::<Vec<_>>();
+    let filename = segments.last().copied().unwrap_or(normalized.as_str());
+    let filename_len = filename.chars().count();
+    if filename_len + 4 <= max_chars {
+        return format!(".../{filename}");
+    }
+
+    if filename_len > max_chars {
+        let suffix_len = max_chars.saturating_sub(3);
+        let suffix = filename
+            .chars()
+            .skip(filename_len.saturating_sub(suffix_len))
+            .collect::<String>();
+        return format!("...{suffix}");
+    }
+    format!(".../{filename}")
+}
+
+fn context_sha256(review: &PendingReview) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(review.context_json_str()).ok()?;
+    let sha = value.get("sha256")?.as_str()?.trim();
+    let is_sha256 = sha.len() == 64 && sha.chars().all(|ch| ch.is_ascii_hexdigit());
+    is_sha256.then(|| sha.to_ascii_lowercase())
+}
+
+fn file_extension(filename: &str) -> Option<String> {
+    std::path::Path::new(filename)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.trim().to_ascii_lowercase())
+        .filter(|ext| !ext.is_empty())
+}
+
+fn size_display(bytes: i64) -> String {
+    if bytes >= 1_073_741_824 {
+        format!("{:.1} GB", bytes as f64 / 1_073_741_824.0)
+    } else if bytes >= 1_048_576 {
+        format!("{:.1} MB", bytes as f64 / 1_048_576.0)
+    } else if bytes >= 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+fn review_tag(label: impl Into<String>, kind: &'static str) -> ReviewMediaTag {
+    ReviewMediaTag {
+        label: label.into(),
+        kind,
+    }
+}
+
+fn media_tags(row: &ReviewMediaTagRow) -> Vec<ReviewMediaTag> {
+    let mut tags = Vec::new();
+    if let Some(format) = row.audio_format.as_deref().filter(|s| !s.is_empty()) {
+        tags.push(review_tag(format.to_ascii_lowercase(), "format"));
+    } else if let Some(ext) = file_extension(&row.original_filename) {
+        tags.push(review_tag(ext, "format"));
+    }
+    if let Some(bitrate) = row.audio_bitrate {
+        tags.push(review_tag(format!("{bitrate} kbps"), "bitrate"));
+    }
+    if let Some(sample_rate) = row.audio_sample_rate {
+        if sample_rate % 1000 == 0 {
+            tags.push(review_tag(format!("{} kHz", sample_rate / 1000), "sample"));
+        } else {
+            tags.push(review_tag(
+                format!("{:.1} kHz", sample_rate as f64 / 1000.0),
+                "sample",
+            ));
+        }
+    }
+    if let Some(bit_depth) = row.audio_bit_depth {
+        tags.push(review_tag(format!("{bit_depth}-bit"), "depth"));
+    }
+    tags.push(review_tag(size_display(row.file_size_bytes), "size"));
+    tags
+}
+
+async fn review_media_tags(
+    pool: &sqlx::PgPool,
+    reviews: &[PendingReview],
+) -> HashMap<String, Vec<ReviewMediaTag>> {
+    let mut hashes = reviews
+        .iter()
+        .filter_map(context_sha256)
+        .collect::<Vec<_>>();
+    hashes.sort();
+    hashes.dedup();
+    if hashes.is_empty() {
+        return HashMap::new();
+    }
+
+    let quoted = hashes
+        .iter()
+        .map(|hash| format!("'{hash}'"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let query = format!(
+        "SELECT sha256_hash::text AS sha256_hash, \
+                original_filename::text AS original_filename, \
+                file_size_bytes, \
+                audio_format::text AS audio_format, \
+                audio_bitrate, audio_sample_rate, audio_bit_depth \
+         FROM furumusic__media_file \
+         WHERE file_type = 'audio' AND sha256_hash IN ({quoted})"
+    );
+
+    match sqlx::query_as::<_, ReviewMediaTagRow>(&query)
+        .fetch_all(pool)
+        .await
+    {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|row| (row.sha256_hash.to_ascii_lowercase(), media_tags(&row)))
+            .collect(),
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to load review media tags");
+            HashMap::new()
+        }
+    }
 }
 
 pub async fn reviews_list(
@@ -1389,12 +1765,27 @@ pub async fn reviews_list(
     let stats_map = scheduler::ProcessingStats::list_by_review_ids(pool, &review_ids)
         .await
         .unwrap_or_default();
+    let media_tags = review_media_tags(pool, &reviews).await;
+    let rows = reviews
+        .into_iter()
+        .map(|review| {
+            let media_tags = context_sha256(&review)
+                .and_then(|sha| media_tags.get(&sha).cloned())
+                .unwrap_or_default();
+            let display_input_path = compact_path_tail(review.input_path_str(), 80);
+            ReviewListRow {
+                review,
+                display_input_path,
+                media_tags,
+            }
+        })
+        .collect();
 
     let template = ReviewsTemplate {
         t: i18n.t,
         user_name: admin.name,
         user_role: admin.role.code().to_owned(),
-        reviews,
+        rows,
         stats_map,
         status_filter: status.unwrap_or("").to_owned(),
     };
@@ -1479,9 +1870,8 @@ pub async fn review_approve(
         return Ok(auth::redirect(&format!("/admin/reviews/{review_id}")));
     }
 
-    let normalized: crate::agent::dto::NormalizedFields =
-        serde_json::from_str(&result_str)
-            .map_err(|e| cot::Error::internal(format!("invalid result_json: {e}")))?;
+    let normalized: crate::agent::dto::NormalizedFields = serde_json::from_str(&result_str)
+        .map_err(|e| cot::Error::internal(format!("invalid result_json: {e}")))?;
 
     let context: serde_json::Value = serde_json::from_str(&context_str).unwrap_or_default();
 
@@ -1516,6 +1906,65 @@ pub async fn review_approve(
     }
 
     Ok(auth::redirect(&format!("/admin/reviews/{review_id}")))
+}
+
+#[derive(Debug, Form)]
+pub struct ReviewsBulkForm {
+    selected_ids: Option<String>,
+    action: Option<String>,
+    status_filter: Option<String>,
+}
+
+fn parse_review_ids(raw: &str) -> Vec<i64> {
+    let mut ids = raw
+        .split(',')
+        .filter_map(|part| part.trim().parse::<i64>().ok())
+        .filter(|id| *id > 0)
+        .collect::<Vec<_>>();
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
+fn reviews_redirect(status: Option<&str>) -> String {
+    match status {
+        Some(s) if !s.is_empty() => format!("/admin/reviews?status={s}"),
+        _ => "/admin/reviews".to_owned(),
+    }
+}
+
+pub async fn reviews_bulk(
+    _admin: AuthenticatedUser,
+    db: &Database,
+    form: RequestForm<ReviewsBulkForm>,
+) -> cot::Result<cot::http::Response<Body>> {
+    let RequestForm(result) = form;
+    let data = match result {
+        FormResult::Ok(data) => data,
+        FormResult::ValidationError(_) => return Ok(auth::redirect("/admin/reviews")),
+    };
+
+    let redirect_url = reviews_redirect(data.status_filter.as_deref());
+    let ids = parse_review_ids(data.selected_ids.as_deref().unwrap_or_default());
+    if ids.is_empty() {
+        return Ok(auth::redirect(&redirect_url));
+    }
+
+    match data.action.as_deref() {
+        Some("delete") => {
+            PendingReview::delete_by_ids(db, &ids)
+                .await
+                .map_err(|e| cot::Error::internal(format!("db error: {e}")))?;
+        }
+        Some("requeue") => {
+            PendingReview::requeue_by_ids(db, &ids)
+                .await
+                .map_err(|e| cot::Error::internal(format!("db error: {e}")))?;
+        }
+        _ => {}
+    }
+
+    Ok(auth::redirect(&redirect_url))
 }
 
 pub async fn review_reject(

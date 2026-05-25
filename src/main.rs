@@ -24,13 +24,13 @@ use cot::db::Database;
 use cot::form::{Form, FormResult};
 use cot::html::Html;
 use cot::middleware::SessionMiddleware;
-use cot::static_files::StaticFilesMiddleware;
 use cot::project::RegisterAppsContext;
 use cot::request::extractors::{RequestForm, UrlQuery};
 use cot::response::IntoResponse;
 use cot::router::method::get;
 use cot::router::{Route, Router};
 use cot::session::Session;
+use cot::static_files::StaticFilesMiddleware;
 use cot::{App, AppBuilder, Body, Project, Template};
 use serde::Deserialize;
 
@@ -51,6 +51,7 @@ fn build_registry() -> Arc<JobRegistry> {
     registry.register(jobs::cover_backfill::CoverBackfillJob);
     registry.register(jobs::artist_image_backfill::ArtistImageBackfillJob);
     registry.register(jobs::artist_track_image_backfill::ArtistTrackImageBackfillJob);
+    registry.register(jobs::metadata_backfill::MetadataBackfillJob);
     Arc::new(registry)
 }
 
@@ -58,11 +59,7 @@ fn build_registry() -> Arc<JobRegistry> {
 // Handlers
 // ---------------------------------------------------------------------------
 
-async fn index(
-    session: Session,
-    db: Database,
-    i18n: I18n,
-) -> cot::Result<cot::response::Response> {
+async fn index(session: Session, db: Database, i18n: I18n) -> cot::Result<cot::response::Response> {
     let _user = match auth::get_session_user(&session, &db).await {
         Some(u) => u,
         None => return Ok(auth::redirect("/login")),
@@ -164,7 +161,8 @@ impl App for FuruApp {
                 get(|| async { Ok::<_, cot::Error>(auth::redirect("/swagger/")) }),
                 "swagger_redirect",
             ),
-            Route::with_handler_and_name("/",
+            Route::with_handler_and_name(
+                "/",
                 |session: Session, db: Database, i18n: I18n| async move {
                     index(session, db, i18n).await
                 },
@@ -186,9 +184,12 @@ impl App for FuruApp {
                                 .into_response()
                         }
                     }
-                }).post({
+                })
+                .post({
                     let config = Arc::clone(&self.config);
-                    move |i18n: I18n, db: Database, session: Session,
+                    move |i18n: I18n,
+                          db: Database,
+                          session: Session,
                           form: RequestForm<LoginForm>| {
                         let config = Arc::clone(&config);
                         async move {
@@ -204,8 +205,7 @@ impl App for FuruApp {
                             };
 
                             // Try to authenticate
-                            if let Ok(Some(user)) =
-                                User::get_by_username(&db, &data.username).await
+                            if let Ok(Some(user)) = User::get_by_username(&db, &data.username).await
                             {
                                 if let Some(hash) = user.password_ref() {
                                     let password = Password::new(&data.password);
@@ -374,10 +374,7 @@ impl Project for FuruProject {
             "/api/player",
         );
         if self.app_config.swagger_enabled {
-            apps.register_with_views(
-                cot::openapi::swagger_ui::SwaggerUi::new(),
-                "/swagger",
-            );
+            apps.register_with_views(cot::openapi::swagger_ui::SwaggerUi::new(), "/swagger");
         }
     }
 }
@@ -393,8 +390,8 @@ fn main() -> impl Project {
     // Initialise tracing subscriber with the configured log level.
     // FURU_LOG_LEVEL (or the default "info") is parsed as an EnvFilter
     // directive, so values like "debug", "warn,furumusic=trace" all work.
-    let filter = tracing_subscriber::EnvFilter::try_new(&app_config.log_level)
-        .unwrap_or_else(|e| {
+    let filter =
+        tracing_subscriber::EnvFilter::try_new(&app_config.log_level).unwrap_or_else(|e| {
             eprintln!(
                 "WARNING: invalid FURU_LOG_LEVEL {:?}: {e}; falling back to \"info\"",
                 app_config.log_level,

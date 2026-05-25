@@ -10,6 +10,9 @@ pub struct RawMetadata {
     pub year: Option<u32>,
     pub genre: Option<String>,
     pub duration_secs: Option<f64>,
+    pub audio_bitrate: Option<i32>,
+    pub audio_sample_rate: Option<i32>,
+    pub audio_bit_depth: Option<i32>,
 }
 
 /// Hints parsed from the file path (directory structure + filename).

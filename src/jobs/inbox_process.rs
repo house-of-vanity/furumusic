@@ -20,12 +20,10 @@ pub fn is_orchestrator_running() -> bool {
 /// Try to acquire the PostgreSQL advisory lock for the orchestrator.
 /// Returns true if the lock was acquired (no other orchestrator is running).
 async fn try_acquire_orchestrator_lock(pool: &sqlx::PgPool) -> bool {
-    match sqlx::query_scalar::<_, bool>(
-        "SELECT pg_try_advisory_lock($1)"
-    )
-    .bind(ORCHESTRATOR_ADVISORY_LOCK_ID)
-    .fetch_one(pool)
-    .await
+    match sqlx::query_scalar::<_, bool>("SELECT pg_try_advisory_lock($1)")
+        .bind(ORCHESTRATOR_ADVISORY_LOCK_ID)
+        .fetch_one(pool)
+        .await
     {
         Ok(acquired) => acquired,
         Err(e) => {
@@ -43,14 +41,12 @@ async fn release_orchestrator_lock(pool: &sqlx::PgPool) {
         .await;
 }
 
-use crate::config::AppConfig;
-use crate::music::{
-    Artist, MediaFile, Release, ReleaseArtist, Track, TrackArtist,
-};
-use crate::scheduler::{Job, JobContext, JobLog, JobRun, PendingReview, ProcessingStats};
-use crate::agent::dto::{FolderContext, NormalizedFields, RawMetadata, PathHints};
-use crate::agent::normalize::BatchFileInput;
+use crate::agent::dto::{FolderContext, NormalizedFields, PathHints, RawMetadata};
 use crate::agent::mover;
+use crate::agent::normalize::BatchFileInput;
+use crate::config::AppConfig;
+use crate::music::{Artist, MediaFile, Release, ReleaseArtist, Track, TrackArtist};
+use crate::scheduler::{Job, JobContext, JobLog, JobRun, PendingReview, ProcessingStats};
 
 const AUDIO_EXTENSIONS: &[&str] = &[
     "mp3", "flac", "ogg", "opus", "aac", "m4a", "wav", "ape", "wv", "wma", "tta", "aiff", "aif",
@@ -83,8 +79,13 @@ impl Job for InboxProcessJob {
             previous_value = prev,
             "inbox_process: checking ORCHESTRATOR_RUNNING AtomicBool"
         );
-        if ORCHESTRATOR_RUNNING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
-            log.info("Another inbox_process orchestrator is already running (AtomicBool), skipping");
+        if ORCHESTRATOR_RUNNING
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            log.info(
+                "Another inbox_process orchestrator is already running (AtomicBool), skipping",
+            );
             return Ok(());
         }
         struct AtomicGuard;
@@ -115,7 +116,9 @@ impl Job for InboxProcessJob {
                 });
             }
         }
-        let _advisory_guard = AdvisoryGuard { pool: pool_for_unlock };
+        let _advisory_guard = AdvisoryGuard {
+            pool: pool_for_unlock,
+        };
 
         let config = Arc::clone(&ctx.config);
         let mut total_ok = 0u64;
@@ -151,9 +154,9 @@ impl Job for InboxProcessJob {
                     folder_rel, file_count,
                 ));
 
-                let (ok, fail) = process_folder_batch(
-                    &ctx.db, &config, &ctx.pool, &folder_rel, reviews, log,
-                ).await;
+                let (ok, fail) =
+                    process_folder_batch(&ctx.db, &config, &ctx.pool, &folder_rel, reviews, log)
+                        .await;
 
                 total_ok += ok;
                 total_fail += fail;
@@ -296,7 +299,7 @@ async fn process_folder_batch(
         let _ = review.set_processing(db).await;
 
         // Parse context_json
-        let context: serde_json::Value = review
+        let mut context: serde_json::Value = review
             .context_json
             .as_deref()
             .and_then(|s| serde_json::from_str(s).ok())
@@ -304,40 +307,51 @@ async fn process_folder_batch(
 
         // Extract metadata (with 60s timeout)
         let path_for_meta = file_path.to_path_buf();
-        let meta_future = tokio::task::spawn_blocking(move || {
-            crate::agent::metadata::extract(&path_for_meta)
-        });
-        let raw_meta = match tokio::time::timeout(
-            std::time::Duration::from_secs(60),
-            meta_future,
-        ).await {
-            Ok(Ok(Ok(m))) => m,
-            Ok(Ok(Err(e))) => {
-                let msg = format!("{filename}: metadata error: {e}");
-                log.error(&msg);
-                let _ = review.set_failed(db, &msg).await;
-                failed_reviews.push(review);
-                continue;
-            }
-            Ok(Err(e)) => {
-                let msg = format!("{filename}: metadata panic: {e}");
-                log.error(&msg);
-                let _ = review.set_failed(db, &msg).await;
-                failed_reviews.push(review);
-                continue;
-            }
-            Err(_) => {
-                let msg = format!("{filename}: metadata timeout (60s)");
-                log.error(&msg);
-                let _ = review.set_failed(db, &msg).await;
-                failed_reviews.push(review);
-                continue;
-            }
-        };
+        let meta_future =
+            tokio::task::spawn_blocking(move || crate::agent::metadata::extract(&path_for_meta));
+        let raw_meta =
+            match tokio::time::timeout(std::time::Duration::from_secs(60), meta_future).await {
+                Ok(Ok(Ok(m))) => m,
+                Ok(Ok(Err(e))) => {
+                    let msg = format!("{filename}: metadata error: {e}");
+                    log.error(&msg);
+                    let _ = review.set_failed(db, &msg).await;
+                    failed_reviews.push(review);
+                    continue;
+                }
+                Ok(Err(e)) => {
+                    let msg = format!("{filename}: metadata panic: {e}");
+                    log.error(&msg);
+                    let _ = review.set_failed(db, &msg).await;
+                    failed_reviews.push(review);
+                    continue;
+                }
+                Err(_) => {
+                    let msg = format!("{filename}: metadata timeout (60s)");
+                    log.error(&msg);
+                    let _ = review.set_failed(db, &msg).await;
+                    failed_reviews.push(review);
+                    continue;
+                }
+            };
 
         // Parse path hints
         let relative = file_path.strip_prefix(inbox_path).unwrap_or(file_path);
         let hints = crate::agent::path_hints::parse(relative);
+        if let Some(context_obj) = context.as_object_mut() {
+            context_obj.insert(
+                "audio_bitrate".to_owned(),
+                serde_json::json!(raw_meta.audio_bitrate),
+            );
+            context_obj.insert(
+                "audio_sample_rate".to_owned(),
+                serde_json::json!(raw_meta.audio_sample_rate),
+            );
+            context_obj.insert(
+                "audio_bit_depth".to_owned(),
+                serde_json::json!(raw_meta.audio_bit_depth),
+            );
+        }
 
         prepared.push(PreparedFile {
             review,
@@ -366,14 +380,20 @@ async fn process_folder_batch(
     let mut album_queries: Vec<String> = Vec::new();
 
     for p in &prepared {
-        let artist_q = p.raw_meta.artist.as_deref()
+        let artist_q = p
+            .raw_meta
+            .artist
+            .as_deref()
             .or(p.hints.artist.as_deref())
             .unwrap_or("")
             .to_owned();
         if !artist_q.is_empty() && !artist_queries.contains(&artist_q) {
             artist_queries.push(artist_q);
         }
-        let album_q = p.raw_meta.album.as_deref()
+        let album_q = p
+            .raw_meta
+            .album
+            .as_deref()
             .or(p.hints.album.as_deref())
             .unwrap_or("")
             .to_owned();
@@ -388,10 +408,15 @@ async fn process_folder_batch(
         match tokio::time::timeout(
             std::time::Duration::from_secs(30),
             crate::agent::rag::find_similar_artists(pool, q, 5),
-        ).await {
+        )
+        .await
+        {
             Ok(Ok(results)) => {
                 for a in results {
-                    if !all_similar_artists.iter().any(|x: &crate::agent::dto::SimilarArtist| x.id == a.id) {
+                    if !all_similar_artists
+                        .iter()
+                        .any(|x: &crate::agent::dto::SimilarArtist| x.id == a.id)
+                    {
                         all_similar_artists.push(a);
                     }
                 }
@@ -406,10 +431,15 @@ async fn process_folder_batch(
         match tokio::time::timeout(
             std::time::Duration::from_secs(30),
             crate::agent::rag::find_similar_releases(pool, q, 5),
-        ).await {
+        )
+        .await
+        {
             Ok(Ok(results)) => {
                 for r in results {
-                    if !all_similar_releases.iter().any(|x: &crate::agent::dto::SimilarRelease| x.id == r.id) {
+                    if !all_similar_releases
+                        .iter()
+                        .any(|x: &crate::agent::dto::SimilarRelease| x.id == r.id)
+                    {
                         all_similar_releases.push(r);
                     }
                 }
@@ -458,8 +488,9 @@ async fn process_folder_batch(
     };
 
     // Build batch input
-    let batch_files: Vec<BatchFileInput> = prepared.iter().map(|p| {
-        BatchFileInput {
+    let batch_files: Vec<BatchFileInput> = prepared
+        .iter()
+        .map(|p| BatchFileInput {
             filename: p.filename.clone(),
             raw: RawMetadata {
                 title: p.raw_meta.title.clone(),
@@ -469,6 +500,9 @@ async fn process_folder_batch(
                 year: p.raw_meta.year,
                 genre: p.raw_meta.genre.clone(),
                 duration_secs: p.raw_meta.duration_secs,
+                audio_bitrate: p.raw_meta.audio_bitrate,
+                audio_sample_rate: p.raw_meta.audio_sample_rate,
+                audio_bit_depth: p.raw_meta.audio_bit_depth,
             },
             hints: PathHints {
                 title: p.hints.title.clone(),
@@ -477,8 +511,8 @@ async fn process_folder_batch(
                 year: p.hints.year,
                 track_number: p.hints.track_number,
             },
-        }
-    }).collect();
+        })
+        .collect();
 
     let system_prompt = include_str!("../../prompts/normalize_batch.txt");
     let context_limit = config.agent_context_limit;
@@ -493,7 +527,8 @@ async fn process_folder_batch(
         &all_similar_artists,
         &all_similar_releases,
         Some(&folder_ctx),
-    ).await;
+    )
+    .await;
 
     let batch_result = match llm_result {
         Ok(r) => r,
@@ -506,7 +541,9 @@ async fn process_folder_batch(
             }
             let total_fail_count = failed_reviews.len() as u64 + file_count as u64;
             let duration_ms = batch_start.elapsed().as_millis() as i64;
-            let _ = run.set_failed(db, duration_ms, &log.output(), &err_msg).await;
+            let _ = run
+                .set_failed(db, duration_ms, &log.output(), &err_msg)
+                .await;
             return (0, total_fail_count);
         }
     };
@@ -524,9 +561,7 @@ async fn process_folder_batch(
     log.info("Phase 4: finalizing...");
 
     // Build lookup map: filename → NormalizedFields
-    let result_map: HashMap<String, NormalizedFields> = batch_result.results
-        .into_iter()
-        .collect();
+    let result_map: HashMap<String, NormalizedFields> = batch_result.results.into_iter().collect();
 
     let llm_model = &batch_result.model;
     let prompt_per_file = batch_result.prompt_tokens / prepared.len().max(1) as u64;
@@ -558,7 +593,8 @@ async fn process_folder_batch(
             duration_per_file,
             prompt_per_file as i64,
             completion_per_file as i64,
-        ).await;
+        )
+        .await;
 
         let result_json = serde_json::to_string(normalized).unwrap_or_default();
         let confidence = normalized.confidence.unwrap_or(0.0);
@@ -573,7 +609,9 @@ async fn process_folder_batch(
             normalized.artist.as_deref().unwrap_or("-"),
             normalized.album.as_deref().unwrap_or("-"),
             normalized.title.as_deref().unwrap_or("-"),
-            normalized.track_number.map_or("-".into(), |n| n.to_string()),
+            normalized
+                .track_number
+                .map_or("-".into(), |n| n.to_string()),
             normalized.year.map_or("-".into(), |y| y.to_string()),
             confidence,
             feat,
@@ -586,9 +624,17 @@ async fn process_folder_batch(
 
         if confidence >= config.agent_confidence_threshold {
             match finalize_approved(
-                db, pool, config, &input_path_str, normalized, &p.context,
-                &config.agent_storage_dir, Some(llm_model),
-            ).await {
+                db,
+                pool,
+                config,
+                &input_path_str,
+                normalized,
+                &p.context,
+                &config.agent_storage_dir,
+                Some(llm_model),
+            )
+            .await
+            {
                 Ok(()) => {
                     let _ = p.review.set_auto_approved(db).await;
                     ok_count += 1;
@@ -604,7 +650,8 @@ async fn process_folder_batch(
             p.review.status = cot::db::LimitedString::new("pending").unwrap();
             p.review.updated_at = cot::db::LimitedString::new(
                 &chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
-            ).unwrap();
+            )
+            .unwrap();
             let _ = p.review.save(db).await;
             log.info(&format!(
                 "{filename}: manual review (confidence {confidence} < {})",
@@ -669,10 +716,7 @@ pub async fn finalize_approved(
             .map_err(|e| anyhow::anyhow!("failed to link release-artist: {e}"))?;
     }
 
-    let sha256 = context
-        .get("sha256")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let sha256 = context.get("sha256").and_then(|v| v.as_str()).unwrap_or("");
     let file_size = context
         .get("file_size")
         .and_then(|v| v.as_i64())
@@ -681,6 +725,18 @@ pub async fn finalize_approved(
         .get("duration_secs")
         .and_then(|v| v.as_f64())
         .unwrap_or(0.0);
+    let audio_bitrate = context
+        .get("audio_bitrate")
+        .and_then(|v| v.as_i64())
+        .and_then(|v| i32::try_from(v).ok());
+    let audio_sample_rate = context
+        .get("audio_sample_rate")
+        .and_then(|v| v.as_i64())
+        .and_then(|v| i32::try_from(v).ok());
+    let audio_bit_depth = context
+        .get("audio_bit_depth")
+        .and_then(|v| v.as_i64())
+        .and_then(|v| i32::try_from(v).ok());
 
     let source_path = Path::new(input_path_str);
     let original_filename = source_path
@@ -746,9 +802,9 @@ pub async fn finalize_approved(
         file_size,
         sha256,
         Some(ext),
-        None,
-        None,
-        None,
+        audio_bitrate,
+        audio_sample_rate,
+        audio_bit_depth,
     )
     .await
     .map_err(|e| anyhow::anyhow!("failed to create media file: {e}"))?;
@@ -785,9 +841,7 @@ pub async fn finalize_approved(
 
     // Cover art: if the release has no cover yet, try to find one
     if release.cover_file_id.is_none() {
-        let source_folder = Path::new(input_path_str)
-            .parent()
-            .unwrap_or(Path::new("."));
+        let source_folder = Path::new(input_path_str).parent().unwrap_or(Path::new("."));
 
         // Collect audio files in the same folder to try embedded extraction
         let audio_files_in_folder: Vec<std::path::PathBuf> = std::fs::read_dir(source_folder)
@@ -955,10 +1009,7 @@ fn truncate_path(path: &str, max_len: usize) -> String {
     } else if max_len <= 3 {
         ".".repeat(max_len)
     } else {
-        let suffix: String = path
-            .chars()
-            .skip(char_count - (max_len - 3))
-            .collect();
+        let suffix: String = path.chars().skip(char_count - (max_len - 3)).collect();
         format!("...{suffix}")
     }
 }
