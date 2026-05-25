@@ -208,6 +208,84 @@ button.user-stat:hover {
 
 .sidebar-nav-item svg { width: 20px; height: 20px; flex-shrink: 0; }
 
+.sidebar-section {
+    padding: 8px;
+    border-top: 1px solid var(--border-color);
+}
+
+.sidebar-section-title {
+    padding: 6px 12px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-subdued);
+}
+
+.following-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+.following-artist {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    transition: background 0.15s, color 0.15s;
+}
+
+.following-artist:hover,
+.following-artist.active {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.following-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--bg-elevated);
+    overflow: hidden;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.following-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.following-avatar svg {
+    width: 16px;
+    height: 16px;
+    color: var(--text-subdued);
+}
+
+.following-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.following-empty {
+    padding: 8px 12px;
+    color: var(--text-subdued);
+    font-size: 12px;
+}
+
 .playlist-list {
     flex: 1;
     overflow-y: auto;
@@ -588,6 +666,49 @@ button.user-stat:hover {
 .release-action-btn.secondary {
     background: var(--bg-active);
     color: var(--text-primary);
+}
+
+.release-action-btn.followed {
+    background: var(--accent);
+    color: #000;
+}
+
+.artist-follow-card-btn {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-color);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.2s, transform 0.2s, background 0.15s, color 0.15s;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+    color: var(--text-primary);
+}
+
+.card:hover .artist-follow-card-btn,
+.search-artist-card:hover .artist-follow-card-btn,
+.artist-follow-card-btn.followed {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.artist-follow-card-btn.followed {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #000;
+}
+
+.artist-follow-card-btn svg {
+    width: 17px;
+    height: 17px;
 }
 
 /* Queue Panel */
@@ -1166,6 +1287,7 @@ button.user-stat:hover {
     display: flex;
     align-items: center;
     justify-content: center;
+    position: relative;
 }
 
 .search-artist-img img { width: 100%; height: 100%; object-fit: cover; }
@@ -1704,6 +1826,7 @@ button.user-stat:hover {
     .card-subtitle { font-size: 11px; }
     .card-play-btn,
     .card-enqueue-btn,
+    .artist-follow-card-btn,
     .track-actions,
     .playlist-item-actions,
     .queue-track-actions,
@@ -2146,6 +2269,33 @@ button.user-stat:hover {
                     Artists
                 </div>
             </div>
+            <div class="sidebar-section">
+                <div class="sidebar-section-title">
+                    Following
+                    <span x-show="$store.follows.artists.length > 0"
+                          x-text="'(' + $store.follows.artists.length + ')'"></span>
+                </div>
+                <template x-if="$store.follows.artists.length === 0">
+                    <div class="following-empty">No followed artists</div>
+                </template>
+                <div class="following-list" x-show="$store.follows.artists.length > 0" x-cloak>
+                    <template x-for="artist in $store.follows.artists" :key="artist.id">
+                        <div class="following-artist"
+                             :class="{ active: $store.library.currentArtist && $store.library.currentArtist.id === artist.id }"
+                             @click="$store.library.openArtist(artist.id)">
+                            <div class="following-avatar">
+                                <template x-if="artist.image_url">
+                                    <img :src="artist.image_url" :alt="artist.name" loading="lazy">
+                                </template>
+                                <template x-if="!artist.image_url">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 10-16 0"/></svg>
+                                </template>
+                            </div>
+                            <div class="following-name" x-text="artist.name"></div>
+                        </div>
+                    </template>
+                </div>
+            </div>
             <div class="playlist-list">
                 <template x-for="pl in $store.playlists.list" :key="pl.id">
                     <div class="playlist-item-row">
@@ -2279,6 +2429,17 @@ button.user-stat:hover {
                                                     <template x-if="!artist.image_url">
                                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 10-16 0"/></svg>
                                                     </template>
+                                                    <button class="artist-follow-card-btn"
+                                                            :class="{ followed: $store.follows.has(artist.id) }"
+                                                            @click.stop="$store.follows.toggle(artist.id)"
+                                                            :title="$store.follows.has(artist.id) ? 'Unfollow artist' : 'Follow artist'">
+                                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                            <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/>
+                                                            <circle cx="9" cy="7" r="4"/>
+                                                            <path x-show="!$store.follows.has(artist.id)" d="M19 8v6M16 11h6"/>
+                                                            <path x-show="$store.follows.has(artist.id)" d="M16 11l2 2 4-5"/>
+                                                        </svg>
+                                                    </button>
                                                 </div>
                                                 <div class="search-artist-name" x-text="artist.name"></div>
                                             </div>
@@ -2380,6 +2541,17 @@ button.user-stat:hover {
                                     <template x-if="!artist.image_url">
                                         <span class="placeholder-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 10-16 0"/></svg></span>
                                     </template>
+                                    <button class="artist-follow-card-btn"
+                                            :class="{ followed: $store.follows.has(artist.id) }"
+                                            @click.stop="$store.follows.toggle(artist.id)"
+                                            :title="$store.follows.has(artist.id) ? 'Unfollow artist' : 'Follow artist'">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/>
+                                            <circle cx="9" cy="7" r="4"/>
+                                            <path x-show="!$store.follows.has(artist.id)" d="M19 8v6M16 11h6"/>
+                                            <path x-show="$store.follows.has(artist.id)" d="M16 11l2 2 4-5"/>
+                                        </svg>
+                                    </button>
                                 </div>
                                 <div class="card-title" x-text="artist.name"></div>
                                 <div class="card-subtitle" x-text="artist.release_count + ' releases · ' + artist.track_count + ' tracks'"></div>
@@ -2418,6 +2590,20 @@ button.user-stat:hover {
                                 <span x-text="$store.library.currentArtist.total_track_count + ' tracks'"></span>
                                 <span>•</span>
                                 <span x-text="$store.library.currentArtist.total_play_count + ' plays'"></span>
+                            </div>
+                            <div class="release-actions">
+                                <button class="release-action-btn secondary"
+                                        :class="{ followed: $store.follows.has($store.library.currentArtist.id) }"
+                                        @click="$store.follows.toggle($store.library.currentArtist.id)"
+                                        :title="$store.follows.has($store.library.currentArtist.id) ? 'Unfollow artist' : 'Follow artist'">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/>
+                                        <circle cx="9" cy="7" r="4"/>
+                                        <path x-show="!$store.follows.has($store.library.currentArtist.id)" d="M19 8v6M16 11h6"/>
+                                        <path x-show="$store.follows.has($store.library.currentArtist.id)" d="M16 11l2 2 4-5"/>
+                                    </svg>
+                                    <span x-text="$store.follows.has($store.library.currentArtist.id) ? 'Following' : 'Follow'"></span>
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -3816,6 +4002,81 @@ document.addEventListener('alpine:init', () => {
         isReleaseLiked(release) {
             if (!release || !release.tracks || release.tracks.length === 0) return false;
             return release.tracks.every(t => this._set.has(t.id));
+        },
+    });
+
+    // -----------------------------------------------------------------------
+    // Artist follows store
+    // -----------------------------------------------------------------------
+    Alpine.store('follows', {
+        _set: new Set(),
+        artists: [],
+
+        init() {
+            this.reload();
+        },
+
+        has(artistId) {
+            return this._set.has(Number(artistId));
+        },
+
+        async reload() {
+            try {
+                const res = await fetch('/api/player/follows');
+                if (!res.ok) return;
+                const data = await res.json();
+                this._set = new Set((data.artist_ids || []).map(Number));
+                this.artists = data.artists || [];
+            } catch {}
+        },
+
+        _artistSnapshot(artistId) {
+            const id = Number(artistId);
+            const library = Alpine.store('library');
+            const fromLists = [
+                ...(library.artists || []),
+                ...((library.searchResults && library.searchResults.artists) || []),
+            ].find(artist => Number(artist.id) === id);
+            if (fromLists) return fromLists;
+            if (library.currentArtist && Number(library.currentArtist.id) === id) {
+                return {
+                    id,
+                    name: library.currentArtist.name,
+                    image_url: library.currentArtist.image_url,
+                    release_count: (library.currentArtist.releases || []).length,
+                    track_count: library.currentArtist.total_track_count || 0,
+                };
+            }
+            return null;
+        },
+
+        async toggle(artistId) {
+            const id = Number(artistId);
+            if (!id) return;
+
+            if (this._set.has(id)) {
+                this._set.delete(id);
+                this.artists = this.artists.filter(artist => Number(artist.id) !== id);
+            } else {
+                this._set.add(id);
+                const snapshot = this._artistSnapshot(id);
+                if (snapshot && !this.artists.some(artist => Number(artist.id) === id)) {
+                    this.artists = [snapshot, ...this.artists];
+                }
+            }
+            this._set = new Set(this._set);
+
+            try {
+                const res = await fetch(`/api/player/follows/toggle/${id}`, { method: 'POST' });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.followed) this._set.add(id);
+                    else this._set.delete(id);
+                    this._set = new Set(this._set);
+                }
+            } catch {}
+
+            await this.reload();
         },
     });
 

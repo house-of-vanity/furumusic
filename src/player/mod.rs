@@ -237,6 +237,17 @@ struct LikedIds {
     track_ids: Vec<i64>,
 }
 
+#[derive(Debug, Serialize, JsonSchema)]
+struct FollowStatus {
+    followed: bool,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct FollowedArtists {
+    artist_ids: Vec<i64>,
+    artists: Vec<ArtistCard>,
+}
+
 // ---------------------------------------------------------------------------
 // Query helpers
 // ---------------------------------------------------------------------------
@@ -2113,6 +2124,124 @@ async fn liked_ids_handler(
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/player/follows  — get followed artists for current user
+// ---------------------------------------------------------------------------
+
+async fn followed_artists_handler(
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+
+    let rows = sqlx::query_as::<_, ArtistRow>(
+        r#"SELECT a.id, a.name::text as name, a.image_file_id,
+                  COALESCE(s.release_count, 0)::bigint AS release_count,
+                  COALESCE(s.track_count, 0)::bigint AS track_count
+           FROM furumusic__user_followed_artist ufa
+           JOIN furumusic__artist a ON a.id = ufa.artist_id
+           LEFT JOIN (
+               SELECT ra.artist_id,
+                      COUNT(DISTINCT r.id) AS release_count,
+                      COUNT(t.id) AS track_count
+               FROM furumusic__release_artist ra
+               JOIN furumusic__release r ON r.id = ra.release_id AND r.is_hidden = false
+               LEFT JOIN furumusic__track t ON t.release_id = r.id AND t.is_hidden = false
+               WHERE ra.position = 0
+               GROUP BY ra.artist_id
+           ) s ON s.artist_id = a.id
+           WHERE ufa.user_id = $1 AND a.is_hidden = false
+           ORDER BY ufa.created_at DESC, a.name_sort"#,
+    )
+    .bind(user.id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    let artist_ids = rows.iter().map(|row| row.id).collect();
+    let artists = rows
+        .into_iter()
+        .map(|r| ArtistCard {
+            id: r.id,
+            name: r.name,
+            image_url: cover_url(r.image_file_id),
+            release_count: r.release_count,
+            track_count: r.track_count,
+        })
+        .collect();
+
+    Json(FollowedArtists {
+        artist_ids,
+        artists,
+    })
+    .into_response()
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/player/follows/toggle/{id}  — follow/unfollow artist
+// ---------------------------------------------------------------------------
+
+async fn toggle_follow_artist_handler(
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+    path: Path<PathId>,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    let artist_id = path.0.id;
+
+    let artist_exists: Option<(i64,)> =
+        sqlx::query_as("SELECT id FROM furumusic__artist WHERE id = $1 AND is_hidden = false")
+            .bind(artist_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    if artist_exists.is_none() {
+        return Ok(json_error(StatusCode::NOT_FOUND, "artist not found"));
+    }
+
+    let existing: Option<(i64,)> = sqlx::query_as(
+        "SELECT id FROM furumusic__user_followed_artist WHERE user_id = $1 AND artist_id = $2",
+    )
+    .bind(user.id)
+    .bind(artist_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    if existing.is_some() {
+        sqlx::query(
+            "DELETE FROM furumusic__user_followed_artist WHERE user_id = $1 AND artist_id = $2",
+        )
+        .bind(user.id)
+        .bind(artist_id)
+        .execute(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+        Json(FollowStatus { followed: false }).into_response()
+    } else {
+        let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+        sqlx::query(
+            r#"INSERT INTO furumusic__user_followed_artist (user_id, artist_id, created_at)
+               VALUES ($1, $2, $3)
+               ON CONFLICT (user_id, artist_id) DO NOTHING"#,
+        )
+        .bind(user.id)
+        .bind(artist_id)
+        .bind(&now)
+        .execute(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+        Json(FollowStatus { followed: true }).into_response()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // POST /api/player/tracks-by-ids
 // ---------------------------------------------------------------------------
 
@@ -2700,6 +2829,56 @@ impl App for PlayerApp {
                     }
                 }),
                 "player_like_release",
+            ),
+            // -- Followed artists --
+            Route::with_handler_and_name(
+                "/follows",
+                get({
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    move |session: Session, db: Database| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            followed_artists_handler(session, db, pg_pool).await
+                        }
+                    }
+                }),
+                "player_follows",
+            ),
+            // -- Follow/unfollow artist --
+            Route::with_handler_and_name(
+                "/follows/toggle/{id}",
+                post({
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    move |session: Session, db: Database, path: Path<PathId>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            toggle_follow_artist_handler(session, db, pg_pool, path).await
+                        }
+                    }
+                }),
+                "player_follow_toggle",
             ),
             // -- Audio stream --
             Route::with_handler_and_name(
