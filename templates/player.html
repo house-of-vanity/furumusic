@@ -142,6 +142,17 @@ body {
     background: var(--bg-primary);
 }
 
+button.user-stat {
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+}
+
+button.user-stat:hover {
+    background: var(--bg-hover);
+}
+
 .user-stat-value {
     display: block;
     font-size: 13px;
@@ -980,6 +991,29 @@ body {
     background: var(--bg-hover);
 }
 
+.mobile-account-popover {
+    position: absolute;
+    right: 16px;
+    top: 66px;
+    z-index: 80;
+    width: min(286px, calc(100vw - 32px));
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--bg-elevated);
+    box-shadow: 0 16px 36px rgba(0,0,0,0.42);
+}
+
+.mobile-account-popover .user-widget-main {
+    grid-template-columns: 36px minmax(0, 1fr);
+}
+
+.mobile-account-logout {
+    width: 100%;
+    margin-top: 12px;
+    justify-content: center;
+}
+
 .torrent-import-btn {
     display: flex;
     align-items: center;
@@ -1282,6 +1316,60 @@ body {
     max-width: 860px;
     max-height: min(88dvh, 760px);
     overflow: hidden;
+}
+
+.history-modal {
+    width: min(620px, calc(100vw - 32px));
+    max-width: 620px;
+}
+
+.history-list {
+    margin-top: 12px;
+    overflow-y: auto;
+    max-height: min(54vh, 460px);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+}
+
+.history-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 12px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.history-row:last-child { border-bottom: 0; }
+
+.history-title {
+    min-width: 0;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.history-release,
+.history-date,
+.history-duration {
+    color: var(--text-subdued);
+    font-size: 12px;
+}
+
+.history-date,
+.history-duration {
+    text-align: right;
+    white-space: nowrap;
+}
+
+.history-pager {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 12px;
 }
 
 .torrent-modal-grid {
@@ -1774,6 +1862,11 @@ body {
         display: none;
     }
 
+    .mobile-account-popover {
+        right: 8px;
+        top: 64px;
+    }
+
     .card-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 12px;
@@ -2017,17 +2110,17 @@ body {
                     </button>
                 </div>
                 <div class="user-stats">
-                    <div class="user-stat">
+                    <button class="user-stat" @click="$store.history.open()">
                         <span class="user-stat-value" x-text="$store.user.format($store.user.profile?.stats?.plays)"></span>
                         <span class="user-stat-label">plays</span>
-                    </div>
+                    </button>
                     <div class="user-stat">
                         <span class="user-stat-value" x-text="$store.user.format($store.user.profile?.stats?.liked_tracks)"></span>
                         <span class="user-stat-label">likes</span>
                     </div>
                     <div class="user-stat">
-                        <span class="user-stat-value" x-text="$store.user.format($store.user.profile?.stats?.listened_minutes)"></span>
-                        <span class="user-stat-label">min</span>
+                        <span class="user-stat-value" x-text="$store.user.duration($store.user.profile?.stats?.listened_minutes)"></span>
+                        <span class="user-stat-label">listened</span>
                     </div>
                 </div>
             </div>
@@ -2082,7 +2175,7 @@ body {
         <!-- Center Content -->
         <div class="center-content" id="center-scroll">
             <!-- Search / account bar -->
-            <div class="content-topbar">
+            <div class="content-topbar" @click.outside="$store.user.menuOpen = false">
                 <div class="search-bar">
                     <span class="search-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
                     <input id="search-input" type="text" placeholder="Search artists, releases, tracks..."
@@ -2111,11 +2204,40 @@ body {
                 <button class="mobile-account-chip"
                         x-show="$store.user.profile"
                         x-cloak
-                        @click="$store.user.logout()"
-                        :title="'Log out ' + ($store.user.profile?.name || '')">
+                        @click="$store.user.menuOpen = !$store.user.menuOpen"
+                        :title="$store.user.profile?.name || 'Account'">
                     <span class="user-avatar" x-text="$store.user.initials()"></span>
                     <span class="mobile-account-name" x-text="$store.user.profile?.name || ''"></span>
                 </button>
+                <div class="mobile-account-popover"
+                     x-show="$store.user.menuOpen && $store.user.profile"
+                     x-cloak>
+                    <div class="user-widget-main">
+                        <span class="user-avatar" x-text="$store.user.initials()"></span>
+                        <div style="min-width:0">
+                            <div class="user-name" x-text="$store.user.profile?.name || ''"></div>
+                            <div class="user-role" x-text="$store.user.profile?.role || ''"></div>
+                        </div>
+                    </div>
+                    <div class="user-stats">
+                        <button class="user-stat" @click="$store.history.open(); $store.user.menuOpen = false">
+                            <span class="user-stat-value" x-text="$store.user.format($store.user.profile?.stats?.plays)"></span>
+                            <span class="user-stat-label">plays</span>
+                        </button>
+                        <div class="user-stat">
+                            <span class="user-stat-value" x-text="$store.user.format($store.user.profile?.stats?.liked_tracks)"></span>
+                            <span class="user-stat-label">likes</span>
+                        </div>
+                        <div class="user-stat">
+                            <span class="user-stat-value" x-text="$store.user.duration($store.user.profile?.stats?.listened_minutes)"></span>
+                            <span class="user-stat-label">listened</span>
+                        </div>
+                    </div>
+                    <button class="modal-btn modal-btn-primary mobile-account-logout"
+                            @click="$store.user.logout()">
+                        Log out
+                    </button>
+                </div>
             </div>
 
             <!-- Search Results -->
@@ -2719,6 +2841,50 @@ body {
             </div>
         </div>
     </template>
+
+    <!-- Play History Modal -->
+    <template x-if="$store.history.modal">
+        <div class="modal-overlay" @click.self="$store.history.close()">
+            <div class="modal-box history-modal">
+                <h3>Play history</h3>
+                <p class="torrent-message" :class="{ error: $store.history.error }"
+                   x-text="$store.history.message"></p>
+                <div class="history-list">
+                    <template x-if="!$store.history.loading && $store.history.items.length === 0">
+                        <div class="empty-state" style="padding:32px 16px">
+                            <p>No plays yet</p>
+                        </div>
+                    </template>
+                    <template x-for="item in $store.history.items" :key="item.id">
+                        <div class="history-row">
+                            <div style="min-width:0">
+                                <div class="history-title" x-text="item.track_title"></div>
+                                <div class="history-release" x-text="item.release_title || 'Unknown release'"></div>
+                            </div>
+                            <div>
+                                <div class="history-date" x-text="$store.history.date(item.played_at)"></div>
+                                <div class="history-duration" x-text="$store.history.duration(item.duration_listened)"></div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+                <div class="history-pager">
+                    <button class="modal-btn modal-btn-ghost"
+                            @click="$store.history.load($store.history.page - 1)"
+                            :disabled="$store.history.loading || $store.history.page <= 1">
+                        Previous
+                    </button>
+                    <span class="history-release"
+                          x-text="'Page ' + $store.history.page + ' of ' + $store.history.totalPages()"></span>
+                    <button class="modal-btn modal-btn-primary"
+                            @click="$store.history.load($store.history.page + 1)"
+                            :disabled="$store.history.loading || $store.history.page >= $store.history.totalPages()">
+                        Next
+                    </button>
+                </div>
+            </div>
+        </div>
+    </template>
 </div>
 
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
@@ -2743,6 +2909,7 @@ document.addEventListener('alpine:init', () => {
     // -----------------------------------------------------------------------
     Alpine.store('user', {
         profile: null,
+        menuOpen: false,
 
         init() {
             this.load();
@@ -2767,8 +2934,96 @@ document.addEventListener('alpine:init', () => {
             return new Intl.NumberFormat().format(value || 0);
         },
 
+        duration(minutes) {
+            let value = Number(minutes || 0);
+            const units = [
+                ['y', 525600],
+                ['mo', 43800],
+                ['d', 1440],
+                ['h', 60],
+                ['m', 1],
+            ];
+            const parts = [];
+            for (const [label, size] of units) {
+                if (value >= size) {
+                    const count = Math.floor(value / size);
+                    value -= count * size;
+                    parts.push(count + label);
+                }
+                if (parts.length >= 2) break;
+            }
+            return parts.length ? parts.join(' ') : '0m';
+        },
+
         logout() {
             window.location.href = '/logout';
+        },
+    });
+
+    // -----------------------------------------------------------------------
+    // Play history store
+    // -----------------------------------------------------------------------
+    Alpine.store('history', {
+        modal: false,
+        items: [],
+        page: 1,
+        perPage: 20,
+        total: 0,
+        loading: false,
+        message: '',
+        error: false,
+
+        open() {
+            this.modal = true;
+            this.load(1);
+        },
+
+        close() {
+            this.modal = false;
+        },
+
+        totalPages() {
+            return Math.max(1, Math.ceil(this.total / this.perPage));
+        },
+
+        async load(page) {
+            page = Math.max(1, page || 1);
+            this.loading = true;
+            this.error = false;
+            this.message = 'Loading history...';
+            try {
+                const res = await fetch(`/api/player/history?page=${page}&limit=${this.perPage}`);
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Failed to load history');
+                this.items = data.items || [];
+                this.page = data.page || page;
+                this.perPage = data.per_page || this.perPage;
+                this.total = data.total || 0;
+                this.message = this.total ? (this.total + ' total plays') : '';
+            } catch (err) {
+                this.error = true;
+                this.message = err.message || String(err);
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        date(value) {
+            if (!value) return '';
+            const date = new Date(value);
+            if (Number.isNaN(date.getTime())) return value;
+            return new Intl.DateTimeFormat(undefined, {
+                year: 'numeric',
+                month: 'short',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+            }).format(date);
+        },
+
+        duration(seconds) {
+            if (!seconds) return '0:00';
+            return formatTime(Number(seconds));
         },
     });
 

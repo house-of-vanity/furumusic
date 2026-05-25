@@ -155,11 +155,36 @@ struct UserProfile {
     stats: UserStats,
 }
 
+#[derive(Debug, Serialize, JsonSchema)]
+struct PlayHistoryItem {
+    id: i64,
+    track_id: i64,
+    track_title: String,
+    release_title: Option<String>,
+    played_at: String,
+    duration_listened: Option<i32>,
+    completed: bool,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct PlayHistoryPage {
+    items: Vec<PlayHistoryItem>,
+    total: i64,
+    page: i32,
+    per_page: i32,
+}
+
 #[derive(Debug, Deserialize)]
 struct HistoryEntry {
     track_id: i64,
     duration_listened: Option<i32>,
     completed: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct HistoryQuery {
+    page: Option<i32>,
+    limit: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -363,6 +388,17 @@ struct SearchTrackRow {
 }
 
 #[derive(sqlx::FromRow)]
+struct PlayHistoryRow {
+    id: i64,
+    track_id: i64,
+    track_title: String,
+    release_title: Option<String>,
+    played_at: String,
+    duration_listened: Option<i32>,
+    completed: bool,
+}
+
+#[derive(sqlx::FromRow)]
 struct ReleaseInfoRow {
     id: i64,
     title: String,
@@ -471,7 +507,7 @@ async fn artists_handler(
            FROM furumusic__artist a
            JOIN furumusic__release_artist ra ON ra.artist_id = a.id
            JOIN furumusic__release r ON r.id = ra.release_id
-           WHERE a.is_hidden = false AND r.is_hidden = false"#,
+           WHERE a.is_hidden = false AND r.is_hidden = false AND ra.position = 0"#,
     )
     .fetch_one(pool)
     .await
@@ -489,6 +525,7 @@ async fn artists_handler(
                FROM furumusic__release_artist ra
                JOIN furumusic__release r ON r.id = ra.release_id AND r.is_hidden = false
                LEFT JOIN furumusic__track t ON t.release_id = r.id AND t.is_hidden = false
+               WHERE ra.position = 0
                GROUP BY ra.artist_id
            ) s ON s.artist_id = a.id
            WHERE a.is_hidden = false
@@ -1237,6 +1274,69 @@ async fn put_state_handler(
 // ---------------------------------------------------------------------------
 // POST /api/player/history
 // ---------------------------------------------------------------------------
+
+async fn history_list_handler(
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+    query: cot::request::extractors::UrlQuery<HistoryQuery>,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+
+    let page = query.0.page.unwrap_or(1).max(1);
+    let per_page = query.0.limit.unwrap_or(20).clamp(1, 100);
+    let offset = (page - 1) as i64 * per_page as i64;
+
+    let total: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM furumusic__play_history WHERE user_id = $1")
+            .bind(user.id)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    let rows = sqlx::query_as::<_, PlayHistoryRow>(
+        r#"SELECT ph.id,
+                  ph.track_id,
+                  t.title::text AS track_title,
+                  r.title::text AS release_title,
+                  ph.played_at::text AS played_at,
+                  ph.duration_listened,
+                  ph.completed
+           FROM furumusic__play_history ph
+           JOIN furumusic__track t ON t.id = ph.track_id
+           LEFT JOIN furumusic__release r ON r.id = t.release_id
+           WHERE ph.user_id = $1
+           ORDER BY ph.played_at DESC, ph.id DESC
+           LIMIT $2 OFFSET $3"#,
+    )
+    .bind(user.id)
+    .bind(per_page as i64)
+    .bind(offset)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    Json(PlayHistoryPage {
+        items: rows
+            .into_iter()
+            .map(|row| PlayHistoryItem {
+                id: row.id,
+                track_id: row.track_id,
+                track_title: row.track_title,
+                release_title: row.release_title,
+                played_at: row.played_at,
+                duration_listened: row.duration_listened,
+                completed: row.completed,
+            })
+            .collect(),
+        total,
+        page,
+        per_page,
+    })
+    .into_response()
+}
 
 async fn history_handler(
     session: Session,
@@ -2625,7 +2725,29 @@ impl App for PlayerApp {
             // -- Play history --
             Route::with_handler_and_name(
                 "/history",
-                cot::router::method::post({
+                get({
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    move |session: Session,
+                          db: Database,
+                          query: cot::request::extractors::UrlQuery<HistoryQuery>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            history_list_handler(session, db, pg_pool, query).await
+                        }
+                    }
+                })
+                .post({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
                     move |session: Session, db: Database, json: Json<HistoryEntry>| {
