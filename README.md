@@ -7,7 +7,7 @@ Built with Rust ([cot](https://cot.rs) framework).
 ## Quick start
 
 ```bash
-export FURU_DATABASE_URL=postgres://user:pass@localhost/furumusic
+export FURU_DATABASE_URL=postgresql://user:pass@localhost/furumusic
 cargo run
 # Open http://localhost:8000/admin/setup to create the first admin account
 ```
