@@ -40,6 +40,7 @@ struct ArtistCard {
     name: String,
     image_url: Option<String>,
     release_count: i64,
+    track_count: i64,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -221,6 +222,7 @@ struct ArtistRow {
     name: String,
     image_file_id: Option<i64>,
     release_count: i64,
+    track_count: i64,
 }
 
 #[derive(sqlx::FromRow)]
@@ -314,6 +316,7 @@ struct SearchArtistRow {
     name: String,
     image_file_id: Option<i64>,
     release_count: i64,
+    track_count: i64,
 }
 
 #[derive(sqlx::FromRow)]
@@ -387,7 +390,11 @@ async fn artists_handler(
     let offset = (page - 1) as i64 * per_page as i64;
 
     let total_row = sqlx::query_as::<_, CountRow>(
-        "SELECT COUNT(*) as count FROM furumusic__artist WHERE is_hidden = false",
+        r#"SELECT COUNT(DISTINCT a.id) AS count
+           FROM furumusic__artist a
+           JOIN furumusic__release_artist ra ON ra.artist_id = a.id
+           JOIN furumusic__release r ON r.id = ra.release_id
+           WHERE a.is_hidden = false AND r.is_hidden = false"#,
     )
     .fetch_one(pool)
     .await
@@ -395,12 +402,20 @@ async fn artists_handler(
 
     let rows = sqlx::query_as::<_, ArtistRow>(
         r#"SELECT a.id, a.name::text as name, a.image_file_id,
-           COALESCE((SELECT COUNT(*) FROM furumusic__release_artist ra
-                     JOIN furumusic__release r ON r.id = ra.release_id AND r.is_hidden = false
-                     WHERE ra.artist_id = a.id), 0) as release_count
+                  s.release_count,
+                  s.track_count
            FROM furumusic__artist a
+           JOIN (
+               SELECT ra.artist_id,
+                      COUNT(DISTINCT r.id) AS release_count,
+                      COUNT(t.id) AS track_count
+               FROM furumusic__release_artist ra
+               JOIN furumusic__release r ON r.id = ra.release_id AND r.is_hidden = false
+               LEFT JOIN furumusic__track t ON t.release_id = r.id AND t.is_hidden = false
+               GROUP BY ra.artist_id
+           ) s ON s.artist_id = a.id
            WHERE a.is_hidden = false
-           ORDER BY a.name_sort
+           ORDER BY s.release_count DESC, s.track_count DESC, a.name_sort
            LIMIT $1 OFFSET $2"#,
     )
     .bind(per_page as i64)
@@ -416,6 +431,7 @@ async fn artists_handler(
             name: r.name,
             image_url: cover_url(r.image_file_id),
             release_count: r.release_count,
+            track_count: r.track_count,
         })
         .collect();
 
@@ -1205,7 +1221,11 @@ async fn search_handler(
             r#"SELECT a.id, a.name::text AS name, a.image_file_id,
                       COALESCE((SELECT COUNT(*) FROM furumusic__release_artist ra
                                 JOIN furumusic__release r ON r.id = ra.release_id AND r.is_hidden = false
-                                WHERE ra.artist_id = a.id), 0) AS release_count
+                                WHERE ra.artist_id = a.id), 0) AS release_count,
+                      COALESCE((SELECT COUNT(*) FROM furumusic__release_artist ra
+                                JOIN furumusic__release r ON r.id = ra.release_id AND r.is_hidden = false
+                                JOIN furumusic__track t ON t.release_id = r.id AND t.is_hidden = false
+                                WHERE ra.artist_id = a.id), 0) AS track_count
                FROM furumusic__artist a
                WHERE a.is_hidden = false AND a.name_sort ILIKE '%' || $1 || '%'
                ORDER BY a.name_sort LIMIT $2"#,
@@ -1242,11 +1262,15 @@ async fn search_handler(
         tokio::try_join!(a, r, t).map_err(|e| cot::Error::internal(e.to_string()))?
     } else {
         let a = sqlx::query_as::<_, SearchArtistRow>(
-            r#"SELECT id, name, image_file_id, release_count FROM (
+            r#"SELECT id, name, image_file_id, release_count, track_count FROM (
                 SELECT a.id, a.name::text AS name, a.image_file_id,
                        COALESCE((SELECT COUNT(*) FROM furumusic__release_artist ra
                                  JOIN furumusic__release r ON r.id = ra.release_id AND r.is_hidden = false
                                  WHERE ra.artist_id = a.id), 0) AS release_count,
+                       COALESCE((SELECT COUNT(*) FROM furumusic__release_artist ra
+                                 JOIN furumusic__release r ON r.id = ra.release_id AND r.is_hidden = false
+                                 JOIN furumusic__track t ON t.release_id = r.id AND t.is_hidden = false
+                                 WHERE ra.artist_id = a.id), 0) AS track_count,
                        MAX(sim) AS similarity
                 FROM (
                     SELECT id, name, image_file_id, name_sort, similarity(name_sort, $1) AS sim
@@ -1363,6 +1387,7 @@ async fn search_handler(
             name: r.name,
             image_url: cover_url(r.image_file_id),
             release_count: r.release_count,
+            track_count: r.track_count,
         })
         .collect();
 
