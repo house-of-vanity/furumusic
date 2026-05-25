@@ -138,6 +138,21 @@ struct SearchResults {
     tracks: Vec<TrackItem>,
 }
 
+#[derive(Debug, Serialize, JsonSchema)]
+struct UserStats {
+    liked_tracks: i64,
+    playlists: i64,
+    plays: i64,
+    listened_minutes: i64,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct UserProfile {
+    name: String,
+    role: String,
+    stats: UserStats,
+}
+
 #[derive(Debug, Deserialize)]
 struct HistoryEntry {
     track_id: i64,
@@ -369,6 +384,61 @@ fn track_cover_url(track_cover: Option<i64>, release_cover: Option<i64>) -> Opti
 #[template(path = "player.html")]
 pub struct PlayerPageTemplate {
     pub t: &'static Translations,
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/player/me
+// ---------------------------------------------------------------------------
+
+async fn me_handler(
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+
+    let liked_tracks: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM furumusic__user_liked_track WHERE user_id = $1")
+            .bind(user.id)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    let playlists: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM furumusic__playlist WHERE owner_id = $1")
+            .bind(user.id)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    let plays: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM furumusic__play_history WHERE user_id = $1")
+            .bind(user.id)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    let listened_seconds: Option<i64> = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(duration_listened), 0) FROM furumusic__play_history WHERE user_id = $1",
+    )
+    .bind(user.id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    Json(UserProfile {
+        name: user.name,
+        role: user.role.code().to_string(),
+        stats: UserStats {
+            liked_tracks: liked_tracks.0,
+            playlists: playlists.0,
+            plays: plays.0,
+            listened_minutes: listened_seconds.unwrap_or(0) / 60,
+        },
+    })
+    .into_response()
 }
 
 // ---------------------------------------------------------------------------
@@ -1954,6 +2024,31 @@ impl App for PlayerApp {
         let pool: Arc<tokio::sync::OnceCell<sqlx::PgPool>> = Arc::new(tokio::sync::OnceCell::new());
 
         Router::with_urls([
+            // -- Current user profile --
+            Route::with_handler_and_name(
+                "/me",
+                {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    get(move |session: Session, db: Database| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            me_handler(session, db, pg_pool).await
+                        }
+                    })
+                },
+                "player_me",
+            ),
             // -- Artists (paginated) --
             Route::with_handler_and_name(
                 "/artists",
