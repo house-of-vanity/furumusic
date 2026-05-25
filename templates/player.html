@@ -937,10 +937,50 @@ body {
 .empty-state svg { width: 64px; height: 64px; margin-bottom: 16px; }
 .empty-state p { font-size: 14px; }
 
+.content-topbar {
+    margin-bottom: 20px;
+}
+
 /* Search bar */
 .search-bar {
     position: relative;
-    margin-bottom: 20px;
+    min-width: 0;
+}
+
+.mobile-account-chip {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    max-width: 148px;
+    height: 42px;
+    padding: 0 10px 0 6px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.mobile-account-chip:hover {
+    background: var(--bg-hover);
+}
+
+.mobile-account-chip .user-avatar {
+    width: 30px;
+    height: 30px;
+    font-size: 13px;
+    flex-shrink: 0;
+}
+
+.mobile-account-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: left;
 }
 
 .search-bar input {
@@ -1281,6 +1321,22 @@ body {
         padding: 16px;
     }
 
+    .content-topbar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 16px;
+    }
+
+    .content-topbar .search-bar {
+        flex: 1 1 auto;
+    }
+
+    .mobile-account-chip {
+        display: flex;
+        flex: 0 0 auto;
+    }
+
     .card-grid {
         grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
         gap: 14px;
@@ -1439,7 +1495,7 @@ body {
         margin-bottom: 14px;
     }
 
-    .search-bar {
+    .content-topbar {
         margin-bottom: 14px;
     }
 
@@ -1450,6 +1506,17 @@ body {
     }
 
     .search-bar .search-shortcut {
+        display: none;
+    }
+
+    .mobile-account-chip {
+        max-width: 42px;
+        width: 42px;
+        padding: 0;
+        justify-content: center;
+    }
+
+    .mobile-account-name {
         display: none;
     }
 
@@ -1701,21 +1768,31 @@ body {
 
         <!-- Center Content -->
         <div class="center-content" id="center-scroll">
-            <!-- Search Bar -->
-            <div class="search-bar">
-                <span class="search-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
-                <input id="search-input" type="text" placeholder="Search artists, releases, tracks..."
-                       x-model="$store.library.searchQuery"
-                       @input.debounce.300ms="$store.library.search($store.library.searchQuery)"
-                       @keydown.escape="$store.library.clearSearch(); $el.blur()">
-                <template x-if="$store.library.searchQuery">
-                    <button class="search-clear" @click="$store.library.clearSearch()">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                    </button>
-                </template>
-                <template x-if="!$store.library.searchQuery">
-                    <span class="search-shortcut">Ctrl+K</span>
-                </template>
+            <!-- Search / account bar -->
+            <div class="content-topbar">
+                <div class="search-bar">
+                    <span class="search-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
+                    <input id="search-input" type="text" placeholder="Search artists, releases, tracks..."
+                           x-model="$store.library.searchQuery"
+                           @input.debounce.300ms="$store.library.search($store.library.searchQuery)"
+                           @keydown.escape="$store.library.clearSearch(); $el.blur()">
+                    <template x-if="$store.library.searchQuery">
+                        <button class="search-clear" @click="$store.library.clearSearch()">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                        </button>
+                    </template>
+                    <template x-if="!$store.library.searchQuery">
+                        <span class="search-shortcut">Ctrl+K</span>
+                    </template>
+                </div>
+                <button class="mobile-account-chip"
+                        x-show="$store.user.profile"
+                        x-cloak
+                        @click="$store.user.logout()"
+                        :title="'Log out ' + ($store.user.profile?.name || '')">
+                    <span class="user-avatar" x-text="$store.user.initials()"></span>
+                    <span class="mobile-account-name" x-text="$store.user.profile?.name || ''"></span>
+                </button>
             </div>
 
             <!-- Search Results -->
