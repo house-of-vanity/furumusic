@@ -2136,28 +2136,170 @@ impl App for PlayerApp {
             ),
             // -- Torrent import widget --
             Route::with_handler_and_name(
-                "/torrents/preview",
+                "/torrents",
                 {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
                     let torrent_service = Arc::clone(&torrent_service);
                     let scheduler_handle = Arc::clone(&self.scheduler_handle);
-                    post(
-                        move |session: Session, db: Database, json: Json<TorrentPreviewRequest>| {
+                    get(move |session: Session, db: Database| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        let torrent_service = Arc::clone(&torrent_service);
+                        let scheduler_handle = Arc::clone(&scheduler_handle);
+                        async move {
+                            let Some(user) = auth::get_session_user(&session, &db).await else {
+                                return Ok(json_error(
+                                    StatusCode::UNAUTHORIZED,
+                                    "not authenticated",
+                                ));
+                            };
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            let service = torrent_service
+                                .get_or_init(|| async {
+                                    Arc::new(TorrentService::new(Arc::clone(&scheduler_handle)))
+                                })
+                                .await;
+                            match service.list(pg_pool, user.id).await {
+                                Ok(items) => Json(items).into_response(),
+                                Err(err) => {
+                                    Ok(json_error(StatusCode::BAD_REQUEST, &err.to_string()))
+                                }
+                            }
+                        }
+                    })
+                },
+                "player_torrent_list",
+            ),
+            Route::with_handler_and_name(
+                "/torrents/session/{id}",
+                {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    let torrent_service = Arc::clone(&torrent_service);
+                    let scheduler_handle = Arc::clone(&self.scheduler_handle);
+                    get({
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        let torrent_service = Arc::clone(&torrent_service);
+                        let scheduler_handle = Arc::clone(&scheduler_handle);
+                        move |session: Session, db: Database, path: Path<PathStringId>| {
+                            let pool = Arc::clone(&pool);
+                            let pool_config = Arc::clone(&pool_config);
                             let torrent_service = Arc::clone(&torrent_service);
                             let scheduler_handle = Arc::clone(&scheduler_handle);
                             async move {
-                                let Some(_user) = auth::get_session_user(&session, &db).await
-                                else {
+                                let Some(user) = auth::get_session_user(&session, &db).await else {
                                     return Ok(json_error(
                                         StatusCode::UNAUTHORIZED,
                                         "not authenticated",
                                     ));
                                 };
+                                let pg_pool = pool
+                                    .get_or_init(|| async {
+                                        sqlx::postgres::PgPoolOptions::new()
+                                            .max_connections(5)
+                                            .connect(&pool_config.database_url)
+                                            .await
+                                            .expect("player pool")
+                                    })
+                                    .await;
+                                let service = torrent_service
+                                    .get_or_init(|| async {
+                                        Arc::new(TorrentService::new(Arc::clone(
+                                            &scheduler_handle,
+                                        )))
+                                    })
+                                    .await;
+                                match service.details(pg_pool, user.id, &path.0.id).await {
+                                    Ok(details) => Json(details).into_response(),
+                                    Err(err) => {
+                                        Ok(json_error(StatusCode::NOT_FOUND, &err.to_string()))
+                                    }
+                                }
+                            }
+                        }
+                    })
+                    .delete(move |session: Session, db: Database, path: Path<PathStringId>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        let torrent_service = Arc::clone(&torrent_service);
+                        let scheduler_handle = Arc::clone(&scheduler_handle);
+                        async move {
+                            let Some(user) = auth::get_session_user(&session, &db).await else {
+                                return Ok(json_error(
+                                    StatusCode::UNAUTHORIZED,
+                                    "not authenticated",
+                                ));
+                            };
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            let service = torrent_service
+                                .get_or_init(|| async {
+                                    Arc::new(TorrentService::new(Arc::clone(&scheduler_handle)))
+                                })
+                                .await;
+                            match service.remove(pg_pool, user.id, &path.0.id).await {
+                                Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
+                                Err(err) => {
+                                    Ok(json_error(StatusCode::NOT_FOUND, &err.to_string()))
+                                }
+                            }
+                        }
+                    })
+                },
+                "player_torrent_detail",
+            ),
+            Route::with_handler_and_name(
+                "/torrents/preview",
+                {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    let torrent_service = Arc::clone(&torrent_service);
+                    let scheduler_handle = Arc::clone(&self.scheduler_handle);
+                    post(
+                        move |session: Session, db: Database, json: Json<TorrentPreviewRequest>| {
+                            let pool = Arc::clone(&pool);
+                            let pool_config = Arc::clone(&pool_config);
+                            let torrent_service = Arc::clone(&torrent_service);
+                            let scheduler_handle = Arc::clone(&scheduler_handle);
+                            async move {
+                                let Some(user) = auth::get_session_user(&session, &db).await else {
+                                    return Ok(json_error(
+                                        StatusCode::UNAUTHORIZED,
+                                        "not authenticated",
+                                    ));
+                                };
+                                let pg_pool = pool
+                                    .get_or_init(|| async {
+                                        sqlx::postgres::PgPoolOptions::new()
+                                            .max_connections(5)
+                                            .connect(&pool_config.database_url)
+                                            .await
+                                            .expect("player pool")
+                                    })
+                                    .await;
                                 let service = torrent_service
                                     .get_or_init(|| async {
                                         Arc::new(TorrentService::new(Arc::clone(&scheduler_handle)))
                                     })
                                     .await;
-                                match service.preview(json.0).await {
+                                match service.preview(pg_pool, user.id, json.0).await {
                                     Ok(preview) => Json(preview).into_response(),
                                     Err(err) => {
                                         Ok(json_error(StatusCode::BAD_REQUEST, &err.to_string()))
@@ -2172,6 +2314,8 @@ impl App for PlayerApp {
             Route::with_handler_and_name(
                 "/torrents/{id}/start",
                 {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
                     let torrent_service = Arc::clone(&torrent_service);
                     let scheduler_handle = Arc::clone(&self.scheduler_handle);
                     post(
@@ -2179,6 +2323,8 @@ impl App for PlayerApp {
                               db: Database,
                               path: Path<PathStringId>,
                               json: Json<TorrentStartRequest>| {
+                            let pool = Arc::clone(&pool);
+                            let pool_config = Arc::clone(&pool_config);
                             let torrent_service = Arc::clone(&torrent_service);
                             let scheduler_handle = Arc::clone(&scheduler_handle);
                             async move {
@@ -2188,6 +2334,15 @@ impl App for PlayerApp {
                                         "not authenticated",
                                     ));
                                 };
+                                let pg_pool = pool
+                                    .get_or_init(|| async {
+                                        sqlx::postgres::PgPoolOptions::new()
+                                            .max_connections(5)
+                                            .connect(&pool_config.database_url)
+                                            .await
+                                            .expect("player pool")
+                                    })
+                                    .await;
                                 let (live_config, _) = AppConfig::load_with_db(&db).await;
                                 let service = torrent_service
                                     .get_or_init(|| async {
@@ -2196,6 +2351,7 @@ impl App for PlayerApp {
                                     .await;
                                 match service
                                     .start(
+                                        pg_pool,
                                         &path.0.id,
                                         json.0.selected_files,
                                         live_config.agent_inbox_dir,
@@ -2217,26 +2373,38 @@ impl App for PlayerApp {
             Route::with_handler_and_name(
                 "/torrents/{id}/status",
                 {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
                     let torrent_service = Arc::clone(&torrent_service);
                     let scheduler_handle = Arc::clone(&self.scheduler_handle);
                     get(
                         move |session: Session, db: Database, path: Path<PathStringId>| {
+                            let pool = Arc::clone(&pool);
+                            let pool_config = Arc::clone(&pool_config);
                             let torrent_service = Arc::clone(&torrent_service);
                             let scheduler_handle = Arc::clone(&scheduler_handle);
                             async move {
-                                let Some(_user) = auth::get_session_user(&session, &db).await
-                                else {
+                                let Some(user) = auth::get_session_user(&session, &db).await else {
                                     return Ok(json_error(
                                         StatusCode::UNAUTHORIZED,
                                         "not authenticated",
                                     ));
                                 };
+                                let pg_pool = pool
+                                    .get_or_init(|| async {
+                                        sqlx::postgres::PgPoolOptions::new()
+                                            .max_connections(5)
+                                            .connect(&pool_config.database_url)
+                                            .await
+                                            .expect("player pool")
+                                    })
+                                    .await;
                                 let service = torrent_service
                                     .get_or_init(|| async {
                                         Arc::new(TorrentService::new(Arc::clone(&scheduler_handle)))
                                     })
                                     .await;
-                                match service.status(&path.0.id).await {
+                                match service.status(pg_pool, user.id, &path.0.id).await {
                                     Ok(job) => Json(job).into_response(),
                                     Err(err) => {
                                         Ok(json_error(StatusCode::NOT_FOUND, &err.to_string()))

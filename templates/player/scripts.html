@@ -1,0 +1,1545 @@
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+<script>
+function formatTime(seconds) {
+    if (!seconds || isNaN(seconds)) return '0:00';
+    const s = Math.floor(seconds);
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return m + ':' + (sec < 10 ? '0' : '') + sec;
+}
+
+document.addEventListener('alpine:init', () => {
+    // -----------------------------------------------------------------------
+    // Audio element
+    // -----------------------------------------------------------------------
+    const audio = new Audio();
+    audio.preload = 'auto';
+
+    Alpine.store('mobile', {
+        libraryOpen: false,
+        toggleLibrary() {
+            this.libraryOpen = !this.libraryOpen;
+            if (this.libraryOpen) Alpine.store('user').menuOpen = false;
+        },
+        closeLibrary() {
+            this.libraryOpen = false;
+        },
+    });
+
+    Alpine.store('info', {
+        modal: null,
+        open(title, body) {
+            this.modal = {
+                title: title || 'Info',
+                body: body || 'No details available.',
+            };
+        },
+        close() {
+            this.modal = null;
+        },
+    });
+
+    // -----------------------------------------------------------------------
+    // User store
+    // -----------------------------------------------------------------------
+    Alpine.store('user', {
+        profile: null,
+        menuOpen: false,
+
+        init() {
+            this.load();
+        },
+
+        async load() {
+            try {
+                const res = await fetch('/api/player/me');
+                if (!res.ok) throw new Error('failed');
+                this.profile = await res.json();
+            } catch {
+                this.profile = null;
+            }
+        },
+
+        initials() {
+            const name = this.profile?.name || '';
+            return name.trim().charAt(0) || '?';
+        },
+
+        format(value) {
+            return new Intl.NumberFormat().format(value || 0);
+        },
+
+        duration(minutes) {
+            let value = Number(minutes || 0);
+            const units = [
+                ['y', 525600],
+                ['mo', 43800],
+                ['d', 1440],
+                ['h', 60],
+                ['m', 1],
+            ];
+            const parts = [];
+            for (const [label, size] of units) {
+                if (value >= size) {
+                    const count = Math.floor(value / size);
+                    value -= count * size;
+                    parts.push(count + label);
+                }
+                if (parts.length >= 2) break;
+            }
+            return parts.length ? parts.join(' ') : '0m';
+        },
+
+        logout() {
+            window.location.href = '/logout';
+        },
+    });
+
+    // -----------------------------------------------------------------------
+    // Play history store
+    // -----------------------------------------------------------------------
+    Alpine.store('history', {
+        modal: false,
+        items: [],
+        page: 1,
+        perPage: 20,
+        total: 0,
+        loading: false,
+        message: '',
+        error: false,
+
+        open() {
+            this.modal = true;
+            this.load(1);
+        },
+
+        close() {
+            this.modal = false;
+        },
+
+        totalPages() {
+            return Math.max(1, Math.ceil(this.total / this.perPage));
+        },
+
+        async load(page) {
+            page = Math.max(1, page || 1);
+            this.loading = true;
+            this.error = false;
+            this.message = 'Loading history...';
+            try {
+                const res = await fetch(`/api/player/history?page=${page}&limit=${this.perPage}`);
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Failed to load history');
+                this.items = data.items || [];
+                this.page = data.page || page;
+                this.perPage = data.per_page || this.perPage;
+                this.total = data.total || 0;
+                this.message = this.total ? (this.total + ' total plays') : '';
+            } catch (err) {
+                this.error = true;
+                this.message = err.message || String(err);
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        date(value) {
+            if (!value) return '';
+            const date = new Date(value);
+            if (Number.isNaN(date.getTime())) return value;
+            return new Intl.DateTimeFormat(undefined, {
+                year: 'numeric',
+                month: 'short',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+            }).format(date);
+        },
+
+        duration(seconds) {
+            if (!seconds) return '0:00';
+            return formatTime(Number(seconds));
+        },
+    });
+
+    // -----------------------------------------------------------------------
+    // Player store
+    // -----------------------------------------------------------------------
+    Alpine.store('player', {
+        currentTrack: null,
+        isPlaying: false,
+        currentTime: 0,
+        duration: 0,
+        volume: 0.7,
+        _prevVolume: 0.7,
+        shuffle: false,
+        repeatMode: 'off', // off, all, one
+        progress: 0,
+        _saveTimer: null,
+        _historyRecorded: false,
+
+        init() {
+            audio.volume = this.volume;
+
+            audio.addEventListener('timeupdate', () => {
+                this.currentTime = audio.currentTime;
+                this.duration = audio.duration || 0;
+                this.progress = this.duration > 0 ? (this.currentTime / this.duration) * 100 : 0;
+            });
+
+            audio.addEventListener('ended', () => {
+                this._recordHistory(true);
+                this.next();
+            });
+
+            audio.addEventListener('play', () => { this.isPlaying = true; });
+            audio.addEventListener('pause', () => { this.isPlaying = false; });
+
+            audio.addEventListener('loadedmetadata', () => {
+                this.duration = audio.duration || 0;
+            });
+
+            // Periodic state save
+            this._saveTimer = setInterval(() => {
+                this._saveState();
+            }, 10000);
+
+            // Restore state
+            this._restoreState();
+
+            // Save state on page unload
+            window.addEventListener('beforeunload', () => {
+                this._saveStateSync();
+            });
+        },
+
+        play(track) {
+            this.currentTrack = track;
+            this._historyRecorded = false;
+            audio.src = track.stream_url;
+            audio.play().catch(() => {});
+            this._updateMediaSession();
+        },
+
+        pause() { audio.pause(); },
+        resume() { audio.play().catch(() => {}); },
+
+        toggle() {
+            if (!this.currentTrack) return;
+            if (this.isPlaying) { this.pause(); }
+            else { this.resume(); }
+        },
+
+        seek(time) {
+            audio.currentTime = time;
+        },
+
+        seekRelative(delta) {
+            if (!this.currentTrack) return;
+            audio.currentTime = Math.max(0, Math.min(audio.duration || 0, audio.currentTime + delta));
+        },
+
+        seekFromClick(event) {
+            const bar = event.currentTarget;
+            const rect = bar.getBoundingClientRect();
+            const pct = (event.clientX - rect.left) / rect.width;
+            if (this.duration > 0) {
+                this.seek(pct * this.duration);
+            }
+        },
+
+        next() {
+            const queue = Alpine.store('queue');
+            if (queue.tracks.length === 0) return;
+
+            let nextIdx;
+            if (this.repeatMode === 'one') {
+                this.seek(0);
+                this.resume();
+                return;
+            } else if (this.shuffle) {
+                nextIdx = Math.floor(Math.random() * queue.tracks.length);
+            } else {
+                nextIdx = queue.currentIndex + 1;
+                if (nextIdx >= queue.tracks.length) {
+                    if (this.repeatMode === 'all') {
+                        nextIdx = 0;
+                    } else {
+                        this.isPlaying = false;
+                        return;
+                    }
+                }
+            }
+            queue.playFromIndex(nextIdx);
+        },
+
+        prev() {
+            if (this.currentTime > 3) {
+                this.seek(0);
+                return;
+            }
+            const queue = Alpine.store('queue');
+            if (queue.tracks.length === 0) return;
+
+            let prevIdx = queue.currentIndex - 1;
+            if (prevIdx < 0) {
+                if (this.repeatMode === 'all') {
+                    prevIdx = queue.tracks.length - 1;
+                } else {
+                    this.seek(0);
+                    return;
+                }
+            }
+            queue.playFromIndex(prevIdx);
+        },
+
+        setVolume(v) {
+            this.volume = Math.max(0, Math.min(1, v));
+            audio.volume = this.volume;
+        },
+
+        _setVolumeFromClientX(clientX, bar) {
+            const rect = bar.getBoundingClientRect();
+            const pct = rect.width > 0 ? (clientX - rect.left) / rect.width : 0;
+            this.setVolume(pct);
+        },
+
+        setVolumeFromClick(event) {
+            this._setVolumeFromClientX(event.clientX, event.currentTarget);
+        },
+
+        startVolumeDrag(event) {
+            const bar = event.currentTarget;
+            this._setVolumeFromClientX(event.clientX, bar);
+            bar.setPointerCapture?.(event.pointerId);
+
+            const move = (e) => {
+                this._setVolumeFromClientX(e.clientX, bar);
+            };
+            const stop = () => {
+                window.removeEventListener('pointermove', move);
+                window.removeEventListener('pointerup', stop);
+                window.removeEventListener('pointercancel', stop);
+            };
+            window.addEventListener('pointermove', move);
+            window.addEventListener('pointerup', stop);
+            window.addEventListener('pointercancel', stop);
+        },
+
+        toggleMute() {
+            if (this.volume > 0) {
+                this._prevVolume = this.volume;
+                this.setVolume(0);
+            } else {
+                this.setVolume(this._prevVolume || 0.7);
+            }
+        },
+
+        toggleShuffle() {
+            this.shuffle = !this.shuffle;
+        },
+
+        cycleRepeat() {
+            if (this.repeatMode === 'off') this.repeatMode = 'all';
+            else if (this.repeatMode === 'all') this.repeatMode = 'one';
+            else this.repeatMode = 'off';
+        },
+
+        _updateMediaSession() {
+            if (!('mediaSession' in navigator) || !this.currentTrack) return;
+            const t = this.currentTrack;
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: t.title,
+                artist: t.artists.map(a => a.name).join(', '),
+                artwork: t.cover_url ? [{ src: t.cover_url, sizes: '512x512', type: 'image/jpeg' }] : [],
+            });
+            navigator.mediaSession.setActionHandler('play', () => this.resume());
+            navigator.mediaSession.setActionHandler('pause', () => this.pause());
+            navigator.mediaSession.setActionHandler('previoustrack', () => this.prev());
+            navigator.mediaSession.setActionHandler('nexttrack', () => this.next());
+            navigator.mediaSession.setActionHandler('seekto', (d) => { if (d.seekTime != null) this.seek(d.seekTime); });
+        },
+
+        _buildStatePayload() {
+            const queue = Alpine.store('queue');
+            return {
+                current_track_id: this.currentTrack ? this.currentTrack.id : null,
+                position_ms: Math.floor(this.currentTime * 1000),
+                queue: queue.tracks.map(t => t.id),
+                queue_position: queue.currentIndex,
+                shuffle: this.shuffle,
+                repeat_mode: this.repeatMode,
+                volume: this.volume,
+            };
+        },
+
+        _saveState() {
+            const queue = Alpine.store('queue');
+            if (!this.currentTrack && queue.tracks.length === 0) return;
+            const state = this._buildStatePayload();
+            fetch('/api/player/state', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(state),
+            }).catch(() => {});
+        },
+
+        _saveStateSync() {
+            const queue = Alpine.store('queue');
+            if (!this.currentTrack && queue.tracks.length === 0) return;
+            const state = this._buildStatePayload();
+            const blob = new Blob([JSON.stringify(state)], { type: 'application/json' });
+            navigator.sendBeacon('/api/player/state', blob);
+        },
+
+        async _restoreState() {
+            try {
+                const res = await fetch('/api/player/state');
+                if (!res.ok) return;
+                const state = await res.json();
+                this.shuffle = state.shuffle || false;
+                this.repeatMode = state.repeat_mode || 'off';
+                this.setVolume(typeof state.volume === 'number' ? state.volume : 0.7);
+
+                // Restore queue if there are track IDs
+                if (state.queue && state.queue.length > 0) {
+                    try {
+                        const tracksRes = await fetch('/api/player/tracks-by-ids', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ ids: state.queue }),
+                        });
+                        if (tracksRes.ok) {
+                            const tracks = await tracksRes.json();
+                            if (tracks.length > 0) {
+                                const queue = Alpine.store('queue');
+                                queue.tracks = tracks;
+                                const idx = Math.max(0, Math.min(state.queue_position, tracks.length - 1));
+                                queue.currentIndex = idx;
+
+                                // Restore current track
+                                const currentTrack = state.current_track_id
+                                    ? tracks.find(t => t.id === state.current_track_id)
+                                    : tracks[idx];
+                                if (currentTrack) {
+                                    this.currentTrack = currentTrack;
+                                    this._historyRecorded = false;
+                                    audio.src = currentTrack.stream_url;
+                                    // Seek to saved position once metadata is loaded
+                                    const seekMs = state.position_ms || 0;
+                                    if (seekMs > 0) {
+                                        const onLoaded = () => {
+                                            audio.currentTime = seekMs / 1000;
+                                            audio.removeEventListener('loadedmetadata', onLoaded);
+                                        };
+                                        audio.addEventListener('loadedmetadata', onLoaded);
+                                    }
+                                    this._updateMediaSession();
+                                }
+                            }
+                        }
+                    } catch {}
+                }
+            } catch {}
+        },
+
+        _recordHistory(completed) {
+            if (this._historyRecorded || !this.currentTrack) return;
+            this._historyRecorded = true;
+            fetch('/api/player/history', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    track_id: this.currentTrack.id,
+                    duration_listened: Math.floor(this.currentTime),
+                    completed: completed,
+                }),
+            }).catch(() => {});
+        },
+    });
+
+    // -----------------------------------------------------------------------
+    // Queue store
+    // -----------------------------------------------------------------------
+    Alpine.store('queue', {
+        tracks: [],
+        currentIndex: 0,
+        visible: false,
+        _dragIdx: null,
+
+        add(track) {
+            this.tracks.push(track);
+        },
+
+        addToEnd(tracks) {
+            this.tracks = [...this.tracks, ...tracks];
+        },
+
+        addNextInQueue(tracks) {
+            const insertAt = this.currentIndex + 1;
+            this.tracks.splice(insertAt, 0, ...tracks);
+        },
+
+        playRelease(tracks, startIndex) {
+            this.tracks = [...tracks];
+            this.playFromIndex(startIndex || 0);
+        },
+
+        playFromIndex(idx) {
+            if (idx < 0 || idx >= this.tracks.length) return;
+            this.currentIndex = idx;
+            Alpine.store('player').play(this.tracks[idx]);
+        },
+
+        remove(idx) {
+            if (idx < 0 || idx >= this.tracks.length) return;
+            this.tracks.splice(idx, 1);
+            if (this.tracks.length === 0) {
+                this.currentIndex = 0;
+            } else if (idx < this.currentIndex) {
+                this.currentIndex--;
+            } else if (idx === this.currentIndex) {
+                if (this.currentIndex >= this.tracks.length) {
+                    this.currentIndex = this.tracks.length - 1;
+                }
+            }
+        },
+
+        moveTrack(fromIdx, toIdx) {
+            if (fromIdx === toIdx) return;
+            if (fromIdx < 0 || fromIdx >= this.tracks.length) return;
+            if (toIdx < 0 || toIdx >= this.tracks.length) return;
+            const [track] = this.tracks.splice(fromIdx, 1);
+            this.tracks.splice(toIdx, 0, track);
+            // Adjust currentIndex to follow the currently playing track
+            if (this.currentIndex === fromIdx) {
+                this.currentIndex = toIdx;
+            } else if (fromIdx < this.currentIndex && toIdx >= this.currentIndex) {
+                this.currentIndex--;
+            } else if (fromIdx > this.currentIndex && toIdx <= this.currentIndex) {
+                this.currentIndex++;
+            }
+        },
+
+        clear() {
+            this.tracks = [];
+            this.currentIndex = 0;
+        },
+    });
+
+    // -----------------------------------------------------------------------
+    // Library store
+    // -----------------------------------------------------------------------
+    Alpine.store('library', {
+        view: 'artists',
+        artists: [],
+        artistsPage: 0,
+        artistsTotal: 0,
+        loading: false,
+        _allLoaded: false,
+        currentArtist: null,
+        currentRelease: null,
+        currentPlaylist: null,
+        _observer: null,
+        searchQuery: '',
+        searchResults: null,
+        searchLoading: false,
+        _previousView: 'artists',
+
+        _hashNav: false, // guard against circular hash updates
+
+        init() {
+            this.loadArtists(1);
+            this._setupScroll();
+
+            // Listen for browser back/forward
+            window.addEventListener('hashchange', () => {
+                this._navigateFromHash();
+            });
+
+            // Navigate to initial hash (if any)
+            this._navigateFromHash();
+        },
+
+        _setHash(hash) {
+            this._hashNav = true;
+            location.hash = hash;
+            // Reset guard after a tick
+            setTimeout(() => { this._hashNav = false; }, 0);
+        },
+
+        _navigateFromHash() {
+            if (this._hashNav) return;
+            const hash = location.hash || '#artists';
+            const match = hash.match(/^#(\w+)(?:\/([-]?\d+))?(?:\?(.*))?$/);
+            if (!match) {
+                this.goArtists();
+                return;
+            }
+            const view = match[1];
+            const id = match[2] ? parseInt(match[2], 10) : null;
+            const params = match[3] || '';
+
+            if (view === 'artists' && !id) {
+                if (this.view !== 'artists') this.goArtists();
+            } else if (view === 'artist' && id) {
+                this.openArtist(id);
+            } else if (view === 'release' && id) {
+                this.openRelease(id);
+            } else if (view === 'playlist' && id) {
+                this.openPlaylist(id);
+            } else if (view === 'search') {
+                const qMatch = params.match(/q=([^&]*)/);
+                if (qMatch) {
+                    const q = decodeURIComponent(qMatch[1]);
+                    this.searchQuery = q;
+                    this.search(q);
+                }
+            } else {
+                this.goArtists();
+            }
+        },
+
+        goArtists() {
+            this.view = 'artists';
+            this.currentArtist = null;
+            this.currentRelease = null;
+            this.currentPlaylist = null;
+            this.searchQuery = '';
+            this.searchResults = null;
+            this._previousView = 'artists';
+            this._setHash('#artists');
+            this.$nextTick(() => { this._setupScroll(); });
+        },
+
+        async loadArtists(page) {
+            if (this.loading || this._allLoaded) return;
+            this.loading = true;
+            try {
+                const res = await fetch(`/api/player/artists?page=${page}&limit=60`);
+                if (!res.ok) throw new Error('failed');
+                const data = await res.json();
+                if (page === 1) {
+                    this.artists = data.items;
+                } else {
+                    this.artists = [...this.artists, ...data.items];
+                }
+                this.artistsPage = data.page;
+                this.artistsTotal = data.total;
+                if (this.artists.length >= data.total) {
+                    this._allLoaded = true;
+                }
+            } catch {}
+            this.loading = false;
+        },
+
+        async openArtist(id) {
+            this.searchQuery = '';
+            this.searchResults = null;
+            this.view = 'artist_detail';
+            this.currentArtist = null;
+            this._setHash('#artist/' + id);
+            try {
+                const res = await fetch(`/api/player/artists/${id}`);
+                if (!res.ok) throw new Error('failed');
+                this.currentArtist = await res.json();
+            } catch {}
+        },
+
+        artistReleaseGroups() {
+            const releases = this.currentArtist?.releases || [];
+            const order = ['album', 'ep', 'single', 'compilation', 'mixtape', 'live', 'soundtrack'];
+            const labels = {
+                album: 'Albums',
+                ep: 'EPs',
+                single: 'Singles',
+                compilation: 'Compilations',
+                mixtape: 'Mixtapes',
+                live: 'Live releases',
+                soundtrack: 'Soundtracks',
+            };
+            const groups = new Map();
+            for (const release of releases) {
+                const type = (release.release_type || 'other').toLowerCase();
+                if (!groups.has(type)) {
+                    groups.set(type, []);
+                }
+                groups.get(type).push(release);
+            }
+            return Array.from(groups.entries())
+                .sort(([a], [b]) => {
+                    const ai = order.includes(a) ? order.indexOf(a) : order.length;
+                    const bi = order.includes(b) ? order.indexOf(b) : order.length;
+                    return ai === bi ? a.localeCompare(b) : ai - bi;
+                })
+                .map(([type, groupReleases]) => ({
+                    type,
+                    label: labels[type] || type,
+                    releases: groupReleases,
+                }));
+        },
+
+        trackArtistLinks(track) {
+            const main = (track?.artists || []).map(artist => ({
+                id: artist.id,
+                label: artist.name,
+            }));
+            const featured = (track?.featured_artists || []).map(artist => ({
+                id: artist.id,
+                label: 'ft. ' + artist.name,
+            }));
+            return [...main, ...featured];
+        },
+
+        bytes(value) {
+            if (!value) return 'unknown size';
+            const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+            let size = Number(value);
+            let idx = 0;
+            while (size >= 1024 && idx < units.length - 1) {
+                size /= 1024;
+                idx++;
+            }
+            return (idx === 0 ? size.toFixed(0) : size.toFixed(1)) + ' ' + units[idx];
+        },
+
+        uploadersInfo(uploaders) {
+            const rows = uploaders || [];
+            if (!rows.length) return 'UFO';
+            return rows
+                .map(row => `${row.name || 'UFO'} (${row.track_count} track${row.track_count === 1 ? '' : 's'})`)
+                .join(', ');
+        },
+
+        releaseInfo(release) {
+            if (!release) return '';
+            const lines = [
+                release.title || 'Unknown release',
+                `Type: ${release.release_type || 'unknown'}`,
+                `Year: ${release.year || 'unknown'}`,
+                `Tracks: ${release.track_count || release.tracks?.length || 0}`,
+                `Uploaders: ${this.uploadersInfo(release.uploaders || [])}`,
+            ];
+            return lines.join('\n');
+        },
+
+        trackInfo(track) {
+            if (!track) return '';
+            const artists = this.trackArtistLinks(track).map(artist => artist.label).join(', ') || 'unknown';
+            const audio = [
+                track.audio_format || null,
+                track.audio_bitrate ? `${track.audio_bitrate} kbps` : null,
+                track.audio_sample_rate ? `${track.audio_sample_rate} Hz` : null,
+                track.audio_bit_depth ? `${track.audio_bit_depth}-bit` : null,
+            ].filter(Boolean).join(' · ') || 'unknown audio details';
+            const lines = [
+                track.title || 'Unknown track',
+                `Artists: ${artists}`,
+                `Release year: ${track.release_year || 'unknown'}`,
+                `Duration: ${formatTime(track.duration_seconds)}`,
+                `Audio: ${audio}`,
+                `Size: ${this.bytes(track.file_size_bytes)}`,
+                `Uploader: ${track.uploader_name || 'UFO'}`,
+            ];
+            return lines.join('\n');
+        },
+
+        async openRelease(id) {
+            this.searchQuery = '';
+            this.searchResults = null;
+            this.view = 'release_detail';
+            this.currentRelease = null;
+            this._setHash('#release/' + id);
+            try {
+                const res = await fetch(`/api/player/releases/${id}`);
+                if (!res.ok) throw new Error('failed');
+                this.currentRelease = await res.json();
+            } catch {}
+        },
+
+        async openPlaylist(id) {
+            this.view = 'playlist_detail';
+            this.currentPlaylist = null;
+            this._setHash('#playlist/' + id);
+            try {
+                const res = await fetch(`/api/player/playlists/${id}`);
+                if (!res.ok) throw new Error('failed');
+                this.currentPlaylist = await res.json();
+            } catch {}
+        },
+
+        async playRelease(releaseId) {
+            try {
+                const res = await fetch(`/api/player/releases/${releaseId}`);
+                if (!res.ok) return;
+                const release = await res.json();
+                if (release.tracks.length > 0) {
+                    Alpine.store('queue').playRelease(release.tracks, 0);
+                }
+            } catch {}
+        },
+
+        async enqueueRelease(releaseId) {
+            try {
+                const res = await fetch(`/api/player/releases/${releaseId}`);
+                if (!res.ok) return;
+                const release = await res.json();
+                if (release.tracks.length > 0) {
+                    Alpine.store('queue').addToEnd(release.tracks);
+                }
+            } catch {}
+        },
+
+        async enqueueReleaseNext(releaseId) {
+            try {
+                const res = await fetch(`/api/player/releases/${releaseId}`);
+                if (!res.ok) return;
+                const release = await res.json();
+                if (release.tracks.length > 0) {
+                    Alpine.store('queue').addNextInQueue(release.tracks);
+                }
+            } catch {}
+        },
+
+        async search(query) {
+            const q = (query || '').trim();
+            if (!q) {
+                this.clearSearch();
+                return;
+            }
+            if (this.view !== 'search') {
+                this._previousView = this.view;
+            }
+            this.view = 'search';
+            this._setHash('#search?q=' + encodeURIComponent(q));
+            this.searchLoading = true;
+            try {
+                const res = await fetch(`/api/player/search?q=${encodeURIComponent(q)}&limit=10`);
+                if (!res.ok) throw new Error('failed');
+                this.searchResults = await res.json();
+            } catch {
+                this.searchResults = { artists: [], releases: [], tracks: [] };
+            }
+            this.searchLoading = false;
+        },
+
+        clearSearch() {
+            this.searchQuery = '';
+            this.searchResults = null;
+            this.searchLoading = false;
+            if (this.view === 'search') {
+                this.view = this._previousView || 'artists';
+                this._setHash('#artists');
+                if (this.view === 'artists') {
+                    this.$nextTick(() => { this._setupScroll(); });
+                }
+            }
+        },
+
+        playSearchTrack(idx) {
+            if (!this.searchResults || !this.searchResults.tracks) return;
+            Alpine.store('queue').playRelease(this.searchResults.tracks, idx);
+        },
+
+        _setupScroll() {
+            if (this._observer) this._observer.disconnect();
+            this.$nextTick(() => {
+                const sentinel = document.getElementById('artist-sentinel');
+                if (!sentinel) return;
+                this._observer = new IntersectionObserver((entries) => {
+                    if (entries[0].isIntersecting && !this.loading && !this._allLoaded) {
+                        this.loadArtists(this.artistsPage + 1);
+                    }
+                }, { root: document.getElementById('center-scroll'), threshold: 0.1 });
+                this._observer.observe(sentinel);
+            });
+        },
+
+        $nextTick(fn) {
+            setTimeout(fn, 50);
+        },
+    });
+
+    // -----------------------------------------------------------------------
+    // Likes store
+    // -----------------------------------------------------------------------
+    Alpine.store('likes', {
+        _set: new Set(),
+
+        init() {
+            fetch('/api/player/likes')
+                .then(r => r.json())
+                .then(d => { this._set = new Set(d.track_ids || []); })
+                .catch(() => {});
+        },
+
+        has(trackId) {
+            return this._set.has(trackId);
+        },
+
+        async toggle(trackId) {
+            // Optimistic update
+            if (this._set.has(trackId)) {
+                this._set.delete(trackId);
+            } else {
+                this._set.add(trackId);
+            }
+            // Force Alpine reactivity
+            this._set = new Set(this._set);
+            try {
+                const res = await fetch(`/api/player/likes/toggle/${trackId}`, { method: 'POST' });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.liked) {
+                        this._set.add(trackId);
+                    } else {
+                        this._set.delete(trackId);
+                    }
+                    this._set = new Set(this._set);
+                    Alpine.store('playlists').reload();
+                }
+            } catch {}
+        },
+
+        async toggleRelease(releaseId) {
+            try {
+                const res = await fetch(`/api/player/likes/release/${releaseId}`, { method: 'POST' });
+                if (res.ok) {
+                    // Reload liked IDs
+                    const likesRes = await fetch('/api/player/likes');
+                    if (likesRes.ok) {
+                        const d = await likesRes.json();
+                        this._set = new Set(d.track_ids || []);
+                    }
+                    Alpine.store('playlists').reload();
+                }
+            } catch {}
+        },
+
+        isReleaseLiked(release) {
+            if (!release || !release.tracks || release.tracks.length === 0) return false;
+            return release.tracks.every(t => this._set.has(t.id));
+        },
+    });
+
+    // -----------------------------------------------------------------------
+    // Artist follows store
+    // -----------------------------------------------------------------------
+    Alpine.store('follows', {
+        _set: new Set(),
+        artists: [],
+
+        init() {
+            this.reload();
+        },
+
+        has(artistId) {
+            return this._set.has(Number(artistId));
+        },
+
+        async reload() {
+            try {
+                const res = await fetch('/api/player/follows');
+                if (!res.ok) return;
+                const data = await res.json();
+                this._set = new Set((data.artist_ids || []).map(Number));
+                this.artists = data.artists || [];
+            } catch {}
+        },
+
+        _artistSnapshot(artistId) {
+            const id = Number(artistId);
+            const library = Alpine.store('library');
+            const fromLists = [
+                ...(library.artists || []),
+                ...((library.searchResults && library.searchResults.artists) || []),
+            ].find(artist => Number(artist.id) === id);
+            if (fromLists) return fromLists;
+            if (library.currentArtist && Number(library.currentArtist.id) === id) {
+                return {
+                    id,
+                    name: library.currentArtist.name,
+                    image_url: library.currentArtist.image_url,
+                    release_count: (library.currentArtist.releases || []).length,
+                    track_count: library.currentArtist.total_track_count || 0,
+                };
+            }
+            return null;
+        },
+
+        async toggle(artistId) {
+            const id = Number(artistId);
+            if (!id) return;
+
+            if (this._set.has(id)) {
+                this._set.delete(id);
+                this.artists = this.artists.filter(artist => Number(artist.id) !== id);
+            } else {
+                this._set.add(id);
+                const snapshot = this._artistSnapshot(id);
+                if (snapshot && !this.artists.some(artist => Number(artist.id) === id)) {
+                    this.artists = [snapshot, ...this.artists];
+                }
+            }
+            this._set = new Set(this._set);
+
+            try {
+                const res = await fetch(`/api/player/follows/toggle/${id}`, { method: 'POST' });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.followed) this._set.add(id);
+                    else this._set.delete(id);
+                    this._set = new Set(this._set);
+                }
+            } catch {}
+
+            await this.reload();
+        },
+    });
+
+    // -----------------------------------------------------------------------
+    // Torrent import store
+    // -----------------------------------------------------------------------
+    Alpine.store('torrents', {
+        modal: false,
+        file: null,
+        magnet: '',
+        sessions: [],
+        loadingSessions: false,
+        currentJob: null,
+        previewData: null,
+        treeRoot: null,
+        selected: new Set(),
+        expanded: new Set(),
+        loading: false,
+        message: '',
+        error: false,
+        _pollTimer: null,
+
+        open() {
+            this.modal = true;
+            this.message = '';
+            this.error = false;
+            this.loadSessions();
+        },
+
+        close() {
+            this.modal = false;
+        },
+
+        _setMessage(message, error = false) {
+            this.message = message || '';
+            this.error = error;
+        },
+
+        bytes(value) {
+            if (!value) return '0 B';
+            const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+            let size = Number(value);
+            let idx = 0;
+            while (size >= 1024 && idx < units.length - 1) {
+                size /= 1024;
+                idx++;
+            }
+            return (idx === 0 ? size.toFixed(0) : size.toFixed(1)) + ' ' + units[idx];
+        },
+
+        activeCount() {
+            return this.sessions.filter(job => job.active || job.status === 'downloading' || job.status === 'moving').length;
+        },
+
+        clientSummary() {
+            const active = this.activeCount();
+            return active > 0 ? active + ' active' : 'Client idle';
+        },
+
+        statusText(job) {
+            if (!job) return 'No torrent selected';
+            const state = job.client_state ? ' / ' + job.client_state : '';
+            return job.status + state;
+        },
+
+        speedText(job) {
+            if (!job) return '0 B/s';
+            const down = Number(job.download_speed_mbps || 0);
+            const up = Number(job.upload_speed_mbps || 0);
+            return 'down ' + down.toFixed(2) + ' MiB/s - up ' + up.toFixed(2) + ' MiB/s';
+        },
+
+        peerText(job) {
+            if (!job) return 'peers n/a';
+            const live = job.peers_live == null ? '?' : job.peers_live;
+            const seen = job.peers_seen == null ? '?' : job.peers_seen;
+            return 'peers ' + live + ' live / ' + seen + ' seen' + (job.eta ? ' - eta ' + job.eta : '');
+        },
+
+        sessionMeta(job) {
+            if (!job) return '';
+            const size = this.bytes(job.selected_size || job.total_size);
+            return job.status + ' - ' + (job.progress_percent || 0).toFixed(1) + '% - ' + size;
+        },
+
+        _rememberJob(job) {
+            if (!job || !job.id) return;
+            const rest = this.sessions.filter(item => item.id !== job.id);
+            this.sessions = [job, ...rest].sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+            if (this.currentJob && this.currentJob.id === job.id) this.currentJob = job;
+        },
+
+        _applySession(data) {
+            const preview = data.preview || data;
+            const job = data.job || null;
+            this.previewData = preview;
+            this.currentJob = job;
+            const selected = Array.isArray(data.selected_files) && data.selected_files.length
+                ? data.selected_files
+                : (preview.files || []).filter(f => f.selected).map(f => f.index);
+            this.selected = new Set(selected);
+            this.treeRoot = this._buildTree(preview.files || []);
+            if (job) this._rememberJob(job);
+        },
+
+        async loadSessions() {
+            this.loadingSessions = true;
+            try {
+                const res = await fetch('/api/player/torrents');
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Could not load torrents');
+                this.sessions = Array.isArray(data) ? data : [];
+            } catch (err) {
+                this._setMessage(err.message || String(err), true);
+            } finally {
+                this.loadingSessions = false;
+            }
+        },
+
+        async openSession(id) {
+            if (!id || this.loading) return;
+            this.loading = true;
+            this._setMessage('Opening saved torrent...');
+            try {
+                const res = await fetch(`/api/player/torrents/session/${id}`);
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Could not open torrent');
+                this._applySession(data);
+                this._setMessage('Saved torrent opened. Adjust files or resume download.');
+                if (data.job && (data.job.active || data.job.status === 'downloading' || data.job.status === 'moving')) {
+                    this._poll(data.job.id);
+                }
+            } catch (err) {
+                this._setMessage(err.message || String(err), true);
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async removeSession(id) {
+            if (!id || this.loading) return;
+            if (!confirm('Remove this torrent from the client list? Downloaded files will stay on disk.')) return;
+            this.loading = true;
+            try {
+                const res = await fetch(`/api/player/torrents/session/${id}`, { method: 'DELETE' });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Could not delete torrent');
+                this.sessions = this.sessions.filter(job => job.id !== id);
+                if (this.previewData && this.previewData.id === id) {
+                    this.previewData = null;
+                    this.currentJob = null;
+                    this.treeRoot = null;
+                    this.selected = new Set();
+                }
+                this._setMessage('Torrent removed from the client list.');
+            } catch (err) {
+                this._setMessage(err.message || String(err), true);
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async _fileBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onerror = () => reject(reader.error);
+                reader.onload = () => {
+                    const result = String(reader.result || '');
+                    resolve(result.includes(',') ? result.split(',')[1] : result);
+                };
+                reader.readAsDataURL(file);
+            });
+        },
+
+        async preview() {
+            if (this.loading) return;
+            const magnet = this.magnet.trim();
+            if (!this.file && !magnet) {
+                this._setMessage('Choose a .torrent file or paste a magnet link.', true);
+                return;
+            }
+
+            this.loading = true;
+            this.previewData = null;
+            this.treeRoot = null;
+            this.currentJob = null;
+            this.selected = new Set();
+            this.expanded = new Set();
+            this._setMessage(this.file ? 'Reading torrent file...' : 'Resolving magnet metadata. This can take a while...');
+
+            try {
+                const payload = this.file
+                    ? { kind: 'torrent_file', torrent_base64: await this._fileBase64(this.file), source_label: this.file.name }
+                    : { kind: 'magnet', magnet, source_label: magnet.slice(0, 120) };
+                const res = await fetch('/api/player/torrents/preview', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Preview failed');
+
+                this._applySession(data);
+                this._setMessage('All files are selected by default. Clear or adjust the tree before download.');
+                await this.loadSessions();
+            } catch (err) {
+                this._setMessage(err.message || String(err), true);
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        toggle(index, checked) {
+            const next = new Set(this.selected);
+            if (checked) next.add(index);
+            else next.delete(index);
+            this.selected = next;
+        },
+
+        selectAll(value) {
+            if (!this.previewData) return;
+            this.selected = value
+                ? new Set(this.previewData.files.map(f => f.index))
+                : new Set();
+        },
+
+        clearSelection() {
+            this.selectAll(false);
+        },
+
+        selectedBytes() {
+            if (!this.previewData) return 0;
+            return this.previewData.files
+                .filter(file => this.selected.has(file.index))
+                .reduce((sum, file) => sum + Number(file.length || 0), 0);
+        },
+
+        _buildTree(files) {
+            const root = {
+                type: 'folder',
+                key: 'root',
+                name: 'root',
+                depth: -1,
+                size: 0,
+                fileIndexes: [],
+                children: [],
+                childMap: new Map(),
+            };
+
+            const ensureFolder = (parent, name, key, depth) => {
+                let node = parent.childMap.get(key);
+                if (!node) {
+                    node = {
+                        type: 'folder',
+                        key,
+                        name,
+                        depth,
+                        size: 0,
+                        fileIndexes: [],
+                        children: [],
+                        childMap: new Map(),
+                    };
+                    parent.childMap.set(key, node);
+                    parent.children.push(node);
+                }
+                return node;
+            };
+
+            files.forEach(file => {
+                const components = file.components && file.components.length
+                    ? file.components
+                    : String(file.name || '').split('/').filter(Boolean);
+                const pathParts = components.length ? components : [file.name || ('file-' + file.index)];
+                let parent = root;
+                const folderChain = [root];
+
+                pathParts.slice(0, -1).forEach((part, depth) => {
+                    const key = parent.key + '/' + part;
+                    parent = ensureFolder(parent, part, key, depth);
+                    folderChain.push(parent);
+                });
+
+                const fileNode = {
+                    type: 'file',
+                    key: 'file:' + file.index,
+                    name: pathParts[pathParts.length - 1],
+                    depth: Math.max(pathParts.length - 1, 0),
+                    size: Number(file.length || 0),
+                    fileIndex: file.index,
+                    fileIndexes: [file.index],
+                    children: [],
+                };
+                parent.children.push(fileNode);
+
+                folderChain.forEach(folder => {
+                    folder.size += fileNode.size;
+                    folder.fileIndexes.push(file.index);
+                });
+            });
+
+            const sortAndSeal = node => {
+                node.children.sort((a, b) => {
+                    if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+                    return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+                });
+                node.children.forEach(sortAndSeal);
+                delete node.childMap;
+            };
+            sortAndSeal(root);
+
+            const initiallyExpanded = new Set();
+            const collectExpanded = node => {
+                if (node.type === 'folder' && node.depth < 1) initiallyExpanded.add(node.key);
+                node.children.forEach(collectExpanded);
+            };
+            collectExpanded(root);
+            this.expanded = initiallyExpanded;
+
+            return root;
+        },
+
+        visibleNodes() {
+            if (!this.treeRoot) return [];
+            const rows = [];
+            const visit = node => {
+                node.children.forEach(child => {
+                    rows.push(child);
+                    if (child.type === 'folder' && this.expanded.has(child.key)) {
+                        visit(child);
+                    }
+                });
+            };
+            visit(this.treeRoot);
+            return rows;
+        },
+
+        rowIndent(node) {
+            return Math.min(10 + Math.max(node.depth, 0) * 18, 82);
+        },
+
+        toggleExpand(node) {
+            if (node.type !== 'folder') return;
+            const next = new Set(this.expanded);
+            if (next.has(node.key)) next.delete(node.key);
+            else next.add(node.key);
+            this.expanded = next;
+        },
+
+        expandAll(value) {
+            if (!this.treeRoot) return;
+            const next = new Set();
+            const visit = node => {
+                if (node.type === 'folder' && value) next.add(node.key);
+                node.children.forEach(visit);
+            };
+            visit(this.treeRoot);
+            this.expanded = next;
+        },
+
+        nodeState(node) {
+            if (node.type === 'file') {
+                return this.selected.has(node.fileIndex) ? 'checked' : 'empty';
+            }
+            const total = node.fileIndexes.length;
+            const selected = node.fileIndexes.filter(index => this.selected.has(index)).length;
+            if (selected === 0) return 'empty';
+            if (selected === total) return 'checked';
+            return 'partial';
+        },
+
+        nodeCheckClass(node) {
+            const state = this.nodeState(node);
+            return {
+                checked: state === 'checked',
+                partial: state === 'partial',
+            };
+        },
+
+        toggleNode(node) {
+            const next = new Set(this.selected);
+            if (node.type === 'file') {
+                if (next.has(node.fileIndex)) next.delete(node.fileIndex);
+                else next.add(node.fileIndex);
+                this.selected = next;
+                return;
+            }
+
+            if (this.nodeState(node) === 'checked') {
+                node.fileIndexes.forEach(index => next.delete(index));
+            } else {
+                node.fileIndexes.forEach(index => next.add(index));
+            }
+            this.selected = next;
+        },
+
+        async start() {
+            if (!this.previewData || this.loading) return;
+            const selected = [...this.selected];
+            if (selected.length === 0) {
+                this._setMessage('Select at least one file.', true);
+                return;
+            }
+
+            this.loading = true;
+            this._setMessage('Starting download...');
+            try {
+                const res = await fetch(`/api/player/torrents/${this.previewData.id}/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ selected_files: selected }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Start failed');
+                this.currentJob = data;
+                this._rememberJob(data);
+                this._setMessage('Download started. Files will move to inbox when complete.');
+                this._poll(data.id);
+                await this.loadSessions();
+            } catch (err) {
+                this._setMessage(err.message || String(err), true);
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        _poll(id) {
+            if (this._pollTimer) clearInterval(this._pollTimer);
+            this._pollTimer = setInterval(async () => {
+                try {
+                    const res = await fetch(`/api/player/torrents/${id}/status`);
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error || 'Status failed');
+                    this.currentJob = data;
+                    this._rememberJob(data);
+                    this._setMessage(
+                        data.status + ' - ' + data.progress_percent.toFixed(1) + '% - ' + this.bytes(data.downloaded_bytes),
+                        data.status === 'failed'
+                    );
+                    if (data.status === 'complete' || data.status === 'failed') {
+                        clearInterval(this._pollTimer);
+                        this._pollTimer = null;
+                        this.loadSessions();
+                    }
+                } catch (err) {
+                    this._setMessage(err.message || String(err), true);
+                    clearInterval(this._pollTimer);
+                    this._pollTimer = null;
+                }
+            }, 2000);
+        },
+    });
+
+    // -----------------------------------------------------------------------
+    // Playlists store
+    // -----------------------------------------------------------------------
+    Alpine.store('playlists', {
+        list: [],
+        modal: null,   // { mode: 'create'|'rename', title: '', id?: number }
+        picker: null,  // { trackIds: [1,2,3] }
+
+        init() {
+            this.reload();
+        },
+
+        async reload() {
+            try {
+                const res = await fetch('/api/player/playlists');
+                if (res.ok) this.list = await res.json();
+            } catch {}
+        },
+
+        regularList() {
+            return this.list.filter(pl => (
+                pl.kind === 'likes' ||
+                pl.is_own ||
+                !pl.is_public
+            ));
+        },
+
+        publishedList() {
+            return this.list.filter(pl => (
+                pl.kind === 'user' &&
+                !pl.is_own &&
+                pl.is_public
+            ));
+        },
+
+        showCreate() {
+            this.modal = { mode: 'create', title: '' };
+        },
+
+        startRename(pl) {
+            this.modal = { mode: 'rename', title: pl.title, id: pl.id };
+        },
+
+        async submitModal() {
+            if (!this.modal) return;
+            const title = this.modal.title.trim();
+            if (!title) return;
+
+            if (this.modal.mode === 'create') {
+                try {
+                    await fetch('/api/player/playlists', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ title }),
+                    });
+                    await this.reload();
+                } catch {}
+            } else if (this.modal.mode === 'rename') {
+                try {
+                    await fetch(`/api/player/playlists/${this.modal.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ title }),
+                    });
+                    await this.reload();
+                } catch {}
+            }
+            this.modal = null;
+        },
+
+        async deletePlaylist(id) {
+            if (!confirm('Delete this playlist?')) return;
+            try {
+                await fetch(`/api/player/playlists/${id}`, { method: 'DELETE' });
+                await this.reload();
+            } catch {}
+        },
+
+        showPicker(trackIds) {
+            this.picker = { trackIds };
+        },
+
+        async addToPicked(playlistId) {
+            if (!this.picker) return;
+            try {
+                await fetch(`/api/player/playlists/${playlistId}/tracks`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ track_ids: this.picker.trackIds }),
+                });
+                await this.reload();
+            } catch {}
+            this.picker = null;
+        },
+    });
+});
+</script>

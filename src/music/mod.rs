@@ -1578,6 +1578,65 @@ pub mod db_migrations {
             &[Operation::custom(add_media_file_uploader).build()];
     }
 
+    // -- M0031: persistent torrent import sessions ---------------------------
+
+    #[cot::db::migrations::migration_op]
+    async fn create_torrent_session(ctx: migrations::MigrationContext<'_>) -> cot::db::Result<()> {
+        ctx.db
+            .raw(
+                "CREATE TABLE IF NOT EXISTS furumusic__torrent_session (
+                    id VARCHAR(36) PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    name TEXT NOT NULL,
+                    info_hash VARCHAR(80) NOT NULL,
+                    source_kind VARCHAR(32) NOT NULL,
+                    source_label TEXT,
+                    torrent_bytes BYTEA NOT NULL,
+                    files_json TEXT NOT NULL,
+                    selected_files_json TEXT NOT NULL DEFAULT '[]',
+                    status VARCHAR(32) NOT NULL,
+                    total_size BIGINT NOT NULL DEFAULT 0,
+                    selected_size BIGINT NOT NULL DEFAULT 0,
+                    downloaded_bytes BIGINT NOT NULL DEFAULT 0,
+                    uploaded_bytes BIGINT NOT NULL DEFAULT 0,
+                    progress_percent DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    error TEXT,
+                    created_at VARCHAR(32) NOT NULL,
+                    updated_at VARCHAR(32) NOT NULL,
+                    completed_at VARCHAR(32)
+                )",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE INDEX IF NOT EXISTS idx_torrent_session_user_updated
+                   ON furumusic__torrent_session (user_id, updated_at DESC)",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE INDEX IF NOT EXISTS idx_torrent_session_user_status
+                   ON furumusic__torrent_session (user_id, status)",
+            )
+            .await?;
+        Ok(())
+    }
+
+    #[derive(Debug, Copy, Clone)]
+    pub struct M0031CreateTorrentSession;
+
+    impl migrations::Migration for M0031CreateTorrentSession {
+        const APP_NAME: &'static str = "furumusic";
+        const MIGRATION_NAME: &'static str = "m_0031_create_torrent_session";
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
+                "furumusic",
+                "m_0030_add_media_file_uploader",
+            )];
+        const OPERATIONS: &'static [Operation] =
+            &[Operation::custom(create_torrent_session).build()];
+    }
+
     pub const MIGRATIONS: &[&SyncDynMigration] = &[
         &M0006CreateMediaFile,
         &M0007CreateArtist,
@@ -1599,5 +1658,6 @@ pub mod db_migrations {
         &M0028AddModelNameColumns,
         &M0029AddPlaybackVolume,
         &M0030AddMediaFileUploader,
+        &M0031CreateTorrentSession,
     ];
 }
