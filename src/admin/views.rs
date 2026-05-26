@@ -799,7 +799,7 @@ pub async fn artists_edit(
             .await
             .ok()
             .flatten()
-            .map(|mf| format!("/api/player/cover/{}", mf.id_val())),
+            .map(|mf| format!("/api/player/cover/{}/large", mf.id_val())),
         None => None,
     };
 
@@ -879,7 +879,7 @@ pub async fn artists_available_covers(
                 covers.push(AvailableCover {
                     media_file_id: cover_fid,
                     release_title: release.title_str().to_owned(),
-                    cover_url: format!("/api/player/cover/{cover_fid}"),
+                    cover_url: format!("/api/player/cover/{cover_fid}/medium"),
                 });
             }
         }

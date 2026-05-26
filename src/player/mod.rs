@@ -25,7 +25,7 @@ mod queries;
 mod rows;
 
 use dto::*;
-use helpers::{cover_url, load_release_uploaders, track_cover_url};
+use helpers::{cover_variant_url, load_release_uploaders, track_cover_variant_url};
 use queries::*;
 use rows::*;
 
@@ -203,7 +203,7 @@ async fn artists_handler(
         .map(|r| ArtistCard {
             id: r.id,
             name: r.name,
-            image_url: cover_url(r.image_file_id),
+            image_url: cover_variant_url(r.image_file_id, "medium"),
             release_count: r.release_count,
             track_count: r.track_count,
         })
@@ -279,7 +279,7 @@ async fn artist_detail_handler(
             title: r.title,
             release_type: r.release_type,
             year: r.year,
-            cover_url: cover_url(r.cover_file_id),
+            cover_url: cover_variant_url(r.cover_file_id, "medium"),
             track_count: r.track_count,
             uploaders: release_uploaders.remove(&r.id).unwrap_or_default(),
         })
@@ -386,7 +386,11 @@ async fn artist_detail_handler(
                 duration_seconds: t.duration_seconds,
                 artists: featured_main_artists.remove(&tid).unwrap_or_default(),
                 featured_artists: featured_feat_artists.remove(&tid).unwrap_or_default(),
-                cover_url: track_cover_url(t.cover_file_id, t.release_cover_file_id),
+                cover_url: track_cover_variant_url(
+                    t.cover_file_id,
+                    t.release_cover_file_id,
+                    "medium",
+                ),
                 stream_url: format!("/api/player/stream/{tid}"),
                 uploader_name: t.uploader_name,
                 audio_format: t.audio_format,
@@ -405,7 +409,7 @@ async fn artist_detail_handler(
     Json(ArtistDetail {
         id: artist.id,
         name: artist.name,
-        image_url: cover_url(image_file_id),
+        image_url: cover_variant_url(image_file_id, "large"),
         total_track_count,
         total_play_count,
         releases: release_cards,
@@ -539,7 +543,11 @@ async fn release_detail_handler(
                 artists: track_main_artists.remove(&tid).unwrap_or_default(),
                 featured_artists: track_feat_artists.remove(&tid).unwrap_or_default(),
                 release_year: t.release_year,
-                cover_url: track_cover_url(t.cover_file_id, t.release_cover_file_id),
+                cover_url: track_cover_variant_url(
+                    t.cover_file_id,
+                    t.release_cover_file_id,
+                    "medium",
+                ),
                 stream_url: format!("/api/player/stream/{tid}"),
                 uploader_name: t.uploader_name,
                 audio_format: t.audio_format,
@@ -565,7 +573,7 @@ async fn release_detail_handler(
         title: release.title,
         release_type: release.release_type,
         year: release.year,
-        cover_url: cover_url(release.cover_file_id),
+        cover_url: cover_variant_url(release.cover_file_id, "large"),
         artists: release_artists
             .into_iter()
             .map(|a| ArtistRef {
@@ -797,7 +805,11 @@ async fn build_track_items(
                 artists: track_main_artists.remove(&tid).unwrap_or_default(),
                 featured_artists: track_feat_artists.remove(&tid).unwrap_or_default(),
                 release_year: t.release_year,
-                cover_url: track_cover_url(t.cover_file_id, t.release_cover_file_id),
+                cover_url: track_cover_variant_url(
+                    t.cover_file_id,
+                    t.release_cover_file_id,
+                    "medium",
+                ),
                 stream_url: format!("/api/player/stream/{tid}"),
                 uploader_name: t.uploader_name,
                 audio_format: t.audio_format,
@@ -1139,11 +1151,38 @@ async fn cover_handler(
     config: &AppConfig,
     path: Path<PathMediaFileId>,
 ) -> cot::Result<cot::http::Response<Body>> {
+    cover_response(session, db, pool, config, path.0.media_file_id, None).await
+}
+
+async fn cover_variant_handler(
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+    config: &AppConfig,
+    path: Path<PathMediaFileVariant>,
+) -> cot::Result<cot::http::Response<Body>> {
+    cover_response(
+        session,
+        db,
+        pool,
+        config,
+        path.0.media_file_id,
+        Some(path.0.variant.as_str()),
+    )
+    .await
+}
+
+async fn cover_response(
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+    config: &AppConfig,
+    media_file_id: i64,
+    variant_name: Option<&str>,
+) -> cot::Result<cot::http::Response<Body>> {
     let Some(_user) = auth::get_session_user(&session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
-
-    let media_file_id = path.0.media_file_id;
 
     let media = sqlx::query_as::<_, MediaFileRow>(
         "SELECT file_path, mime_type::text as mime_type, file_size_bytes FROM furumusic__media_file WHERE id = $1",
@@ -1163,13 +1202,25 @@ async fn cover_handler(
         return Ok(json_error(StatusCode::NOT_FOUND, "file not found on disk"));
     }
 
-    let data = tokio::fs::read(&full_path)
+    let (response_path, content_type) = variant_name
+        .and_then(crate::agent::cover_variants::variant_by_name)
+        .map(|variant| {
+            let variant_path = crate::agent::cover_variants::variant_path(&full_path, variant);
+            if variant_path.exists() {
+                (variant_path, "image/jpeg")
+            } else {
+                (full_path.clone(), media.mime_type.as_str())
+            }
+        })
+        .unwrap_or_else(|| (full_path.clone(), media.mime_type.as_str()));
+
+    let data = tokio::fs::read(&response_path)
         .await
         .map_err(|e| cot::Error::internal(e.to_string()))?;
 
     let response = cot::http::Response::builder()
         .status(StatusCode::OK)
-        .header(CONTENT_TYPE, media.mime_type.as_str())
+        .header(CONTENT_TYPE, content_type)
         .header(CONTENT_LENGTH, data.len().to_string())
         .header("Cache-Control", "public, max-age=86400")
         .body(Body::fixed(data))
@@ -1590,7 +1641,7 @@ async fn search_handler(
         .map(|r| ArtistCard {
             id: r.id,
             name: r.name,
-            image_url: cover_url(r.image_file_id),
+            image_url: cover_variant_url(r.image_file_id, "medium"),
             release_count: r.release_count,
             track_count: r.track_count,
         })
@@ -1608,7 +1659,7 @@ async fn search_handler(
             title: r.title,
             release_type: r.release_type,
             year: r.year,
-            cover_url: cover_url(r.cover_file_id),
+            cover_url: cover_variant_url(r.cover_file_id, "medium"),
             track_count: r.track_count,
             uploaders: release_uploaders.remove(&r.id).unwrap_or_default(),
         })
@@ -1627,7 +1678,11 @@ async fn search_handler(
                 artists: track_main_artists.remove(&tid).unwrap_or_default(),
                 featured_artists: track_feat_artists.remove(&tid).unwrap_or_default(),
                 release_year: t.release_year,
-                cover_url: track_cover_url(t.cover_file_id, t.release_cover_file_id),
+                cover_url: track_cover_variant_url(
+                    t.cover_file_id,
+                    t.release_cover_file_id,
+                    "medium",
+                ),
                 stream_url: format!("/api/player/stream/{tid}"),
                 uploader_name: t.uploader_name,
                 audio_format: t.audio_format,
@@ -2097,7 +2152,7 @@ async fn followed_artists_handler(
         .map(|r| ArtistCard {
             id: r.id,
             name: r.name,
-            image_url: cover_url(r.image_file_id),
+            image_url: cover_variant_url(r.image_file_id, "small"),
             release_count: r.release_count,
             track_count: r.track_count,
         })
@@ -2274,7 +2329,11 @@ async fn tracks_by_ids_handler(
                 artists: track_main_artists.remove(&tid).unwrap_or_default(),
                 featured_artists: track_feat_artists.remove(&tid).unwrap_or_default(),
                 release_year: t.release_year,
-                cover_url: track_cover_url(t.cover_file_id, t.release_cover_file_id),
+                cover_url: track_cover_variant_url(
+                    t.cover_file_id,
+                    t.release_cover_file_id,
+                    "medium",
+                ),
                 stream_url: format!("/api/player/stream/{tid}"),
                 uploader_name: t.uploader_name,
                 audio_format: t.audio_format,
@@ -3130,6 +3189,34 @@ impl App for PlayerApp {
                 "player_stream",
             ),
             // -- Cover art --
+            Route::with_handler_and_name(
+                "/cover/{media_file_id}/{variant}",
+                {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    let config = Arc::clone(&self.config);
+                    get(
+                        move |session: Session, db: Database, path: Path<PathMediaFileVariant>| {
+                            let pool = Arc::clone(&pool);
+                            let pool_config = Arc::clone(&pool_config);
+                            let config = Arc::clone(&config);
+                            async move {
+                                let pg_pool = pool
+                                    .get_or_init(|| async {
+                                        sqlx::postgres::PgPoolOptions::new()
+                                            .max_connections(5)
+                                            .connect(&pool_config.database_url)
+                                            .await
+                                            .expect("player pool")
+                                    })
+                                    .await;
+                                cover_variant_handler(session, db, pg_pool, &config, path).await
+                            }
+                        },
+                    )
+                },
+                "player_cover_variant",
+            ),
             Route::with_handler_and_name(
                 "/cover/{media_file_id}",
                 {

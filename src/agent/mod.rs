@@ -1,4 +1,5 @@
 pub mod cover_art;
+pub mod cover_variants;
 pub mod dto;
 pub mod metadata;
 pub mod mover;

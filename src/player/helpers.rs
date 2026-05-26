@@ -1,15 +1,16 @@
 use crate::player::dto::UploaderSummary;
 use crate::player::rows::ReleaseUploaderRow;
 
-pub(super) fn cover_url(file_id: Option<i64>) -> Option<String> {
-    file_id.map(|id| format!("/api/player/cover/{id}"))
+pub(super) fn cover_variant_url(file_id: Option<i64>, variant: &str) -> Option<String> {
+    file_id.map(|id| format!("/api/player/cover/{id}/{variant}"))
 }
 
-pub(super) fn track_cover_url(
+pub(super) fn track_cover_variant_url(
     track_cover: Option<i64>,
     release_cover: Option<i64>,
+    variant: &str,
 ) -> Option<String> {
-    cover_url(track_cover.or(release_cover))
+    cover_variant_url(track_cover.or(release_cover), variant)
 }
 
 pub(super) async fn load_release_uploaders(

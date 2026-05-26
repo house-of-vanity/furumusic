@@ -70,3 +70,9 @@ pub(super) struct PathTrackId {
 pub(super) struct PathMediaFileId {
     pub(super) media_file_id: i64,
 }
+
+#[derive(Debug, Deserialize)]
+pub(super) struct PathMediaFileVariant {
+    pub(super) media_file_id: i64,
+    pub(super) variant: String,
+}

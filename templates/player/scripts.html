@@ -97,6 +97,11 @@ function formatTime(seconds) {
     return m + ':' + (sec < 10 ? '0' : '') + sec;
 }
 
+function coverVariantUrl(url, variant) {
+    if (!url) return url;
+    return url.replace(/\/(small|medium|large)$/, '/' + variant);
+}
+
 document.addEventListener('alpine:init', () => {
     // -----------------------------------------------------------------------
     // Audio element
@@ -440,7 +445,7 @@ document.addEventListener('alpine:init', () => {
             navigator.mediaSession.metadata = new MediaMetadata({
                 title: t.title,
                 artist: t.artists.map(a => a.name).join(', '),
-                artwork: t.cover_url ? [{ src: t.cover_url, sizes: '512x512', type: 'image/jpeg' }] : [],
+                artwork: t.cover_url ? [{ src: coverVariantUrl(t.cover_url, 'large'), sizes: '512x512', type: 'image/jpeg' }] : [],
             });
             navigator.mediaSession.setActionHandler('play', () => this.resume());
             navigator.mediaSession.setActionHandler('pause', () => this.pause());
@@ -634,6 +639,8 @@ document.addEventListener('alpine:init', () => {
         searchResults: null,
         searchLoading: false,
         _previousView: 'artists',
+        _activeHash: location.hash || '#artists',
+        _scrollPositions: {},
 
         _hashNav: false, // guard against circular hash updates
 
@@ -643,26 +650,31 @@ document.addEventListener('alpine:init', () => {
 
             // Listen for browser back/forward
             window.addEventListener('hashchange', () => {
-                this._navigateFromHash();
+                if (this._hashNav) return;
+                const nextHash = location.hash || '#artists';
+                this._saveScrollPosition(this._activeHash);
+                this._activeHash = nextHash;
+                this._navigateFromHash({ fromHash: true, restoreScroll: true });
             });
 
             // Navigate to initial hash (if any)
-            this._navigateFromHash();
+            this._navigateFromHash({ fromHash: true, restoreScroll: true });
         },
 
         _setHash(hash) {
             this._hashNav = true;
+            this._activeHash = hash;
             location.hash = hash;
             // Reset guard after a tick
             setTimeout(() => { this._hashNav = false; }, 0);
         },
 
-        _navigateFromHash() {
+        _navigateFromHash(options = {}) {
             if (this._hashNav) return;
             const hash = location.hash || '#artists';
             const match = hash.match(/^#(\w+)(?:\/([-]?\d+))?(?:\?(.*))?$/);
             if (!match) {
-                this.goArtists();
+                this.goArtists(options);
                 return;
             }
             const view = match[1];
@@ -670,26 +682,74 @@ document.addEventListener('alpine:init', () => {
             const params = match[3] || '';
 
             if (view === 'artists' && !id) {
-                if (this.view !== 'artists') this.goArtists();
+                if (this.view !== 'artists') this.goArtists(options);
+                else if (options.restoreScroll) this._restoreScrollPosition(hash);
             } else if (view === 'artist' && id) {
-                this.openArtist(id);
+                this.openArtist(id, options);
             } else if (view === 'release' && id) {
-                this.openRelease(id);
+                this.openRelease(id, options);
             } else if (view === 'playlist' && id) {
-                this.openPlaylist(id);
+                this.openPlaylist(id, options);
             } else if (view === 'search') {
                 const qMatch = params.match(/q=([^&]*)/);
                 if (qMatch) {
                     const q = decodeURIComponent(qMatch[1]);
                     this.searchQuery = q;
-                    this.search(q);
+                    this.search(q, options);
                 }
             } else {
-                this.goArtists();
+                this.goArtists(options);
             }
         },
 
-        goArtists() {
+        _scrollElement() {
+            return document.getElementById('center-scroll');
+        },
+
+        _saveScrollPosition(hash = this._activeHash) {
+            const el = this._scrollElement();
+            if (!el || !hash) return;
+            this._scrollPositions[hash] = el.scrollTop;
+        },
+
+        _scrollToTop() {
+            const el = this._scrollElement();
+            if (el) el.scrollTop = 0;
+        },
+
+        _restoreScrollPosition(hash = this._activeHash) {
+            const top = this._scrollPositions[hash];
+            if (top == null) return;
+            const restore = () => {
+                const el = this._scrollElement();
+                if (el) el.scrollTop = top;
+            };
+            this.$nextTick(() => {
+                restore();
+                requestAnimationFrame(restore);
+                setTimeout(restore, 150);
+            });
+        },
+
+        _afterNavigation(options = {}) {
+            if (options.restoreScroll) {
+                this._restoreScrollPosition(this._activeHash);
+            } else {
+                this.$nextTick(() => { this._scrollToTop(); });
+            }
+        },
+
+        _beginNavigation(hash, options = {}) {
+            if (!options.fromHash) {
+                this._saveScrollPosition(this._activeHash);
+                this._setHash(hash);
+            } else {
+                this._activeHash = hash;
+            }
+        },
+
+        goArtists(options = {}) {
+            this._beginNavigation('#artists', options);
             this.view = 'artists';
             this.currentArtist = null;
             this.currentRelease = null;
@@ -697,8 +757,8 @@ document.addEventListener('alpine:init', () => {
             this.searchQuery = '';
             this.searchResults = null;
             this._previousView = 'artists';
-            this._setHash('#artists');
             this.$nextTick(() => { this._setupScroll(); });
+            this._afterNavigation(options);
         },
 
         async loadArtists(page) {
@@ -722,17 +782,18 @@ document.addEventListener('alpine:init', () => {
             this.loading = false;
         },
 
-        async openArtist(id) {
+        async openArtist(id, options = {}) {
+            this._beginNavigation('#artist/' + id, options);
             this.searchQuery = '';
             this.searchResults = null;
             this.view = 'artist_detail';
             this.currentArtist = null;
-            this._setHash('#artist/' + id);
             try {
                 const res = await fetch(`/api/player/artists/${id}`);
                 if (!res.ok) throw new Error('failed');
                 this.currentArtist = await res.json();
             } catch {}
+            this._afterNavigation(options);
         },
 
         artistReleaseGroups() {
@@ -842,28 +903,30 @@ document.addEventListener('alpine:init', () => {
             return lines.join('\n');
         },
 
-        async openRelease(id) {
+        async openRelease(id, options = {}) {
+            this._beginNavigation('#release/' + id, options);
             this.searchQuery = '';
             this.searchResults = null;
             this.view = 'release_detail';
             this.currentRelease = null;
-            this._setHash('#release/' + id);
             try {
                 const res = await fetch(`/api/player/releases/${id}`);
                 if (!res.ok) throw new Error('failed');
                 this.currentRelease = await res.json();
             } catch {}
+            this._afterNavigation(options);
         },
 
-        async openPlaylist(id) {
+        async openPlaylist(id, options = {}) {
+            this._beginNavigation('#playlist/' + id, options);
             this.view = 'playlist_detail';
             this.currentPlaylist = null;
-            this._setHash('#playlist/' + id);
             try {
                 const res = await fetch(`/api/player/playlists/${id}`);
                 if (!res.ok) throw new Error('failed');
                 this.currentPlaylist = await res.json();
             } catch {}
+            this._afterNavigation(options);
         },
 
         async playRelease(releaseId) {
@@ -899,17 +962,17 @@ document.addEventListener('alpine:init', () => {
             } catch {}
         },
 
-        async search(query) {
+        async search(query, options = {}) {
             const q = (query || '').trim();
             if (!q) {
                 this.clearSearch();
                 return;
             }
+            this._beginNavigation('#search?q=' + encodeURIComponent(q), options);
             if (this.view !== 'search') {
                 this._previousView = this.view;
             }
             this.view = 'search';
-            this._setHash('#search?q=' + encodeURIComponent(q));
             this.searchLoading = true;
             try {
                 const res = await fetch(`/api/player/search?q=${encodeURIComponent(q)}&limit=10`);
@@ -919,6 +982,7 @@ document.addEventListener('alpine:init', () => {
                 this.searchResults = { artists: [], releases: [], tracks: [] };
             }
             this.searchLoading = false;
+            this._afterNavigation(options);
         },
 
         clearSearch() {

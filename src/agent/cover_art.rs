@@ -328,6 +328,23 @@ pub async fn save_cover_to_storage(
     .await?;
 
     if let Some((id,)) = existing {
+        if let Some((file_path,)) = sqlx::query_as::<_, (String,)>(
+            "SELECT file_path FROM furumusic__media_file WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(pool)
+        .await?
+        {
+            let path = PathBuf::from(&file_path);
+            let path = if path.is_absolute() {
+                path
+            } else {
+                Path::new(storage_dir).join(path)
+            };
+            if let Err(err) = crate::agent::cover_variants::ensure_cover_variants(&path).await {
+                tracing::warn!(media_file_id = id, error = %err, "Failed to generate cover variants");
+            }
+        }
         return Ok(id);
     }
 
@@ -373,6 +390,14 @@ pub async fn save_cover_to_storage(
         size = file_size,
         "Saved cover art"
     );
+
+    if let Err(err) = crate::agent::cover_variants::ensure_cover_variants(&dest_path).await {
+        tracing::warn!(
+            media_file_id = media_file.id_val(),
+            error = %err,
+            "Failed to generate cover variants"
+        );
+    }
 
     Ok(media_file.id_val())
 }
