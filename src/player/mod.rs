@@ -265,6 +265,7 @@ async fn artist_detail_handler(
                   t.title::text AS title,
                   r.id AS release_id,
                   r.title::text AS release_title,
+                  r.year AS release_year,
                   t.duration_seconds,
                   t.cover_file_id,
                   r.cover_file_id AS release_cover_file_id,
@@ -338,6 +339,7 @@ async fn artist_detail_handler(
                 title: t.title,
                 release_id: t.release_id,
                 release_title: t.release_title,
+                release_year: t.release_year,
                 duration_seconds: t.duration_seconds,
                 artists: featured_main_artists.remove(&tid).unwrap_or_default(),
                 featured_artists: featured_feat_artists.remove(&tid).unwrap_or_default(),
@@ -412,6 +414,7 @@ async fn release_detail_handler(
         r#"SELECT t.id, t.title::text as title, t.track_number, t.disc_number,
                   t.duration_seconds, t.cover_file_id,
                   r.cover_file_id as release_cover_file_id,
+                  r.year as release_year,
                   COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
                   mf.audio_format,
                   mf.audio_bitrate,
@@ -484,6 +487,7 @@ async fn release_detail_handler(
                 duration_seconds: t.duration_seconds,
                 artists: track_main_artists.remove(&tid).unwrap_or_default(),
                 featured_artists: track_feat_artists.remove(&tid).unwrap_or_default(),
+                release_year: t.release_year,
                 cover_url: track_cover_url(t.cover_file_id, t.release_cover_file_id),
                 stream_url: format!("/api/player/stream/{tid}"),
                 uploader_name: t.uploader_name,
@@ -640,6 +644,7 @@ async fn playlist_detail_handler(
         r#"SELECT t.id, t.title::text as title, t.track_number, t.disc_number,
                   t.duration_seconds, t.cover_file_id,
                   r.cover_file_id as release_cover_file_id,
+                  r.year as release_year,
                   COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
                   mf.audio_format,
                   mf.audio_bitrate,
@@ -732,6 +737,7 @@ async fn build_track_items(
                 duration_seconds: t.duration_seconds,
                 artists: track_main_artists.remove(&tid).unwrap_or_default(),
                 featured_artists: track_feat_artists.remove(&tid).unwrap_or_default(),
+                release_year: t.release_year,
                 cover_url: track_cover_url(t.cover_file_id, t.release_cover_file_id),
                 stream_url: format!("/api/player/stream/{tid}"),
                 uploader_name: t.uploader_name,
@@ -754,6 +760,7 @@ async fn likes_playlist_handler(
         r#"SELECT t.id, t.title::text as title, t.track_number, t.disc_number,
                   t.duration_seconds, t.cover_file_id,
                   r.cover_file_id as release_cover_file_id,
+                  r.year as release_year,
                   COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
                   mf.audio_format,
                   mf.audio_bitrate,
@@ -1221,6 +1228,7 @@ async fn search_handler(
             r#"SELECT t.id, t.title::text AS title, t.track_number, t.disc_number,
                       t.duration_seconds, t.cover_file_id,
                       rel.cover_file_id AS release_cover_file_id,
+                      rel.year AS release_year,
                       COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
                       mf.audio_format,
                       mf.audio_bitrate,
@@ -1290,11 +1298,12 @@ async fn search_handler(
 
         let t = sqlx::query_as::<_, SearchTrackRow>(
             r#"SELECT id, title, track_number, disc_number, duration_seconds, cover_file_id,
-                      release_cover_file_id, uploader_name, audio_format, audio_bitrate,
+                      release_cover_file_id, release_year, uploader_name, audio_format, audio_bitrate,
                       audio_sample_rate, audio_bit_depth, file_size_bytes FROM (
                 SELECT t.id, t.title::text AS title, t.track_number, t.disc_number,
                        t.duration_seconds, t.cover_file_id,
                        rel.cover_file_id AS release_cover_file_id,
+                       rel.year AS release_year,
                        COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
                        mf.audio_format,
                        mf.audio_bitrate,
@@ -1313,7 +1322,7 @@ async fn search_handler(
                 ) t
                 JOIN furumusic__release rel ON rel.id = t.release_id
                 LEFT JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
-                GROUP BY t.id, t.title, t.track_number, t.disc_number, t.duration_seconds, t.cover_file_id, rel.cover_file_id,
+                GROUP BY t.id, t.title, t.track_number, t.disc_number, t.duration_seconds, t.cover_file_id, rel.cover_file_id, rel.year,
                          mf.uploader_name, mf.audio_format, mf.audio_bitrate, mf.audio_sample_rate, mf.audio_bit_depth, mf.file_size_bytes
                 ORDER BY similarity DESC
                 LIMIT $2
@@ -1409,6 +1418,7 @@ async fn search_handler(
                 duration_seconds: t.duration_seconds,
                 artists: track_main_artists.remove(&tid).unwrap_or_default(),
                 featured_artists: track_feat_artists.remove(&tid).unwrap_or_default(),
+                release_year: t.release_year,
                 cover_url: track_cover_url(t.cover_file_id, t.release_cover_file_id),
                 stream_url: format!("/api/player/stream/{tid}"),
                 uploader_name: t.uploader_name,
@@ -1975,6 +1985,7 @@ async fn tracks_by_ids_handler(
         r#"SELECT t.id, t.title::text as title, t.track_number, t.disc_number,
                   t.duration_seconds, t.cover_file_id,
                   r.cover_file_id as release_cover_file_id,
+                  r.year as release_year,
                   COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
                   mf.audio_format,
                   mf.audio_bitrate,
@@ -2046,6 +2057,7 @@ async fn tracks_by_ids_handler(
                 duration_seconds: t.duration_seconds,
                 artists: track_main_artists.remove(&tid).unwrap_or_default(),
                 featured_artists: track_feat_artists.remove(&tid).unwrap_or_default(),
+                release_year: t.release_year,
                 cover_url: track_cover_url(t.cover_file_id, t.release_cover_file_id),
                 stream_url: format!("/api/player/stream/{tid}"),
                 uploader_name: t.uploader_name,

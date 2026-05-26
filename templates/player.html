@@ -692,7 +692,7 @@ button.user-stat:hover {
     border: 1px solid var(--border-color);
     background: rgba(18,18,18,0.78);
     color: var(--text-primary);
-    cursor: help;
+    cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1134,15 +1134,35 @@ button.user-stat:hover {
     border-radius: 2px;
     cursor: pointer;
     position: relative;
+    touch-action: none;
 }
 
 .volume-slider-fill {
     height: 100%;
     background: var(--text-primary);
     border-radius: 2px;
+    position: relative;
 }
 
 .volume-slider:hover .volume-slider-fill { background: var(--accent); }
+
+.volume-slider-thumb {
+    position: absolute;
+    right: -6px;
+    top: 50%;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--text-primary);
+    transform: translateY(-50%);
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.volume-slider:hover .volume-slider-thumb,
+.volume-slider:active .volume-slider-thumb {
+    opacity: 1;
+}
 
 .queue-toggle-btn {
     background: none;
@@ -1224,8 +1244,30 @@ button.user-stat:hover {
     cursor: pointer;
 }
 
+.mobile-library-btn {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    cursor: pointer;
+    flex: 0 0 auto;
+    transition: background 0.15s, color 0.15s;
+}
+
+.mobile-library-btn:hover,
 .mobile-account-chip:hover {
     background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.mobile-library-btn svg {
+    width: 19px;
+    height: 19px;
 }
 
 .mobile-account-popover {
@@ -1291,6 +1333,92 @@ button.user-stat:hover {
     font-size: 12px;
     font-weight: 700;
     text-align: left;
+}
+
+.mobile-library-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    display: none;
+    background: rgba(0,0,0,0.58);
+}
+
+.mobile-library-drawer {
+    width: min(360px, calc(100vw - 28px));
+    height: calc(100dvh - var(--player-bar-space) - 20px);
+    margin: 10px 0 0 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: var(--bg-secondary);
+    box-shadow: 0 18px 60px rgba(0,0,0,0.55);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.mobile-drawer-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 14px 12px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.mobile-drawer-title {
+    font-size: 15px;
+    font-weight: 800;
+}
+
+.mobile-drawer-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 8px;
+}
+
+.mobile-drawer-section {
+    padding: 6px 0 10px;
+    border-top: 1px solid var(--border-color);
+}
+
+.mobile-drawer-section:first-child {
+    border-top: 0;
+}
+
+.mobile-list-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.mobile-list-row .following-artist,
+.mobile-list-row .playlist-item {
+    flex: 1;
+    min-width: 0;
+}
+
+.mobile-list-action {
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-subdued);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.mobile-list-action:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.mobile-list-action svg {
+    width: 15px;
+    height: 15px;
 }
 
 .search-bar input {
@@ -1528,6 +1656,37 @@ button.user-stat:hover {
 
 .modal-playlist-item:hover { background: var(--bg-hover); color: var(--text-primary); }
 .modal-playlist-item svg { width: 16px; height: 16px; flex-shrink: 0; }
+
+.info-modal {
+    max-width: min(520px, calc(100vw - 24px));
+}
+
+.info-modal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.info-modal-head h3 {
+    margin: 0;
+}
+
+.info-modal-body {
+    margin: 0;
+    padding: 14px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    overflow: auto;
+    max-height: min(58dvh, 520px);
+}
 
 .modal-btn {
     padding: 8px 16px;
@@ -1904,9 +2063,17 @@ button.user-stat:hover {
         flex: 1 1 auto;
     }
 
+    .mobile-library-btn {
+        display: flex;
+    }
+
     .mobile-account-chip {
         display: flex;
         flex: 0 0 auto;
+    }
+
+    .mobile-library-backdrop {
+        display: block;
     }
 
     .version-chip {
@@ -2053,7 +2220,21 @@ button.user-stat:hover {
     }
 
     .volume-control {
-        display: none;
+        display: flex;
+    }
+
+    .volume-slider {
+        width: 74px;
+        height: 6px;
+        border-radius: 999px;
+    }
+
+    .volume-slider-fill {
+        border-radius: 999px;
+    }
+
+    .volume-slider-thumb {
+        opacity: 1;
     }
 
     .queue-toggle-btn {
@@ -2100,6 +2281,12 @@ button.user-stat:hover {
 
     .mobile-account-name {
         display: none;
+    }
+
+    .mobile-library-drawer {
+        width: calc(100vw - 16px);
+        margin-left: 8px;
+        height: calc(100dvh - var(--player-bar-space) - 16px);
     }
 
     .mobile-account-popover {
@@ -2296,6 +2483,18 @@ button.user-stat:hover {
     .player-track-artist { font-size: 10px; }
     .player-buttons { gap: 10px; }
 
+    .volume-control {
+        gap: 4px;
+    }
+
+    .volume-btn {
+        padding: 5px;
+    }
+
+    .volume-slider {
+        width: 58px;
+    }
+
     .player-btn {
         min-width: 30px;
         min-height: 30px;
@@ -2459,10 +2658,140 @@ button.user-stat:hover {
             </div>
         </div>
 
+        <template x-if="$store.mobile.libraryOpen">
+            <div class="mobile-library-backdrop" @click.self="$store.mobile.closeLibrary()" x-cloak>
+                <aside class="mobile-library-drawer">
+                    <div class="mobile-drawer-head">
+                        <div>
+                            <div class="mobile-drawer-title">Library</div>
+                            <div class="playlist-count">Playlists and followed artists</div>
+                        </div>
+                        <button class="mobile-list-action" @click="$store.mobile.closeLibrary()" title="Close">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="18" y1="6" x2="6" y2="18"/>
+                                <line x1="6" y1="6" x2="18" y2="18"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="mobile-drawer-body">
+                        <div class="mobile-drawer-section">
+                            <div class="sidebar-nav-item"
+                                 :class="{ active: $store.library.view === 'artists' }"
+                                 @click="$store.library.goArtists(); $store.mobile.closeLibrary()">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 10-16 0"/></svg>
+                                Artists
+                            </div>
+                        </div>
+
+                        <div class="mobile-drawer-section">
+                            <div class="sidebar-section-title">
+                                Following
+                                <span x-show="$store.follows.artists.length > 0"
+                                      x-text="'(' + $store.follows.artists.length + ')'"></span>
+                            </div>
+                            <template x-if="$store.follows.artists.length === 0">
+                                <div class="following-empty">No followed artists</div>
+                            </template>
+                            <div class="following-list" x-show="$store.follows.artists.length > 0" x-cloak>
+                                <template x-for="artist in $store.follows.artists" :key="'mobile-follow-' + artist.id">
+                                    <div class="mobile-list-row">
+                                        <div class="following-artist"
+                                             :class="{ active: $store.library.currentArtist && $store.library.currentArtist.id === artist.id }"
+                                             @click="$store.library.openArtist(artist.id); $store.mobile.closeLibrary()">
+                                            <div class="following-avatar">
+                                                <template x-if="artist.image_url">
+                                                    <img :src="artist.image_url" :alt="artist.name" loading="lazy">
+                                                </template>
+                                                <template x-if="!artist.image_url">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 10-16 0"/></svg>
+                                                </template>
+                                            </div>
+                                            <div class="following-name" x-text="artist.name"></div>
+                                        </div>
+                                        <button class="mobile-list-action"
+                                                @click.stop="$store.follows.toggle(artist.id)"
+                                                title="Unfollow artist">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/>
+                                                <circle cx="9" cy="7" r="4"/>
+                                                <line x1="17" y1="11" x2="23" y2="11"/>
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+
+                        <div class="mobile-drawer-section">
+                            <div class="sidebar-section-title">Playlists</div>
+                            <template x-for="pl in $store.playlists.regularList()" :key="'mobile-playlist-' + pl.id">
+                                <div class="playlist-item-row">
+                                    <div class="playlist-item" @click="$store.library.openPlaylist(pl.id); $store.mobile.closeLibrary()">
+                                        <template x-if="pl.kind === 'likes'">
+                                            <span style="display:flex;align-items:center;gap:6px">
+                                                <svg viewBox="0 0 24 24" fill="var(--accent)" stroke="none" width="14" height="14"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z"/></svg>
+                                                <span x-text="pl.title"></span>
+                                            </span>
+                                        </template>
+                                        <template x-if="pl.kind !== 'likes'">
+                                            <span x-text="pl.title"></span>
+                                        </template>
+                                        <span class="playlist-count" x-text="pl.track_count + ' tracks'"></span>
+                                    </div>
+                                    <template x-if="pl.is_own && pl.kind === 'user'">
+                                        <div class="playlist-item-actions">
+                                            <button class="playlist-action-btn" @click.stop="$store.mobile.closeLibrary(); $store.playlists.startRename(pl)" title="Rename">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                            </button>
+                                            <button class="playlist-action-btn" @click.stop="$store.playlists.deletePlaylist(pl.id)" title="Delete">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                                            </button>
+                                        </div>
+                                    </template>
+                                </div>
+                            </template>
+                            <button class="sidebar-create-btn" @click="$store.mobile.closeLibrary(); $store.playlists.showCreate()">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                New Playlist
+                            </button>
+                            <template x-if="$store.playlists.publishedList().length > 0">
+                                <div class="playlist-public-section">
+                                    <div class="sidebar-section-title playlist-subtitle">Published Playlists</div>
+                                    <template x-for="pl in $store.playlists.publishedList()" :key="'mobile-published-' + pl.id">
+                                        <div class="playlist-item-row">
+                                            <div class="playlist-item playlist-item-public" @click="$store.library.openPlaylist(pl.id); $store.mobile.closeLibrary()">
+                                                <div class="playlist-title-line">
+                                                    <span class="playlist-title-text" x-text="pl.title"></span>
+                                                    <span class="playlist-public-badge">Public</span>
+                                                </div>
+                                                <div class="playlist-meta-line">
+                                                    <span class="playlist-owner" x-show="pl.owner_name" x-text="'by ' + pl.owner_name"></span>
+                                                    <span x-show="pl.owner_name">&middot;</span>
+                                                    <span x-text="pl.track_count + ' tracks'"></span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </aside>
+            </div>
+        </template>
+
         <!-- Center Content -->
         <div class="center-content" id="center-scroll">
             <!-- Search / account bar -->
             <div class="content-topbar" @click.outside="$store.user.menuOpen = false">
+                <button class="mobile-library-btn"
+                        @click="$store.user.menuOpen = false; $store.mobile.toggleLibrary()"
+                        title="Library">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M4 19.5A2.5 2.5 0 016.5 17H20"/>
+                        <path d="M4 4.5A2.5 2.5 0 016.5 2H20v20H6.5A2.5 2.5 0 014 19.5z"/>
+                    </svg>
+                </button>
                 <div class="search-bar">
                     <span class="search-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
                     <input id="search-input" type="text" placeholder="Search artists, releases, tracks..."
@@ -2491,7 +2820,7 @@ button.user-stat:hover {
                 <button class="mobile-account-chip"
                         x-show="$store.user.profile"
                         x-cloak
-                        @click="$store.user.menuOpen = !$store.user.menuOpen"
+                        @click="$store.mobile.closeLibrary(); $store.user.menuOpen = !$store.user.menuOpen"
                         :title="$store.user.profile?.name || 'Account'">
                     <span class="user-avatar" x-text="$store.user.initials()"></span>
                     <span class="mobile-account-name" x-text="$store.user.profile?.name || ''"></span>
@@ -2587,7 +2916,7 @@ button.user-stat:hover {
                                                     <template x-if="!release.cover_url">
                                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="12" r="4"/></svg>
                                                     </template>
-                                                    <button class="card-info-btn" @click.stop :title="$store.library.releaseInfo(release)" aria-label="Release info">
+                                                    <button class="card-info-btn" @click.stop="$store.info.open('Release info', $store.library.releaseInfo(release))" :title="$store.library.releaseInfo(release)" aria-label="Release info">
                                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
                                                     </button>
                                                 </div>
@@ -2630,7 +2959,7 @@ button.user-stat:hover {
                                             </div>
                                             <span></span>
                                             <div class="track-actions">
-                                                <button class="track-action-btn info-btn" @click.stop :title="$store.library.trackInfo(track)" aria-label="Track info">
+                                                <button class="track-action-btn info-btn" @click.stop="$store.info.open('Track info', $store.library.trackInfo(track))" :title="$store.library.trackInfo(track)" aria-label="Track info">
                                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
                                                 </button>
                                                 <button class="track-action-btn play-btn" @click.stop="$store.library.playSearchTrack(idx)" title="Play">
@@ -2752,7 +3081,7 @@ button.user-stat:hover {
                                             <template x-if="!release.cover_url">
                                                 <span class="placeholder-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="12" r="4"/></svg></span>
                                             </template>
-                                            <button class="card-info-btn" @click.stop :title="$store.library.releaseInfo(release)" aria-label="Release info">
+                                            <button class="card-info-btn" @click.stop="$store.info.open('Release info', $store.library.releaseInfo(release))" :title="$store.library.releaseInfo(release)" aria-label="Release info">
                                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
                                             </button>
                                             <button class="card-enqueue-btn" @click.stop="$store.library.enqueueRelease(release.id)" title="Add to queue">
@@ -2804,7 +3133,7 @@ button.user-stat:hover {
                                     </div>
                                     <span></span>
                                     <div class="track-actions">
-                                        <button class="track-action-btn info-btn" @click.stop :title="$store.library.trackInfo(track)" aria-label="Track info">
+                                        <button class="track-action-btn info-btn" @click.stop="$store.info.open('Track info', $store.library.trackInfo(track))" :title="$store.library.trackInfo(track)" aria-label="Track info">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
                                         </button>
                                         <button class="track-action-btn play-btn" @click.stop="$store.queue.playRelease($store.library.currentArtist.featured_tracks, idx)" title="Play">
@@ -2866,7 +3195,7 @@ button.user-stat:hover {
                             <div class="release-year" x-text="$store.library.currentRelease.year || ''"></div>
                             <div class="release-actions">
                                 <button class="release-action-btn secondary"
-                                        @click.stop
+                                        @click.stop="$store.info.open('Release info', $store.library.releaseInfo($store.library.currentRelease))"
                                         :title="$store.library.releaseInfo($store.library.currentRelease)"
                                         aria-label="Release info">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
@@ -2919,7 +3248,7 @@ button.user-stat:hover {
                             </div>
                             <span></span>
                             <div class="track-actions">
-                                <button class="track-action-btn info-btn" @click.stop :title="$store.library.trackInfo(track)" aria-label="Track info">
+                                <button class="track-action-btn info-btn" @click.stop="$store.info.open('Track info', $store.library.trackInfo(track))" :title="$store.library.trackInfo(track)" aria-label="Track info">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
                                 </button>
                                 <button class="track-action-btn play-btn" @click.stop="$store.queue.playRelease($store.library.currentRelease.tracks, idx)" title="Play">
@@ -2989,7 +3318,7 @@ button.user-stat:hover {
                             </div>
                             <span></span>
                             <div class="track-actions">
-                                <button class="track-action-btn info-btn" @click.stop :title="$store.library.trackInfo(track)" aria-label="Track info">
+                                <button class="track-action-btn info-btn" @click.stop="$store.info.open('Track info', $store.library.trackInfo(track))" :title="$store.library.trackInfo(track)" aria-label="Track info">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
                                 </button>
                                 <button class="track-action-btn play-btn" @click.stop="$store.queue.playRelease($store.library.currentPlaylist.tracks, idx)" title="Play">
@@ -3061,7 +3390,7 @@ button.user-stat:hover {
                             </div>
                         </div>
                         <div class="queue-track-actions">
-                            <button class="queue-track-remove info-btn" @click.stop :title="$store.library.trackInfo(track)" aria-label="Track info">
+                            <button class="queue-track-remove info-btn" @click.stop="$store.info.open('Track info', $store.library.trackInfo(track))" :title="$store.library.trackInfo(track)" aria-label="Track info">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
                             </button>
                             <button class="queue-track-remove" @click.stop="$store.queue.remove(idx)" title="Remove">
@@ -3095,6 +3424,9 @@ button.user-stat:hover {
                                     <template x-if="artistIdx > 0"><span>, </span></template>
                                     <a class="artist-link" @click.stop="$store.library.openArtist(artist.id)" x-text="artist.label"></a>
                                 </span>
+                            </template>
+                            <template x-if="$store.player.currentTrack.release_year">
+                                <span class="player-release-year" x-text="' · ' + $store.player.currentTrack.release_year"></span>
                             </template>
                         </div>
                     </div>
@@ -3154,8 +3486,12 @@ button.user-stat:hover {
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/></svg>
                     </template>
                 </button>
-                <div class="volume-slider" @click="$store.player.setVolumeFromClick($event)">
-                    <div class="volume-slider-fill" :style="'width:' + ($store.player.volume * 100) + '%'"></div>
+                <div class="volume-slider"
+                     @pointerdown.prevent="$store.player.startVolumeDrag($event)"
+                     aria-label="Volume">
+                    <div class="volume-slider-fill" :style="'width:' + ($store.player.volume * 100) + '%'">
+                        <div class="volume-slider-thumb"></div>
+                    </div>
                 </div>
             </div>
             <button class="queue-toggle-btn" :class="{ active: $store.queue.visible }" @click="$store.queue.visible = !$store.queue.visible" title="Queue">
@@ -3163,6 +3499,24 @@ button.user-stat:hover {
             </button>
         </div>
     </div>
+
+    <!-- Info Modal -->
+    <template x-if="$store.info.modal">
+        <div class="modal-overlay" @click.self="$store.info.close()">
+            <div class="modal-box info-modal">
+                <div class="info-modal-head">
+                    <h3 x-text="$store.info.modal.title"></h3>
+                    <button class="mobile-list-action" @click="$store.info.close()" title="Close">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                    </button>
+                </div>
+                <pre class="info-modal-body" x-text="$store.info.modal.body"></pre>
+            </div>
+        </div>
+    </template>
 
     <!-- Create / Rename Playlist Modal -->
     <template x-if="$store.playlists.modal">
@@ -3357,6 +3711,30 @@ document.addEventListener('alpine:init', () => {
     // -----------------------------------------------------------------------
     const audio = new Audio();
     audio.preload = 'auto';
+
+    Alpine.store('mobile', {
+        libraryOpen: false,
+        toggleLibrary() {
+            this.libraryOpen = !this.libraryOpen;
+            if (this.libraryOpen) Alpine.store('user').menuOpen = false;
+        },
+        closeLibrary() {
+            this.libraryOpen = false;
+        },
+    });
+
+    Alpine.store('info', {
+        modal: null,
+        open(title, body) {
+            this.modal = {
+                title: title || 'Info',
+                body: body || 'No details available.',
+            };
+        },
+        close() {
+            this.modal = null;
+        },
+    });
 
     // -----------------------------------------------------------------------
     // User store
@@ -3617,11 +3995,32 @@ document.addEventListener('alpine:init', () => {
             audio.volume = this.volume;
         },
 
-        setVolumeFromClick(event) {
-            const bar = event.currentTarget;
+        _setVolumeFromClientX(clientX, bar) {
             const rect = bar.getBoundingClientRect();
-            const pct = (event.clientX - rect.left) / rect.width;
+            const pct = rect.width > 0 ? (clientX - rect.left) / rect.width : 0;
             this.setVolume(pct);
+        },
+
+        setVolumeFromClick(event) {
+            this._setVolumeFromClientX(event.clientX, event.currentTarget);
+        },
+
+        startVolumeDrag(event) {
+            const bar = event.currentTarget;
+            this._setVolumeFromClientX(event.clientX, bar);
+            bar.setPointerCapture?.(event.pointerId);
+
+            const move = (e) => {
+                this._setVolumeFromClientX(e.clientX, bar);
+            };
+            const stop = () => {
+                window.removeEventListener('pointermove', move);
+                window.removeEventListener('pointerup', stop);
+                window.removeEventListener('pointercancel', stop);
+            };
+            window.addEventListener('pointermove', move);
+            window.addEventListener('pointerup', stop);
+            window.addEventListener('pointercancel', stop);
         },
 
         toggleMute() {
@@ -4033,6 +4432,7 @@ document.addEventListener('alpine:init', () => {
             const lines = [
                 track.title || 'Unknown track',
                 `Artists: ${artists}`,
+                `Release year: ${track.release_year || 'unknown'}`,
                 `Duration: ${formatTime(track.duration_seconds)}`,
                 `Audio: ${audio}`,
                 `Size: ${this.bytes(track.file_size_bytes)}`,
