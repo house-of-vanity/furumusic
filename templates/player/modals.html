@@ -64,6 +64,15 @@
                            :class="{ error: $store.torrents.error }"
                            x-text="$store.torrents.message"></p>
                     </div>
+                    <button class="torrent-modal-close"
+                            @click="$store.torrents.close()"
+                            title="{{ t.player_close }}"
+                            aria-label="{{ t.player_close }}">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                    </button>
                     <div class="torrent-client-status">
                         <span class="torrent-status-pill"
                               :class="{ active: $store.torrents.activeCount() > 0 }"
@@ -109,8 +118,6 @@
                                                  :style="'width:' + $store.torrents.progressValue(job) + '%'"></div>
                                         </div>
                                     </div>
-                                    <button class="torrent-session-remove"
-                                            @click.stop="$store.torrents.removeSession(job.id)">{{ t.player_delete }}</button>
                                 </div>
                             </template>
                             <button type="button"
@@ -119,7 +126,7 @@
                                     @click="$store.torrents.addNew()"
                                     :disabled="$store.torrents.loading">
                                 <span class="torrent-session-add-icon">+</span>
-                                <span>{{ t.player_add_torrent }}</span>
+                                <span>{{ t.player_upload }}</span>
                             </button>
                         </div>
                     </aside>
@@ -135,9 +142,10 @@
                             <div class="torrent-import-panel">
                                 <div class="torrent-modal-grid">
                                     <div>
-                                        <label for="torrent-file-input">{{ t.player_torrent_file }}</label>
-                                        <input id="torrent-file-input" type="file" accept=".torrent,application/x-bittorrent"
-                                               @change="$store.torrents.file = $event.target.files[0] || null">
+                                        <label for="local-file-input">{{ t.player_local_files }}</label>
+                                        <input id="local-file-input" type="file" multiple accept="audio/*,.mp3,.flac,.wav,.m4a,.ogg,.opus,.aac"
+                                               @change="$store.torrents.setLocalFiles($event.target.files)">
+                                        <div class="torrent-upload-summary" x-text="$store.torrents.localUploadSummary()"></div>
                                     </div>
                                     <div>
                                         <label for="torrent-magnet-input">{{ t.player_magnet_link }}</label>
@@ -145,10 +153,26 @@
                                                x-model="$store.torrents.magnet"
                                                placeholder="magnet:?xt=urn:btih:...">
                                     </div>
+                                    <div>
+                                        <label for="torrent-file-input">{{ t.player_torrent_file }}</label>
+                                        <input id="torrent-file-input" type="file" accept=".torrent,application/x-bittorrent"
+                                               @change="$store.torrents.file = $event.target.files[0] || null">
+                                    </div>
+                                </div>
+                                <div class="torrent-upload-progress"
+                                    x-show="$store.torrents.uploadProgress > 0 || ($store.torrents.localFiles.length > 0 && $store.torrents.loading)">
+                                    <div class="torrent-progress-head">
+                                        <span x-text="$store.torrents.uploadProgress >= 100 ? T.uploadComplete : T.uploadingFiles"></span>
+                                        <span x-text="$store.torrents.uploadProgressText"></span>
+                                    </div>
+                                    <div class="torrent-progress-track">
+                                        <div class="torrent-progress-bar"
+                                             :style="'width:' + $store.torrents.uploadProgress + '%'"></div>
+                                    </div>
                                 </div>
                                 <div class="torrent-actions">
                                     <button class="modal-btn modal-btn-primary" @click="$store.torrents.preview()" :disabled="$store.torrents.loading">
-                                        {{ t.player_preview_content }}
+                                        {{ t.player_upload_content }}
                                     </button>
                                 </div>
                             </div>
@@ -201,12 +225,19 @@
                                 <div class="torrent-preview-meta"
                                      x-text="$store.torrents.previewData.files.length + ' {{ t.player_files_count }} - ' + $store.torrents.bytes($store.torrents.previewData.total_size)"></div>
                             </div>
-                            <button class="modal-btn"
-                                    :class="$store.torrents.actionButtonClass()"
-                                    @click="$store.torrents.toggleDownloadAction()"
-                                    :disabled="$store.torrents.actionButtonDisabled()">
-                                <span x-text="$store.torrents.actionButtonText()"></span>
-                            </button>
+                            <div class="torrent-preview-actions">
+                                <button class="modal-btn"
+                                        :class="$store.torrents.actionButtonClass()"
+                                        @click="$store.torrents.toggleDownloadAction()"
+                                        :disabled="$store.torrents.actionButtonDisabled()">
+                                    <span x-text="$store.torrents.actionButtonText()"></span>
+                                </button>
+                                <button class="modal-btn modal-btn-danger"
+                                        @click="$store.torrents.removeSession($store.torrents.previewData.id)"
+                                        :disabled="$store.torrents.loading">
+                                    {{ t.player_delete }}
+                                </button>
+                            </div>
                         </div>
                         <div class="torrent-tree-toolbar">
                             <div class="torrent-selected-summary"

@@ -1741,6 +1741,11 @@ button.user-stat:hover {
     color: #111;
 }
 .modal-btn-ghost { background: transparent; color: var(--text-secondary); }
+.modal-btn-danger {
+    background: rgba(229,96,96,0.16);
+    color: #ffb9b9;
+    border: 1px solid rgba(229,96,96,0.32);
+}
 
 .modal-footer {
     display: flex;
@@ -1749,9 +1754,10 @@ button.user-stat:hover {
 }
 
 .torrent-modal {
-    width: min(860px, calc(100vw - 32px));
-    max-width: 860px;
-    max-height: min(88dvh, 760px);
+    width: min(1180px, calc(100vw - 48px));
+    max-width: 1180px;
+    height: min(820px, calc(100dvh - 64px));
+    max-height: calc(100dvh - 64px);
     overflow: hidden;
 }
 
@@ -1761,6 +1767,8 @@ button.user-stat:hover {
     justify-content: space-between;
     gap: 14px;
     margin-bottom: 12px;
+    flex: 0 0 auto;
+    position: relative;
 }
 
 .torrent-modal-head h3 {
@@ -1792,6 +1800,25 @@ button.user-stat:hover {
     white-space: nowrap;
 }
 
+.torrent-modal-close {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 34px;
+    height: 34px;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.torrent-modal-close svg {
+    width: 18px;
+    height: 18px;
+}
+
 .torrent-status-pill.active {
     border-color: rgba(29,185,84,0.42);
     color: #9ff0b9;
@@ -1816,9 +1843,10 @@ button.user-stat:hover {
 
 .torrent-manager-layout {
     display: grid;
-    grid-template-columns: minmax(210px, 260px) minmax(0, 1fr);
+    grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
     gap: 14px;
     min-height: 0;
+    flex: 1 1 auto;
 }
 
 .torrent-manager-sidebar,
@@ -1851,13 +1879,14 @@ button.user-stat:hover {
 
 .torrent-session-list {
     overflow-y: auto;
-    min-height: 150px;
-    max-height: min(52vh, 470px);
+    min-height: 0;
+    max-height: none;
+    flex: 1 1 auto;
 }
 
 .torrent-session-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
     gap: 8px;
     padding: 10px 12px;
     border-bottom: 1px solid var(--border-color);
@@ -1935,19 +1964,28 @@ button.user-stat:hover {
 }
 
 .torrent-status-badge.status-preview {
-    background: rgba(122,162,255,0.14);
-    color: #a8c0ff;
+    background: rgba(122,162,255,0.16);
+    color: #adc3ff;
 }
 
-.torrent-status-badge.status-downloading,
-.torrent-status-badge.status-moving {
+.torrent-status-badge.status-resolving {
+    background: rgba(182,141,255,0.16);
+    color: #d0b6ff;
+}
+
+.torrent-status-badge.status-downloading {
     background: rgba(29,185,84,0.16);
     color: #9ff0b9;
 }
 
+.torrent-status-badge.status-moving {
+    background: rgba(75,198,240,0.16);
+    color: #a8e8ff;
+}
+
 .torrent-status-badge.status-completed {
-    background: rgba(105,214,161,0.2);
-    color: #b8ffd2;
+    background: rgba(110,211,123,0.16);
+    color: #b8f7be;
 }
 
 .torrent-status-badge.status-paused {
@@ -1983,23 +2021,6 @@ button.user-stat:hover {
     border-radius: inherit;
     background: linear-gradient(90deg, var(--accent), #7ee4a2);
     transition: width 0.25s ease;
-}
-
-.torrent-session-remove {
-    align-self: flex-start;
-    border: 1px solid rgba(229,96,96,0.24);
-    background: rgba(229,96,96,0.12);
-    color: #ffb9b9;
-    border-radius: 5px;
-    padding: 4px 7px;
-    font-size: 11px;
-    font-weight: 800;
-    cursor: pointer;
-}
-
-.torrent-session-remove:hover {
-    background: rgba(229,96,96,0.2);
-    color: #ffd7d7;
 }
 
 .torrent-progress-card {
@@ -2143,6 +2164,21 @@ button.user-stat:hover {
     min-height: 150px;
 }
 
+.torrent-upload-summary {
+    min-height: 16px;
+    margin-top: 5px;
+    color: var(--text-subdued);
+    font-size: 11px;
+}
+
+.torrent-upload-progress {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-primary);
+}
+
 .torrent-modal label {
     display: block;
     margin-bottom: 6px;
@@ -2185,6 +2221,13 @@ button.user-stat:hover {
     gap: 12px;
     align-items: center;
     margin-top: 16px;
+}
+
+.torrent-preview-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
 }
 
 .torrent-preview-title {
@@ -2243,7 +2286,7 @@ button.user-stat:hover {
     margin-top: 10px;
     overflow-y: auto;
     min-height: 140px;
-    max-height: min(46vh, 420px);
+    max-height: none;
     border: 1px solid var(--border-color);
     border-radius: 8px;
     background: var(--bg-primary);
@@ -2442,7 +2485,7 @@ button.user-stat:hover {
     }
 
     .torrent-modal {
-        width: calc(100vw - 24px);
+        width: min(1180px, calc(100vw - 32px));
     }
 
     .card-grid {
@@ -2786,24 +2829,35 @@ button.user-stat:hover {
     }
 
     .info-modal,
-    .torrent-modal,
     .history-modal {
         width: min(400px, calc(100vw - 24px));
         max-width: 400px;
     }
 
     .torrent-modal {
-        max-height: min(82dvh, 640px);
-        padding: 20px;
+        width: 100vw;
+        max-width: none;
+        height: 100dvh;
+        max-height: none;
+        border-radius: 0;
+        padding: calc(14px + env(safe-area-inset-top)) 14px calc(14px + env(safe-area-inset-bottom));
+        overflow: hidden;
     }
 
     .torrent-modal-head {
-        flex-direction: column;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
         gap: 8px;
+        align-items: start;
     }
 
     .torrent-client-status {
+        grid-column: 1 / -1;
         justify-content: flex-start;
+    }
+
+    .torrent-modal-close {
+        display: inline-flex;
     }
 
     .torrent-manager-layout {
@@ -2812,8 +2866,12 @@ button.user-stat:hover {
     }
 
     .torrent-session-list {
-        max-height: 148px;
-        min-height: 96px;
+        max-height: none;
+        min-height: 0;
+    }
+
+    .torrent-manager-sidebar {
+        flex: 0 0 178px;
     }
 
     .torrent-progress-head {
@@ -2867,8 +2925,8 @@ button.user-stat:hover {
     }
 
     .torrent-file-tree {
-        min-height: 120px;
-        max-height: min(32dvh, 260px);
+        min-height: 0;
+        max-height: none;
     }
 
     .torrent-tree-row {

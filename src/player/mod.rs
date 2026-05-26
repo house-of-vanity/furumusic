@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use cot::db::Database;
 use cot::http::StatusCode;
-use cot::http::header::{ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, RANGE};
+use cot::http::header::{
+    ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, HeaderName, RANGE,
+};
 use cot::json::Json;
 use cot::request::extractors::Path;
 use cot::response::IntoResponse;
@@ -38,6 +40,13 @@ fn json_error(status: StatusCode, message: &str) -> cot::response::Response {
         .header(CONTENT_TYPE, "application/json")
         .body(Body::fixed(body.to_string()))
         .expect("valid response")
+}
+
+#[derive(serde::Serialize)]
+struct LocalUploadResponse {
+    ok: bool,
+    filename: String,
+    size: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -908,6 +917,137 @@ async fn stream_handler(
         .expect("valid response");
 
     Ok(response)
+}
+
+async fn local_upload_handler(
+    session: Session,
+    db: Database,
+    config: AppConfig,
+    scheduler_handle: Arc<tokio::sync::OnceCell<Arc<SchedulerHandle>>>,
+    request: cot::request::Request,
+) -> cot::Result<cot::http::Response<Body>> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+
+    let inbox_dir = config.agent_inbox_dir.trim();
+    if inbox_dir.is_empty() {
+        return Ok(json_error(
+            StatusCode::BAD_REQUEST,
+            "agent_inbox_dir is not configured",
+        ));
+    }
+    let inbox_root = std::path::PathBuf::from(inbox_dir);
+    if !inbox_root.is_absolute() {
+        return Ok(json_error(
+            StatusCode::BAD_REQUEST,
+            "agent_inbox_dir must be an absolute path",
+        ));
+    }
+
+    let filename_header = HeaderName::from_static("x-furumusic-filename");
+    let original_name = request
+        .headers()
+        .get(filename_header)
+        .and_then(|value| value.to_str().ok())
+        .map(percent_decode_header)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "upload.mp3".to_string());
+    let filename = sanitize_upload_filename(&original_name);
+
+    let bytes = request
+        .into_body()
+        .into_bytes()
+        .await
+        .map_err(|err| cot::Error::internal(err.to_string()))?;
+    if bytes.is_empty() {
+        return Ok(json_error(StatusCode::BAD_REQUEST, "uploaded file is empty"));
+    }
+
+    let upload_dir = inbox_root
+        .join("user_uploads")
+        .join(user.id.to_string())
+        .join(format!("local-{}", uuid::Uuid::new_v4()));
+    tokio::fs::create_dir_all(&upload_dir)
+        .await
+        .map_err(|err| cot::Error::internal(err.to_string()))?;
+    let destination = upload_dir.join(&filename);
+    tokio::fs::write(&destination, &bytes)
+        .await
+        .map_err(|err| cot::Error::internal(err.to_string()))?;
+
+    if let Some(handle) = scheduler_handle.get() {
+        let handle = Arc::clone(handle);
+        tokio::spawn(async move {
+            if let Err(err) = handle.trigger_job_now("inbox_discover").await {
+                tracing::warn!("failed to trigger inbox_discover after local upload: {err}");
+            }
+        });
+    }
+
+    Json(LocalUploadResponse {
+        ok: true,
+        filename,
+        size: bytes.len() as u64,
+    })
+    .into_response()
+}
+
+fn sanitize_upload_filename(value: &str) -> String {
+    let name = std::path::Path::new(value)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("upload.mp3");
+    let sanitized: String = name
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            c if c.is_control() => '_',
+            c => c,
+        })
+        .collect();
+    let trimmed = sanitized.trim().trim_matches('.').trim();
+    if trimmed.is_empty() {
+        "upload.mp3".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn percent_decode_header(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'%' if index + 2 < bytes.len() => {
+                let hi = hex_value(bytes[index + 1]);
+                let lo = hex_value(bytes[index + 2]);
+                if let (Some(hi), Some(lo)) = (hi, lo) {
+                    out.push((hi << 4) | lo);
+                    index += 3;
+                } else {
+                    out.push(bytes[index]);
+                    index += 1;
+                }
+            }
+            byte => {
+                out.push(byte);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).to_string()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn parse_range(header: &str, file_size: u64) -> Option<(u64, u64)> {
@@ -2364,6 +2504,29 @@ impl App for PlayerApp {
                     )
                 },
                 "player_torrent_preview",
+            ),
+            Route::with_handler_and_name(
+                "/uploads/local",
+                {
+                    let scheduler_handle = Arc::clone(&self.scheduler_handle);
+                    post(
+                        move |session: Session, db: Database, request: cot::request::Request| {
+                            let scheduler_handle = Arc::clone(&scheduler_handle);
+                            async move {
+                                let (live_config, _) = AppConfig::load_with_db(&db).await;
+                                local_upload_handler(
+                                    session,
+                                    db,
+                                    live_config,
+                                    scheduler_handle,
+                                    request,
+                                )
+                                .await
+                            }
+                        },
+                    )
+                },
+                "player_local_upload",
             ),
             Route::with_handler_and_name(
                 "/torrents/{id}/start",

@@ -30,7 +30,11 @@ const T = {
     queued: "{{ t.player_queued }}",
     saved: "{{ t.player_saved }}",
     chooseSavedOrAddTorrent: "{{ t.player_choose_saved_or_add_torrent }}",
+    uploadFailed: "{{ t.player_upload_failed }}",
+    uploadComplete: "{{ t.player_upload_complete }}",
+    uploadingFiles: "{{ t.player_uploading_files }}",
     preview: "{{ t.player_preview }}",
+    resolving: "{{ t.player_resolving }}",
     downloading: "{{ t.player_downloading }}",
     moving: "{{ t.player_moving }}",
     completed: "{{ t.player_completed }}",
@@ -1083,6 +1087,7 @@ document.addEventListener('alpine:init', () => {
     Alpine.store('torrents', {
         modal: false,
         file: null,
+        localFiles: [],
         magnet: '',
         sessions: [],
         loadingSessions: false,
@@ -1101,6 +1106,8 @@ document.addEventListener('alpine:init', () => {
         queuedTasks: 0,
         processingTasks: 0,
         loadingAgentStatus: false,
+        uploadProgress: 0,
+        uploadProgressText: '',
 
         open() {
             this.modal = true;
@@ -1132,7 +1139,10 @@ document.addEventListener('alpine:init', () => {
             this._stopPoll();
             this.workspaceMode = 'new';
             this.file = null;
+            this.localFiles = [];
             this.magnet = '';
+            this.uploadProgress = 0;
+            this.uploadProgressText = '';
             this.currentJob = null;
             this.previewData = null;
             this.treeRoot = null;
@@ -1208,6 +1218,7 @@ document.addEventListener('alpine:init', () => {
         statusLabel(job) {
             const labels = {
                 preview: T.preview,
+                resolving: T.resolving,
                 downloading: T.downloading,
                 moving: T.moving,
                 completed: T.completed,
@@ -1283,12 +1294,18 @@ document.addEventListener('alpine:init', () => {
         },
 
         actionButtonText() {
+            if (this.normalizedStatus(this.currentJob) === 'resolving') return T.resolving;
             if (this.isCurrentCompletedLocked()) return T.completed;
             return this.isCurrentDownloading() ? T.pauseDownload : T.downloadSelected;
         },
 
         actionButtonDisabled() {
-            return this.loading || this.isCurrentCompletedLocked();
+            return this.loading
+                || this.isCurrentCompletedLocked()
+                || this.normalizedStatus(this.currentJob) === 'resolving'
+                || !this.previewData
+                || !Array.isArray(this.previewData.files)
+                || this.previewData.files.length === 0;
         },
 
         toggleDownloadAction() {
@@ -1336,7 +1353,7 @@ document.addEventListener('alpine:init', () => {
         _rememberJob(job) {
             if (!job || !job.id) return;
             const rest = this.sessions.filter(item => item.id !== job.id);
-            this.sessions = [job, ...rest].sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+            this.sessions = [job, ...rest].sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
             if (this.currentJob && this.currentJob.id === job.id) this.currentJob = job;
         },
 
@@ -1359,7 +1376,10 @@ document.addEventListener('alpine:init', () => {
             const job = data.job || null;
             this.workspaceMode = 'session';
             this.file = null;
+            this.localFiles = [];
             this.magnet = '';
+            this.uploadProgress = 0;
+            this.uploadProgressText = '';
             this.previewData = preview;
             this.currentJob = job;
             const selected = Array.isArray(data.selected_files) && data.selected_files.length
@@ -1378,11 +1398,25 @@ document.addEventListener('alpine:init', () => {
                 if (!res.ok) throw new Error(data.error || T.loadTorrentsFailed);
                 this.sessions = Array.isArray(data) ? data : [];
                 this._syncCurrentJobFromSessions();
+                await this._refreshResolvedSelection();
             } catch (err) {
                 this._setMessage(err.message || String(err), true);
             } finally {
                 this.loadingSessions = false;
             }
+        },
+
+        async _refreshResolvedSelection() {
+            if (!this.currentJob || !this.previewData || (this.previewData.files || []).length > 0) return;
+            const selected = this.sessions.find(job => job.id === this.currentJob.id);
+            if (!selected || this.normalizedStatus(selected) === 'resolving') return;
+            try {
+                const res = await fetch(`/api/player/torrents/session/${selected.id}`);
+                const data = await res.json();
+                if (!res.ok) return;
+                this._applySession(data);
+                this._setMessage(T.allFilesSelected);
+            } catch {}
         },
 
         async openSession(id) {
@@ -1442,8 +1476,76 @@ document.addEventListener('alpine:init', () => {
             });
         },
 
+        setLocalFiles(files) {
+            this.localFiles = Array.from(files || []);
+        },
+
+        localUploadBytes() {
+            return this.localFiles.reduce((sum, file) => sum + Number(file.size || 0), 0);
+        },
+
+        localUploadSummary() {
+            const count = this.localFiles.length;
+            if (count === 0) return '';
+            return count + ' ' + T.selected + ' - ' + this.bytes(this.localUploadBytes());
+        },
+
+        uploadLocalFile(file, loadedBefore, totalBytes) {
+            return new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', '/api/player/uploads/local');
+                xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+                xhr.setRequestHeader('X-Furumusic-Filename', encodeURIComponent(file.name || 'upload.mp3'));
+                xhr.upload.onprogress = event => {
+                    if (!event.lengthComputable || totalBytes <= 0) return;
+                    const loaded = loadedBefore + event.loaded;
+                    this.uploadProgress = Math.max(0, Math.min(100, loaded / totalBytes * 100));
+                    this.uploadProgressText = this.uploadProgress.toFixed(1) + '%';
+                };
+                xhr.onload = () => {
+                    let data = {};
+                    try { data = JSON.parse(xhr.responseText || '{}'); } catch {}
+                    if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+                    else reject(new Error(data.error || T.uploadFailed));
+                };
+                xhr.onerror = () => reject(new Error(T.uploadFailed));
+                xhr.send(file);
+            });
+        },
+
+        async uploadLocalFiles() {
+            if (this.loading || this.localFiles.length === 0) return;
+            this.loading = true;
+            this.uploadProgress = 0;
+            this.uploadProgressText = '0.0%';
+            this._setMessage(T.uploadingFiles);
+            const totalBytes = this.localUploadBytes();
+            let loadedBefore = 0;
+            try {
+                for (const file of this.localFiles) {
+                    await this.uploadLocalFile(file, loadedBefore, totalBytes);
+                    loadedBefore += Number(file.size || 0);
+                    this.uploadProgress = totalBytes > 0 ? Math.min(100, loadedBefore / totalBytes * 100) : 100;
+                    this.uploadProgressText = this.uploadProgress.toFixed(1) + '%';
+                }
+                this.localFiles = [];
+                this.uploadProgress = 100;
+                this.uploadProgressText = '100.0%';
+                this._setMessage(T.uploadComplete);
+                await this.loadAgentStatus();
+            } catch (err) {
+                this._setMessage(err.message || String(err), true);
+            } finally {
+                this.loading = false;
+            }
+        },
+
         async preview() {
             if (this.loading) return;
+            if (this.localFiles.length > 0) {
+                await this.uploadLocalFiles();
+                return;
+            }
             const magnet = this.magnet.trim();
             if (!this.file && !magnet) {
                 this._setMessage(T.chooseTorrent, true);
@@ -1472,7 +1574,7 @@ document.addEventListener('alpine:init', () => {
                 if (!res.ok) throw new Error(data.error || T.previewFailed);
 
                 this._applySession(data);
-                this._setMessage(T.allFilesSelected);
+                this._setMessage((data.preview?.files || []).length ? T.allFilesSelected : T.resolving);
                 await this.loadSessions();
             } catch (err) {
                 this._setMessage(err.message || String(err), true);
