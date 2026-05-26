@@ -13,8 +13,9 @@ use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Postgres, QueryBuilder};
 
 use super::BUILD_INFO;
+use crate::agent;
 use crate::auth::{self, AuthenticatedUser, Role};
-use crate::config::{AppConfig, ConfigEntry};
+use crate::config::{AppConfig, ConfigEntry, ConfigSources};
 use crate::i18n::{I18n, Translations};
 use crate::scheduler::{JobRegistry, ScheduledJob};
 
@@ -217,13 +218,91 @@ struct MutationResponse {
 
 #[derive(Debug, Serialize, JsonSchema)]
 struct AdminSettingsDto {
-    lastfm_api_key: String,
+    values: AdminSettingsValues,
+    sources: AdminSettingsSources,
     lastfm_api_key_configured: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+struct AdminSettingsValues {
+    auth_password_enabled: bool,
+    auth_sso_enabled: bool,
+    oidc_button_text: String,
+    oidc_issuer: String,
+    oidc_client_id: String,
+    oidc_client_secret: String,
+    oidc_admin_groups: String,
+    oidc_user_groups: String,
+    swagger_enabled: bool,
+    lastfm_api_key: String,
+    agent_enabled: bool,
+    agent_inbox_dir: String,
+    agent_storage_dir: String,
+    agent_llm_url: String,
+    agent_llm_model: String,
+    agent_llm_auth: String,
+    agent_confidence_threshold: String,
+    agent_context_limit: String,
+    agent_concurrency: String,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+struct AdminSettingsSources {
+    auth_password_enabled: &'static str,
+    auth_sso_enabled: &'static str,
+    oidc_button_text: &'static str,
+    oidc_issuer: &'static str,
+    oidc_client_id: &'static str,
+    oidc_client_secret: &'static str,
+    oidc_admin_groups: &'static str,
+    oidc_user_groups: &'static str,
+    swagger_enabled: &'static str,
+    lastfm_api_key: &'static str,
+    agent_enabled: &'static str,
+    agent_inbox_dir: &'static str,
+    agent_storage_dir: &'static str,
+    agent_llm_url: &'static str,
+    agent_llm_model: &'static str,
+    agent_llm_auth: &'static str,
+    agent_confidence_threshold: &'static str,
+    agent_context_limit: &'static str,
+    agent_concurrency: &'static str,
 }
 
 #[derive(Debug, Deserialize)]
 pub(super) struct UpdateSettingsRequest {
+    auth_password_enabled: bool,
+    auth_sso_enabled: bool,
+    oidc_button_text: String,
+    oidc_issuer: String,
+    oidc_client_id: String,
+    oidc_client_secret: String,
+    oidc_admin_groups: String,
+    oidc_user_groups: String,
+    swagger_enabled: bool,
     lastfm_api_key: String,
+    agent_enabled: bool,
+    agent_inbox_dir: String,
+    agent_storage_dir: String,
+    agent_llm_url: String,
+    agent_llm_model: String,
+    agent_llm_auth: String,
+    agent_confidence_threshold: String,
+    agent_context_limit: String,
+    agent_concurrency: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct AgentProbeDto {
+    status: String,
+    ok: bool,
+    model_intro: String,
+    model_name: String,
+    prompt_tokens: Option<u32>,
+    completion_tokens: Option<u32>,
+    tokens_per_sec: Option<f64>,
+    latency_ms: u64,
+    error: String,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -474,12 +553,8 @@ pub async fn settings(session: Session, db: Database) -> cot::Result<cot::respon
     if let Err(response) = require_admin_json(&session, &db).await {
         return Ok(response);
     }
-    let (config, _) = AppConfig::load_with_db(&db).await;
-    Json(AdminSettingsDto {
-        lastfm_api_key_configured: !config.lastfm_api_key.trim().is_empty(),
-        lastfm_api_key: config.lastfm_api_key,
-    })
-    .into_response()
+    let (config, sources) = AppConfig::load_with_db(&db).await;
+    Json(settings_dto(config, sources)).into_response()
 }
 
 pub async fn update_settings(
@@ -490,15 +565,145 @@ pub async fn update_settings(
     if let Err(response) = require_admin_json(&session, &db).await {
         return Ok(response);
     }
-    let mut entry = ConfigEntry::new(
-        "lastfm_api_key".to_string(),
-        body.lastfm_api_key.trim().to_string(),
-    );
-    entry
-        .save(&db)
-        .await
-        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let fields = [
+        (
+            "auth_password_enabled",
+            body.auth_password_enabled.to_string(),
+        ),
+        ("auth_sso_enabled", body.auth_sso_enabled.to_string()),
+        ("oidc_button_text", body.oidc_button_text.trim().to_string()),
+        ("oidc_issuer", body.oidc_issuer.trim().to_string()),
+        ("oidc_client_id", body.oidc_client_id.trim().to_string()),
+        (
+            "oidc_client_secret",
+            body.oidc_client_secret.trim().to_string(),
+        ),
+        (
+            "oidc_admin_groups",
+            body.oidc_admin_groups.trim().to_string(),
+        ),
+        ("oidc_user_groups", body.oidc_user_groups.trim().to_string()),
+        ("swagger_enabled", body.swagger_enabled.to_string()),
+        ("lastfm_api_key", body.lastfm_api_key.trim().to_string()),
+        ("agent_enabled", body.agent_enabled.to_string()),
+        ("agent_inbox_dir", body.agent_inbox_dir.trim().to_string()),
+        (
+            "agent_storage_dir",
+            body.agent_storage_dir.trim().to_string(),
+        ),
+        ("agent_llm_url", body.agent_llm_url.trim().to_string()),
+        ("agent_llm_model", body.agent_llm_model.trim().to_string()),
+        ("agent_llm_auth", body.agent_llm_auth.trim().to_string()),
+        (
+            "agent_confidence_threshold",
+            body.agent_confidence_threshold.trim().to_string(),
+        ),
+        (
+            "agent_context_limit",
+            body.agent_context_limit.trim().to_string(),
+        ),
+        (
+            "agent_concurrency",
+            body.agent_concurrency.trim().to_string(),
+        ),
+    ];
+    for (key, value) in fields {
+        let mut entry = ConfigEntry::new(key.to_string(), value);
+        entry
+            .save(&db)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
+    }
     Json(serde_json::json!({ "ok": true })).into_response()
+}
+
+pub async fn settings_probe(
+    session: Session,
+    db: Database,
+) -> cot::Result<cot::response::Response> {
+    if let Err(response) = require_admin_json(&session, &db).await {
+        return Ok(response);
+    }
+    let (config, _) = AppConfig::load_with_db(&db).await;
+    let probe = if config.agent_enabled && !config.agent_llm_url.is_empty() {
+        agent::probe_llm(
+            &config.agent_llm_url,
+            &config.agent_llm_model,
+            &config.agent_llm_auth,
+        )
+        .await
+    } else {
+        agent::AgentProbeResult::default()
+    };
+    let status = if !config.agent_enabled {
+        "disabled"
+    } else if config.agent_llm_url.is_empty() {
+        "not_configured"
+    } else if probe.ok {
+        "ok"
+    } else {
+        "error"
+    };
+    Json(AgentProbeDto {
+        status: status.to_string(),
+        ok: probe.ok,
+        model_intro: probe.model_intro,
+        model_name: probe.model_name,
+        prompt_tokens: probe.prompt_tokens,
+        completion_tokens: probe.completion_tokens,
+        tokens_per_sec: probe.tokens_per_sec,
+        latency_ms: probe.latency_ms,
+        error: probe.error,
+    })
+    .into_response()
+}
+
+fn settings_dto(config: AppConfig, sources: ConfigSources) -> AdminSettingsDto {
+    AdminSettingsDto {
+        lastfm_api_key_configured: !config.lastfm_api_key.trim().is_empty(),
+        values: AdminSettingsValues {
+            auth_password_enabled: config.auth_password_enabled,
+            auth_sso_enabled: config.auth_sso_enabled,
+            oidc_button_text: config.oidc_button_text,
+            oidc_issuer: config.oidc_issuer,
+            oidc_client_id: config.oidc_client_id,
+            oidc_client_secret: config.oidc_client_secret,
+            oidc_admin_groups: config.oidc_admin_groups,
+            oidc_user_groups: config.oidc_user_groups,
+            swagger_enabled: config.swagger_enabled,
+            lastfm_api_key: config.lastfm_api_key,
+            agent_enabled: config.agent_enabled,
+            agent_inbox_dir: config.agent_inbox_dir,
+            agent_storage_dir: config.agent_storage_dir,
+            agent_llm_url: config.agent_llm_url,
+            agent_llm_model: config.agent_llm_model,
+            agent_llm_auth: config.agent_llm_auth,
+            agent_confidence_threshold: config.agent_confidence_threshold.to_string(),
+            agent_context_limit: config.agent_context_limit.to_string(),
+            agent_concurrency: config.agent_concurrency.to_string(),
+        },
+        sources: AdminSettingsSources {
+            auth_password_enabled: sources.auth_password_enabled.code(),
+            auth_sso_enabled: sources.auth_sso_enabled.code(),
+            oidc_button_text: sources.oidc_button_text.code(),
+            oidc_issuer: sources.oidc_issuer.code(),
+            oidc_client_id: sources.oidc_client_id.code(),
+            oidc_client_secret: sources.oidc_client_secret.code(),
+            oidc_admin_groups: sources.oidc_admin_groups.code(),
+            oidc_user_groups: sources.oidc_user_groups.code(),
+            swagger_enabled: sources.swagger_enabled.code(),
+            lastfm_api_key: sources.lastfm_api_key.code(),
+            agent_enabled: sources.agent_enabled.code(),
+            agent_inbox_dir: sources.agent_inbox_dir.code(),
+            agent_storage_dir: sources.agent_storage_dir.code(),
+            agent_llm_url: sources.agent_llm_url.code(),
+            agent_llm_model: sources.agent_llm_model.code(),
+            agent_llm_auth: sources.agent_llm_auth.code(),
+            agent_confidence_threshold: sources.agent_confidence_threshold.code(),
+            agent_context_limit: sources.agent_context_limit.code(),
+            agent_concurrency: sources.agent_concurrency.code(),
+        },
+    }
 }
 
 pub async fn run_job(

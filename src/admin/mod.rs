@@ -279,6 +279,13 @@ impl App for AdminApp {
                 "admin_v2_settings",
             ),
             Route::with_handler_and_name(
+                "/v2/api/settings/probe",
+                get(move |session: Session, db: Database| async move {
+                    v2::settings_probe(session, db).await
+                }),
+                "admin_v2_settings_probe",
+            ),
+            Route::with_handler_and_name(
                 "/v2/api/jobs/{name}/toggle",
                 cot::router::method::post({
                     let handle = Arc::clone(&self.scheduler_handle);
