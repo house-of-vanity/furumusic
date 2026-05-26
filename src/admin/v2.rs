@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use cot::db::Database;
+use cot::db::{Database, Model};
 use cot::html::Html;
 use cot::http::StatusCode;
 use cot::http::header::CONTENT_TYPE;
@@ -14,6 +14,7 @@ use sqlx::{PgPool, Postgres, QueryBuilder};
 
 use super::BUILD_INFO;
 use crate::auth::{self, AuthenticatedUser, Role};
+use crate::config::{AppConfig, ConfigEntry};
 use crate::i18n::{I18n, Translations};
 use crate::scheduler::{JobRegistry, ScheduledJob};
 
@@ -212,6 +213,17 @@ struct BulkReviewsResponse {
 struct MutationResponse {
     ok: bool,
     affected: u64,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct AdminSettingsDto {
+    lastfm_api_key: String,
+    lastfm_api_key_configured: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct UpdateSettingsRequest {
+    lastfm_api_key: String,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -456,6 +468,37 @@ pub async fn jobs(
         .await
         .map_err(|e| cot::Error::internal(e.to_string()))?;
     Json(jobs).into_response()
+}
+
+pub async fn settings(session: Session, db: Database) -> cot::Result<cot::response::Response> {
+    if let Err(response) = require_admin_json(&session, &db).await {
+        return Ok(response);
+    }
+    let (config, _) = AppConfig::load_with_db(&db).await;
+    Json(AdminSettingsDto {
+        lastfm_api_key_configured: !config.lastfm_api_key.trim().is_empty(),
+        lastfm_api_key: config.lastfm_api_key,
+    })
+    .into_response()
+}
+
+pub async fn update_settings(
+    session: Session,
+    db: Database,
+    Json(body): Json<UpdateSettingsRequest>,
+) -> cot::Result<cot::response::Response> {
+    if let Err(response) = require_admin_json(&session, &db).await {
+        return Ok(response);
+    }
+    let mut entry = ConfigEntry::new(
+        "lastfm_api_key".to_string(),
+        body.lastfm_api_key.trim().to_string(),
+    );
+    entry
+        .save(&db)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    Json(serde_json::json!({ "ok": true })).into_response()
 }
 
 pub async fn run_job(

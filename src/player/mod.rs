@@ -313,7 +313,11 @@ async fn artist_detail_handler(
                   mf.audio_bitrate,
                   mf.audio_sample_rate,
                   mf.audio_bit_depth,
-                  mf.file_size_bytes
+                  mf.file_size_bytes,
+                  t.lastfm_listeners,
+                  t.lastfm_playcount,
+                  t.lastfm_rating,
+                  t.lastfm_updated_at
            FROM furumusic__track_artist ta
            JOIN furumusic__track t ON t.id = ta.track_id
            JOIN furumusic__release r ON r.id = t.release_id
@@ -390,6 +394,10 @@ async fn artist_detail_handler(
                 audio_sample_rate: t.audio_sample_rate,
                 audio_bit_depth: t.audio_bit_depth,
                 file_size_bytes: t.file_size_bytes,
+                lastfm_listeners: t.lastfm_listeners,
+                lastfm_playcount: t.lastfm_playcount,
+                lastfm_rating: t.lastfm_rating,
+                lastfm_updated_at: t.lastfm_updated_at,
             }
         })
         .collect();
@@ -459,7 +467,11 @@ async fn release_detail_handler(
                   mf.audio_bitrate,
                   mf.audio_sample_rate,
                   mf.audio_bit_depth,
-                  mf.file_size_bytes
+                  mf.file_size_bytes,
+                  t.lastfm_listeners,
+                  t.lastfm_playcount,
+                  t.lastfm_rating,
+                  t.lastfm_updated_at
            FROM furumusic__track t
            JOIN furumusic__release r ON r.id = t.release_id
            LEFT JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
@@ -535,6 +547,10 @@ async fn release_detail_handler(
                 audio_sample_rate: t.audio_sample_rate,
                 audio_bit_depth: t.audio_bit_depth,
                 file_size_bytes: t.file_size_bytes,
+                lastfm_listeners: t.lastfm_listeners,
+                lastfm_playcount: t.lastfm_playcount,
+                lastfm_rating: t.lastfm_rating,
+                lastfm_updated_at: t.lastfm_updated_at,
             }
         })
         .collect();
@@ -689,7 +705,11 @@ async fn playlist_detail_handler(
                   mf.audio_bitrate,
                   mf.audio_sample_rate,
                   mf.audio_bit_depth,
-                  mf.file_size_bytes
+                  mf.file_size_bytes,
+                  t.lastfm_listeners,
+                  t.lastfm_playcount,
+                  t.lastfm_rating,
+                  t.lastfm_updated_at
            FROM furumusic__playlist_track pt
            JOIN furumusic__track t ON t.id = pt.track_id
            JOIN furumusic__release r ON r.id = t.release_id
@@ -785,6 +805,10 @@ async fn build_track_items(
                 audio_sample_rate: t.audio_sample_rate,
                 audio_bit_depth: t.audio_bit_depth,
                 file_size_bytes: t.file_size_bytes,
+                lastfm_listeners: t.lastfm_listeners,
+                lastfm_playcount: t.lastfm_playcount,
+                lastfm_rating: t.lastfm_rating,
+                lastfm_updated_at: t.lastfm_updated_at,
             }
         })
         .collect())
@@ -962,7 +986,10 @@ async fn local_upload_handler(
         .await
         .map_err(|err| cot::Error::internal(err.to_string()))?;
     if bytes.is_empty() {
-        return Ok(json_error(StatusCode::BAD_REQUEST, "uploaded file is empty"));
+        return Ok(json_error(
+            StatusCode::BAD_REQUEST,
+            "uploaded file is empty",
+        ));
     }
 
     let upload_dir = inbox_root
@@ -1404,7 +1431,11 @@ async fn search_handler(
                       mf.audio_bitrate,
                       mf.audio_sample_rate,
                       mf.audio_bit_depth,
-                      mf.file_size_bytes
+                      mf.file_size_bytes,
+                  t.lastfm_listeners,
+                  t.lastfm_playcount,
+                  t.lastfm_rating,
+                  t.lastfm_updated_at
                FROM furumusic__track t
                JOIN furumusic__release rel ON rel.id = t.release_id
                LEFT JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
@@ -1469,7 +1500,7 @@ async fn search_handler(
         let t = sqlx::query_as::<_, SearchTrackRow>(
             r#"SELECT id, title, track_number, disc_number, duration_seconds, cover_file_id,
                       release_cover_file_id, release_year, uploader_name, audio_format, audio_bitrate,
-                      audio_sample_rate, audio_bit_depth, file_size_bytes FROM (
+                      audio_sample_rate, audio_bit_depth, file_size_bytes, lastfm_listeners, lastfm_playcount, lastfm_rating, lastfm_updated_at FROM (
                 SELECT t.id, t.title::text AS title, t.track_number, t.disc_number,
                        t.duration_seconds, t.cover_file_id,
                        rel.cover_file_id AS release_cover_file_id,
@@ -1480,20 +1511,27 @@ async fn search_handler(
                        mf.audio_sample_rate,
                        mf.audio_bit_depth,
                        mf.file_size_bytes,
+                       t.lastfm_listeners,
+                       t.lastfm_playcount,
+                       t.lastfm_rating,
+                       t.lastfm_updated_at,
                        MAX(sim) AS similarity
                 FROM (
                     SELECT id, title, title_sort, track_number, disc_number, duration_seconds, cover_file_id, release_id, audio_file_id,
+                           lastfm_listeners, lastfm_playcount, lastfm_rating, lastfm_updated_at,
                            similarity(title_sort, $1) AS sim
                     FROM furumusic__track WHERE is_hidden = false AND title_sort % $1
                     UNION ALL
                     SELECT id, title, title_sort, track_number, disc_number, duration_seconds, cover_file_id, release_id, audio_file_id,
+                           lastfm_listeners, lastfm_playcount, lastfm_rating, lastfm_updated_at,
                            0.01::real AS sim
                     FROM furumusic__track WHERE is_hidden = false AND title_sort ILIKE '%' || $1 || '%'
                 ) t
                 JOIN furumusic__release rel ON rel.id = t.release_id
                 LEFT JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
                 GROUP BY t.id, t.title, t.track_number, t.disc_number, t.duration_seconds, t.cover_file_id, rel.cover_file_id, rel.year,
-                         mf.uploader_name, mf.audio_format, mf.audio_bitrate, mf.audio_sample_rate, mf.audio_bit_depth, mf.file_size_bytes
+                         mf.uploader_name, mf.audio_format, mf.audio_bitrate, mf.audio_sample_rate, mf.audio_bit_depth, mf.file_size_bytes,
+                         t.lastfm_listeners, t.lastfm_playcount, t.lastfm_rating, t.lastfm_updated_at
                 ORDER BY similarity DESC
                 LIMIT $2
             ) sub"#,
@@ -1597,6 +1635,10 @@ async fn search_handler(
                 audio_sample_rate: t.audio_sample_rate,
                 audio_bit_depth: t.audio_bit_depth,
                 file_size_bytes: t.file_size_bytes,
+                lastfm_listeners: t.lastfm_listeners,
+                lastfm_playcount: t.lastfm_playcount,
+                lastfm_rating: t.lastfm_rating,
+                lastfm_updated_at: t.lastfm_updated_at,
             }
         })
         .collect();
@@ -2161,7 +2203,11 @@ async fn tracks_by_ids_handler(
                   mf.audio_bitrate,
                   mf.audio_sample_rate,
                   mf.audio_bit_depth,
-                  mf.file_size_bytes
+                  mf.file_size_bytes,
+                  t.lastfm_listeners,
+                  t.lastfm_playcount,
+                  t.lastfm_rating,
+                  t.lastfm_updated_at
            FROM furumusic__track t
            JOIN furumusic__release r ON r.id = t.release_id
            LEFT JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
@@ -2236,6 +2282,10 @@ async fn tracks_by_ids_handler(
                 audio_sample_rate: t.audio_sample_rate,
                 audio_bit_depth: t.audio_bit_depth,
                 file_size_bytes: t.file_size_bytes,
+                lastfm_listeners: t.lastfm_listeners,
+                lastfm_playcount: t.lastfm_playcount,
+                lastfm_rating: t.lastfm_rating,
+                lastfm_updated_at: t.lastfm_updated_at,
             },
         );
     }
@@ -2408,9 +2458,7 @@ impl App for PlayerApp {
                                     .await;
                                 let service = torrent_service
                                     .get_or_init(|| async {
-                                        Arc::new(TorrentService::new(Arc::clone(
-                                            &scheduler_handle,
-                                        )))
+                                        Arc::new(TorrentService::new(Arc::clone(&scheduler_handle)))
                                     })
                                     .await;
                                 match service.details(pg_pool, user.id, &path.0.id).await {
@@ -2422,40 +2470,44 @@ impl App for PlayerApp {
                             }
                         }
                     })
-                    .delete(move |session: Session, db: Database, path: Path<PathStringId>| {
-                        let pool = Arc::clone(&pool);
-                        let pool_config = Arc::clone(&pool_config);
-                        let torrent_service = Arc::clone(&torrent_service);
-                        let scheduler_handle = Arc::clone(&scheduler_handle);
-                        async move {
-                            let Some(user) = auth::get_session_user(&session, &db).await else {
-                                return Ok(json_error(
-                                    StatusCode::UNAUTHORIZED,
-                                    "not authenticated",
-                                ));
-                            };
-                            let pg_pool = pool
-                                .get_or_init(|| async {
-                                    sqlx::postgres::PgPoolOptions::new()
-                                        .max_connections(5)
-                                        .connect(&pool_config.database_url)
-                                        .await
-                                        .expect("player pool")
-                                })
-                                .await;
-                            let service = torrent_service
-                                .get_or_init(|| async {
-                                    Arc::new(TorrentService::new(Arc::clone(&scheduler_handle)))
-                                })
-                                .await;
-                            match service.remove(pg_pool, user.id, &path.0.id).await {
-                                Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
-                                Err(err) => {
-                                    Ok(json_error(StatusCode::NOT_FOUND, &err.to_string()))
+                    .delete(
+                        move |session: Session, db: Database, path: Path<PathStringId>| {
+                            let pool = Arc::clone(&pool);
+                            let pool_config = Arc::clone(&pool_config);
+                            let torrent_service = Arc::clone(&torrent_service);
+                            let scheduler_handle = Arc::clone(&scheduler_handle);
+                            async move {
+                                let Some(user) = auth::get_session_user(&session, &db).await else {
+                                    return Ok(json_error(
+                                        StatusCode::UNAUTHORIZED,
+                                        "not authenticated",
+                                    ));
+                                };
+                                let pg_pool = pool
+                                    .get_or_init(|| async {
+                                        sqlx::postgres::PgPoolOptions::new()
+                                            .max_connections(5)
+                                            .connect(&pool_config.database_url)
+                                            .await
+                                            .expect("player pool")
+                                    })
+                                    .await;
+                                let service = torrent_service
+                                    .get_or_init(|| async {
+                                        Arc::new(TorrentService::new(Arc::clone(&scheduler_handle)))
+                                    })
+                                    .await;
+                                match service.remove(pg_pool, user.id, &path.0.id).await {
+                                    Ok(()) => {
+                                        Json(serde_json::json!({ "ok": true })).into_response()
+                                    }
+                                    Err(err) => {
+                                        Ok(json_error(StatusCode::NOT_FOUND, &err.to_string()))
+                                    }
                                 }
                             }
-                        }
-                    })
+                        },
+                    )
                 },
                 "player_torrent_detail",
             ),
@@ -2594,40 +2646,42 @@ impl App for PlayerApp {
                     let pool_config = Arc::clone(&pool_config);
                     let torrent_service = Arc::clone(&torrent_service);
                     let scheduler_handle = Arc::clone(&self.scheduler_handle);
-                    post(move |session: Session, db: Database, path: Path<PathStringId>| {
-                        let pool = Arc::clone(&pool);
-                        let pool_config = Arc::clone(&pool_config);
-                        let torrent_service = Arc::clone(&torrent_service);
-                        let scheduler_handle = Arc::clone(&scheduler_handle);
-                        async move {
-                            let Some(user) = auth::get_session_user(&session, &db).await else {
-                                return Ok(json_error(
-                                    StatusCode::UNAUTHORIZED,
-                                    "not authenticated",
-                                ));
-                            };
-                            let pg_pool = pool
-                                .get_or_init(|| async {
-                                    sqlx::postgres::PgPoolOptions::new()
-                                        .max_connections(5)
-                                        .connect(&pool_config.database_url)
-                                        .await
-                                        .expect("player pool")
-                                })
-                                .await;
-                            let service = torrent_service
-                                .get_or_init(|| async {
-                                    Arc::new(TorrentService::new(Arc::clone(&scheduler_handle)))
-                                })
-                                .await;
-                            match service.pause(pg_pool, user.id, &path.0.id).await {
-                                Ok(job) => Json(job).into_response(),
-                                Err(err) => {
-                                    Ok(json_error(StatusCode::BAD_REQUEST, &err.to_string()))
+                    post(
+                        move |session: Session, db: Database, path: Path<PathStringId>| {
+                            let pool = Arc::clone(&pool);
+                            let pool_config = Arc::clone(&pool_config);
+                            let torrent_service = Arc::clone(&torrent_service);
+                            let scheduler_handle = Arc::clone(&scheduler_handle);
+                            async move {
+                                let Some(user) = auth::get_session_user(&session, &db).await else {
+                                    return Ok(json_error(
+                                        StatusCode::UNAUTHORIZED,
+                                        "not authenticated",
+                                    ));
+                                };
+                                let pg_pool = pool
+                                    .get_or_init(|| async {
+                                        sqlx::postgres::PgPoolOptions::new()
+                                            .max_connections(5)
+                                            .connect(&pool_config.database_url)
+                                            .await
+                                            .expect("player pool")
+                                    })
+                                    .await;
+                                let service = torrent_service
+                                    .get_or_init(|| async {
+                                        Arc::new(TorrentService::new(Arc::clone(&scheduler_handle)))
+                                    })
+                                    .await;
+                                match service.pause(pg_pool, user.id, &path.0.id).await {
+                                    Ok(job) => Json(job).into_response(),
+                                    Err(err) => {
+                                        Ok(json_error(StatusCode::BAD_REQUEST, &err.to_string()))
+                                    }
                                 }
                             }
-                        }
-                    })
+                        },
+                    )
                 },
                 "player_torrent_pause",
             ),

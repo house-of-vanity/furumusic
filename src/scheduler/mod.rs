@@ -1347,7 +1347,7 @@ async fn run_scheduled_job(
 
     // Check agent_enabled (re-read from DB every run)
     let (live_config, _) = AppConfig::load_with_db(db).await;
-    if !live_config.agent_enabled {
+    if !live_config.agent_enabled && job_name != "lastfm_popularity" {
         tracing::warn!(job = job_name, "Skipping: agent_enabled=false");
         return;
     }

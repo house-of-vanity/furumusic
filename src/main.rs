@@ -53,6 +53,7 @@ fn build_registry() -> Arc<JobRegistry> {
     registry.register(jobs::artist_image_backfill::ArtistImageBackfillJob);
     registry.register(jobs::artist_track_image_backfill::ArtistTrackImageBackfillJob);
     registry.register(jobs::metadata_backfill::MetadataBackfillJob);
+    registry.register(jobs::lastfm_popularity::LastfmPopularityJob);
     Arc::new(registry)
 }
 

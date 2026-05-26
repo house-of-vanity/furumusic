@@ -321,6 +321,11 @@ translations! {
     player_audio:            "Audio"                           , "Аудио";
     player_size:             "Size"                            , "Размер";
     player_uploader:         "Uploader"                        , "Загрузил";
+    player_lastfm_rating:    "Last.fm popularity"              , "Популярность Last.fm";
+    player_lastfm_listeners: "Last.fm listeners"               , "Слушатели Last.fm";
+    player_lastfm_playcount: "Last.fm plays"                   , "Прослушивания Last.fm";
+    player_lastfm_updated:   "Last.fm updated"                 , "Last.fm обновлён";
+    player_lastfm_not_loaded: "not loaded yet"                 , "ещё не загружено";
     player_play:             "Play"                            , "Играть";
     player_like:             "Like"                            , "Лайк";
     player_add_to_queue:     "Add to queue"                    , "Добавить в очередь";

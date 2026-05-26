@@ -354,7 +354,7 @@ impl TorrentJob {
                 100.0
             } else {
                 progress_percent(downloaded_bytes, total_bytes)
-                .unwrap_or(self.progress_percent)
+                    .unwrap_or(self.progress_percent)
                     .clamp(0.0, 100.0)
             },
             download_speed_mbps: live.map(|l| l.download_speed.mbps),
@@ -746,13 +746,12 @@ impl TorrentService {
             self.stop_torrent(&handle).await;
         }
 
-        let result = sqlx::query(
-            "DELETE FROM furumusic__torrent_session WHERE id = $1 AND user_id = $2",
-        )
-        .bind(id)
-        .bind(user_id)
-        .execute(pool)
-        .await?;
+        let result =
+            sqlx::query("DELETE FROM furumusic__torrent_session WHERE id = $1 AND user_id = $2")
+                .bind(id)
+                .bind(user_id)
+                .execute(pool)
+                .await?;
 
         if result.rows_affected() == 0 {
             bail!("torrent session not found");
@@ -784,7 +783,12 @@ impl TorrentService {
             if job.user_id != uploader_user_id {
                 bail!("torrent job not found");
             }
-            if job.handle.is_some() && matches!(job.status, TorrentJobStatus::Downloading | TorrentJobStatus::Moving) {
+            if job.handle.is_some()
+                && matches!(
+                    job.status,
+                    TorrentJobStatus::Downloading | TorrentJobStatus::Moving
+                )
+            {
                 bail!("torrent job is already running");
             }
             validate_selection(&job.files, &selected_files)?;

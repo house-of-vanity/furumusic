@@ -1637,6 +1637,61 @@ pub mod db_migrations {
             &[Operation::custom(create_torrent_session).build()];
     }
 
+    // -- M0032: Last.fm track popularity ------------------------------------
+
+    #[cot::db::migrations::migration_op]
+    async fn create_lastfm_track_popularity(
+        ctx: migrations::MigrationContext<'_>,
+    ) -> cot::db::Result<()> {
+        ctx.db
+            .raw("ALTER TABLE furumusic__track ADD COLUMN lastfm_listeners BIGINT")
+            .await?;
+        ctx.db
+            .raw("ALTER TABLE furumusic__track ADD COLUMN lastfm_playcount BIGINT")
+            .await?;
+        ctx.db
+            .raw("ALTER TABLE furumusic__track ADD COLUMN lastfm_rating DOUBLE PRECISION")
+            .await?;
+        ctx.db
+            .raw("ALTER TABLE furumusic__track ADD COLUMN lastfm_updated_at VARCHAR(32)")
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE TABLE IF NOT EXISTS furumusic__track_popularity_history (
+                    id BIGSERIAL PRIMARY KEY,
+                    track_id BIGINT NOT NULL,
+                    source VARCHAR(32) NOT NULL,
+                    listeners BIGINT NOT NULL,
+                    playcount BIGINT NOT NULL,
+                    rating DOUBLE PRECISION NOT NULL,
+                    fetched_at VARCHAR(32) NOT NULL
+                )",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE INDEX IF NOT EXISTS idx_track_popularity_history_track
+                   ON furumusic__track_popularity_history (track_id, fetched_at DESC)",
+            )
+            .await?;
+        Ok(())
+    }
+
+    #[derive(Debug, Copy, Clone)]
+    pub struct M0032CreateLastfmTrackPopularity;
+
+    impl migrations::Migration for M0032CreateLastfmTrackPopularity {
+        const APP_NAME: &'static str = "furumusic";
+        const MIGRATION_NAME: &'static str = "m_0032_create_lastfm_track_popularity";
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
+                "furumusic",
+                "m_0031_create_torrent_session",
+            )];
+        const OPERATIONS: &'static [Operation] =
+            &[Operation::custom(create_lastfm_track_popularity).build()];
+    }
+
     pub const MIGRATIONS: &[&SyncDynMigration] = &[
         &M0006CreateMediaFile,
         &M0007CreateArtist,
@@ -1659,5 +1714,6 @@ pub mod db_migrations {
         &M0029AddPlaybackVolume,
         &M0030AddMediaFileUploader,
         &M0031CreateTorrentSession,
+        &M0032CreateLastfmTrackPopularity,
     ];
 }

@@ -667,6 +667,24 @@ tbody tr:hover {
     display: block;
 }
 
+.settings-page {
+    display: grid;
+    grid-template-columns: minmax(560px, 760px) minmax(260px, 1fr);
+    gap: 14px;
+    align-items: start;
+}
+
+.settings-card {
+    padding: 14px;
+}
+
+.settings-note {
+    padding: 14px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.55;
+}
+
 .library-row {
     display: grid;
     grid-template-columns: 38px minmax(0, 1fr) 300px 130px;
@@ -817,6 +835,11 @@ tbody tr:hover {
             <button class="nav-btn" :class="{active: activeView === 'tools'}" @click="activeView = 'tools'">
                 <i data-lucide="wrench"></i>
                 <span>Future Tools</span>
+            </button>
+            <button class="nav-btn" :class="{active: activeView === 'settings'}" @click="activeView = 'settings'; loadSettings()">
+                <i data-lucide="settings"></i>
+                <span>Settings</span>
+                <span class="nav-count" x-text="settings.lastfm_api_key_configured ? 'ok' : ''"></span>
             </button>
         </div>
 
@@ -1236,6 +1259,48 @@ tbody tr:hover {
                 </div>
             </section>
         </div>
+
+        <div class="content" x-show="activeView === 'settings'">
+            <div class="settings-page">
+                <section class="panel">
+                    <div class="panel-head">
+                        <div class="panel-title">
+                            <strong>External APIs</strong>
+                            <span>Keys used by scheduled enrichment jobs</span>
+                        </div>
+                        <span class="badge" :class="settings.lastfm_api_key_configured ? 'ok' : 'disabled'" x-text="settings.lastfm_api_key_configured ? 'configured' : 'not configured'"></span>
+                    </div>
+                    <form class="settings-card" @submit.prevent="saveSettings()">
+                        <div class="field">
+                            <label>Last.fm API key</label>
+                            <input type="password" x-model="settingsDraft.lastfm_api_key" autocomplete="off" placeholder="Paste Last.fm API key" />
+                        </div>
+                        <div class="toolbar">
+                            <button class="btn primary" type="submit">
+                                <i data-lucide="save"></i>
+                                Save
+                            </button>
+                            <button class="btn" type="button" @click="loadSettings()">
+                                <i data-lucide="refresh-cw"></i>
+                                Reload
+                            </button>
+                        </div>
+                    </form>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-head">
+                        <div class="panel-title">
+                            <strong>Last.fm Popularity</strong>
+                            <span>Weekly track rating refresh</span>
+                        </div>
+                    </div>
+                    <div class="settings-note">
+                        The scheduler uses Last.fm track.getInfo for each track, stores listeners, playcount, current rating, and a history row. The job processes tracks with missing or oldest ratings first and waits between requests to avoid Last.fm API limits.
+                    </div>
+                </section>
+            </div>
+        </div>
     </main>
 
     <div class="modal-backdrop" x-show="reviewModalOpen && activeReview" x-transition @click.self="reviewModalOpen = false">
@@ -1366,6 +1431,8 @@ function adminV2() {
         activeLibraryItem: null,
         editorOpen: false,
         editorDraft: { title: '', hidden: 'false' },
+        settings: { lastfm_api_key: '', lastfm_api_key_configured: false },
+        settingsDraft: { lastfm_api_key: '' },
         poller: null,
 
         async init() {
@@ -1399,6 +1466,7 @@ function adminV2() {
                 this.jobs = data.jobs || [];
                 this.recentRuns = data.recent_runs || [];
                 if (!this.activeJobName && this.jobs.length) this.activeJobName = this.jobs[0].name;
+                await this.loadSettings(false);
                 await this.loadLibrary(false);
             } catch (error) {
                 this.showToast(error.message);
@@ -1459,6 +1527,32 @@ function adminV2() {
             } finally {
                 this.libraryLoading = false;
                 this.icons();
+            }
+        },
+
+        async loadSettings(showErrors = true) {
+            try {
+                this.settings = await this.request(`${this.apiBase}/settings`);
+                this.settingsDraft.lastfm_api_key = this.settings.lastfm_api_key || '';
+            } catch (error) {
+                if (showErrors) this.showToast(error.message);
+            } finally {
+                this.icons();
+            }
+        },
+
+        async saveSettings() {
+            try {
+                await this.request(`${this.apiBase}/settings`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        lastfm_api_key: this.settingsDraft.lastfm_api_key || ''
+                    })
+                });
+                await this.loadSettings(false);
+                this.showToast('Settings saved');
+            } catch (error) {
+                this.showToast(error.message);
             }
         },
 
@@ -1770,6 +1864,7 @@ function adminV2() {
             if (this.activeView === 'library') return 'Library Workbench';
             if (this.activeView === 'jobs') return 'Tasks';
             if (this.activeView === 'tools') return 'Future Tools';
+            if (this.activeView === 'settings') return 'Settings';
             return 'Review Queue';
         },
 
@@ -1777,6 +1872,7 @@ function adminV2() {
             if (this.activeView === 'library') return 'Fast entity control surface for artists, releases, and playlists';
             if (this.activeView === 'jobs') return 'Scheduler state, recent runs, and manual controls in one place';
             if (this.activeView === 'tools') return 'Reserved space for merge, split, enrichment, and destructive workflows';
+            if (this.activeView === 'settings') return 'Application configuration and external API credentials';
             return 'Full-screen review triage with filter-aware bulk actions';
         },
 

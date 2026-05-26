@@ -133,6 +133,7 @@ pub struct ConfigSources {
     pub agent_confidence_threshold: ConfigSource,
     pub agent_context_limit: ConfigSource,
     pub agent_concurrency: ConfigSource,
+    pub lastfm_api_key: ConfigSource,
 }
 
 impl Default for ConfigSources {
@@ -158,6 +159,7 @@ impl Default for ConfigSources {
             agent_confidence_threshold: ConfigSource::Default,
             agent_context_limit: ConfigSource::Default,
             agent_concurrency: ConfigSource::Default,
+            lastfm_api_key: ConfigSource::Default,
         }
     }
 }
@@ -262,6 +264,8 @@ pub struct AppConfig {
     pub agent_context_limit: u64,
     /// Number of files to process in parallel via the LLM.
     pub agent_concurrency: u64,
+    /// Last.fm API key for weekly popularity enrichment.
+    pub lastfm_api_key: String,
 }
 
 impl Default for AppConfig {
@@ -287,6 +291,7 @@ impl Default for AppConfig {
             agent_confidence_threshold: 0.85,
             agent_context_limit: 8192,
             agent_concurrency: 2,
+            lastfm_api_key: String::new(),
         }
     }
 }
@@ -313,6 +318,7 @@ impl_env_overrides!(
     agent_confidence_threshold,
     agent_context_limit,
     agent_concurrency,
+    lastfm_api_key,
 );
 
 impl AppConfig {
@@ -396,6 +402,7 @@ impl AppConfig {
         apply_db_field!(agent_confidence_threshold);
         apply_db_field!(agent_context_limit);
         apply_db_field!(agent_concurrency);
+        apply_db_field!(lastfm_api_key);
     }
 }
 

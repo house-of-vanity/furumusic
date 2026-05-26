@@ -44,6 +44,10 @@ pub(super) struct TrackRow {
     pub(super) audio_sample_rate: Option<i32>,
     pub(super) audio_bit_depth: Option<i32>,
     pub(super) file_size_bytes: Option<i64>,
+    pub(super) lastfm_listeners: Option<i64>,
+    pub(super) lastfm_playcount: Option<i64>,
+    pub(super) lastfm_rating: Option<f64>,
+    pub(super) lastfm_updated_at: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -110,6 +114,10 @@ pub(super) struct PlaylistTrackRow {
     pub(super) audio_sample_rate: Option<i32>,
     pub(super) audio_bit_depth: Option<i32>,
     pub(super) file_size_bytes: Option<i64>,
+    pub(super) lastfm_listeners: Option<i64>,
+    pub(super) lastfm_playcount: Option<i64>,
+    pub(super) lastfm_rating: Option<f64>,
+    pub(super) lastfm_updated_at: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -128,6 +136,10 @@ pub(super) struct AppearanceTrackRow {
     pub(super) audio_sample_rate: Option<i32>,
     pub(super) audio_bit_depth: Option<i32>,
     pub(super) file_size_bytes: Option<i64>,
+    pub(super) lastfm_listeners: Option<i64>,
+    pub(super) lastfm_playcount: Option<i64>,
+    pub(super) lastfm_rating: Option<f64>,
+    pub(super) lastfm_updated_at: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -165,6 +177,10 @@ pub(super) struct SearchTrackRow {
     pub(super) audio_sample_rate: Option<i32>,
     pub(super) audio_bit_depth: Option<i32>,
     pub(super) file_size_bytes: Option<i64>,
+    pub(super) lastfm_listeners: Option<i64>,
+    pub(super) lastfm_playcount: Option<i64>,
+    pub(super) lastfm_rating: Option<f64>,
+    pub(super) lastfm_updated_at: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]

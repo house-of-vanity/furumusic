@@ -64,6 +64,10 @@ pub(super) struct TrackItem {
     pub(super) audio_sample_rate: Option<i32>,
     pub(super) audio_bit_depth: Option<i32>,
     pub(super) file_size_bytes: Option<i64>,
+    pub(super) lastfm_listeners: Option<i64>,
+    pub(super) lastfm_playcount: Option<i64>,
+    pub(super) lastfm_rating: Option<f64>,
+    pub(super) lastfm_updated_at: Option<String>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -84,6 +88,10 @@ pub(super) struct ArtistAppearanceTrack {
     pub(super) audio_sample_rate: Option<i32>,
     pub(super) audio_bit_depth: Option<i32>,
     pub(super) file_size_bytes: Option<i64>,
+    pub(super) lastfm_listeners: Option<i64>,
+    pub(super) lastfm_playcount: Option<i64>,
+    pub(super) lastfm_rating: Option<f64>,
+    pub(super) lastfm_updated_at: Option<String>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]

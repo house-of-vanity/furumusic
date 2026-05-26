@@ -389,11 +389,7 @@ pub async fn oidc_callback_handler(
         config.oidc_user_groups,
     );
 
-    if !is_allowed_by_groups(
-        &groups,
-        &config.oidc_user_groups,
-        &config.oidc_admin_groups,
-    ) {
+    if !is_allowed_by_groups(&groups, &config.oidc_user_groups, &config.oidc_admin_groups) {
         tracing::warn!(
             "OIDC login denied by group allowlist: sub={sub}, groups={groups:?}, user_groups={:?}, admin_groups={:?}",
             config.oidc_user_groups,

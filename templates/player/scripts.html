@@ -21,6 +21,11 @@ const T = {
     audio: "{{ t.player_audio }}",
     size: "{{ t.player_size }}",
     uploader: "{{ t.player_uploader }}",
+    lastfmRating: "{{ t.player_lastfm_rating }}",
+    lastfmListeners: "{{ t.player_lastfm_listeners }}",
+    lastfmPlaycount: "{{ t.player_lastfm_playcount }}",
+    lastfmUpdated: "{{ t.player_lastfm_updated }}",
+    lastfmNotLoaded: "{{ t.player_lastfm_not_loaded }}",
     trackWord: "{{ t.player_tracks_count }}",
     clientIdle: "{{ t.player_client_idle }}",
     active: "{{ t.player_active }}",
@@ -825,6 +830,15 @@ document.addEventListener('alpine:init', () => {
                 `${T.size}: ${this.bytes(track.file_size_bytes)}`,
                 `${T.uploader}: ${track.uploader_name || 'UFO'}`,
             ];
+            if (track.lastfm_rating != null || track.lastfm_listeners != null || track.lastfm_playcount != null) {
+                const rating = Number(track.lastfm_rating || 0);
+                lines.push(`${T.lastfmRating}: ${Number.isFinite(rating) ? rating.toFixed(2) : T.unknown}`);
+                lines.push(`${T.lastfmListeners}: ${new Intl.NumberFormat().format(track.lastfm_listeners || 0)}`);
+                lines.push(`${T.lastfmPlaycount}: ${new Intl.NumberFormat().format(track.lastfm_playcount || 0)}`);
+                if (track.lastfm_updated_at) lines.push(`${T.lastfmUpdated}: ${track.lastfm_updated_at}`);
+            } else {
+                lines.push(`${T.lastfmRating}: ${T.lastfmNotLoaded}`);
+            }
             return lines.join('\n');
         },
 
