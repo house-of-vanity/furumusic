@@ -316,11 +316,17 @@ impl_env_overrides!(
 );
 
 impl AppConfig {
+    fn normalize_host_paths(&mut self) {
+        self.agent_inbox_dir = normalize_host_path(&self.agent_inbox_dir);
+        self.agent_storage_dir = normalize_host_path(&self.agent_storage_dir);
+    }
+
     /// Build config: start from defaults, then overlay env vars.
     /// Used at startup before the DB is available (to get `database_url`).
     pub fn load() -> Self {
         let mut cfg = Self::default();
         cfg.apply_env_overrides();
+        cfg.normalize_host_paths();
         cfg
     }
 
@@ -331,6 +337,7 @@ impl AppConfig {
         let mut sources = ConfigSources::default();
         cfg.apply_db_overrides(db, &mut sources).await;
         cfg.apply_env_overrides_tracked(&mut sources);
+        cfg.normalize_host_paths();
         (cfg, sources)
     }
 
@@ -392,6 +399,44 @@ impl AppConfig {
     }
 }
 
+fn normalize_host_path(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    normalize_windows_user_path(trimmed).unwrap_or_else(|| trimmed.to_owned())
+}
+
+#[cfg(not(windows))]
+fn normalize_windows_user_path(value: &str) -> Option<String> {
+    let normalized = value.replace('\\', "/");
+    let mut parts = normalized.split('/').filter(|part| !part.is_empty());
+    let drive = parts.next()?;
+    if drive.len() != 2 || !drive.ends_with(':') {
+        return None;
+    }
+    if !parts.next()?.eq_ignore_ascii_case("Users") {
+        return None;
+    }
+    let user = parts.next()?;
+    if user.is_empty() {
+        return None;
+    }
+
+    let mut out = format!("/Users/{user}");
+    for part in parts {
+        out.push('/');
+        out.push_str(part);
+    }
+    Some(out)
+}
+
+#[cfg(windows)]
+fn normalize_windows_user_path(_value: &str) -> Option<String> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -401,6 +446,24 @@ mod tests {
         let cfg = AppConfig::default();
         assert!(cfg.database_url.is_empty());
         assert_eq!(cfg.log_level, "info");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn normalizes_windows_user_path_on_unix() {
+        assert_eq!(
+            normalize_host_path(r"C:\Users\ab\repos\furumusic\media\uploads"),
+            "/Users/ab/repos/furumusic/media/uploads"
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn leaves_unix_path_unchanged() {
+        assert_eq!(
+            normalize_host_path("/Users/ab/repos/furumusic/media/uploads"),
+            "/Users/ab/repos/furumusic/media/uploads"
+        );
     }
 
     // SAFETY: tests run with --test-threads=1 so no concurrent env access.

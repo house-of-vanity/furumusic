@@ -4,7 +4,7 @@
             <div class="modal-box info-modal">
                 <div class="info-modal-head">
                     <h3 x-text="$store.info.modal.title"></h3>
-                    <button class="mobile-list-action" @click="$store.info.close()" title="Close">
+                    <button class="mobile-list-action" @click="$store.info.close()" title="{{ t.player_close }}">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <line x1="18" y1="6" x2="6" y2="18"/>
                             <line x1="6" y1="6" x2="18" y2="18"/>
@@ -20,13 +20,13 @@
     <template x-if="$store.playlists.modal">
         <div class="modal-overlay" @click.self="$store.playlists.modal = null">
             <div class="modal-box">
-                <h3 x-text="$store.playlists.modal.mode === 'create' ? 'New Playlist' : 'Rename Playlist'"></h3>
-                <input type="text" x-model="$store.playlists.modal.title" placeholder="Playlist name"
+                <h3 x-text="$store.playlists.modal.mode === 'create' ? '{{ t.player_new_playlist }}' : '{{ t.player_rename_playlist }}'"></h3>
+                <input type="text" x-model="$store.playlists.modal.title" placeholder="{{ t.player_playlist_name }}"
                        @keydown.enter="$store.playlists.submitModal()" x-init="$nextTick(() => $el.focus())">
                 <div class="modal-footer">
-                    <button class="modal-btn modal-btn-ghost" @click="$store.playlists.modal = null">Cancel</button>
+                    <button class="modal-btn modal-btn-ghost" @click="$store.playlists.modal = null">{{ t.player_cancel }}</button>
                     <button class="modal-btn modal-btn-primary" @click="$store.playlists.submitModal()"
-                            x-text="$store.playlists.modal.mode === 'create' ? 'Create' : 'Save'"></button>
+                            x-text="$store.playlists.modal.mode === 'create' ? '{{ t.player_create }}' : '{{ t.player_save }}'"></button>
                 </div>
             </div>
         </div>
@@ -36,7 +36,7 @@
     <template x-if="$store.playlists.picker">
         <div class="modal-overlay" @click.self="$store.playlists.picker = null">
             <div class="modal-box">
-                <h3>Add to Playlist</h3>
+                <h3>{{ t.player_add_to_playlist }}</h3>
                 <div class="modal-playlist-list">
                     <template x-for="pl in $store.playlists.list.filter(p => p.kind === 'user' && p.is_own)" :key="pl.id">
                         <div class="modal-playlist-item" @click="$store.playlists.addToPicked(pl.id)">
@@ -46,8 +46,8 @@
                     </template>
                 </div>
                 <div class="modal-footer">
-                    <button class="modal-btn modal-btn-ghost" @click="$store.playlists.picker = null">Cancel</button>
-                    <button class="modal-btn modal-btn-primary" @click="$store.playlists.picker = null; $store.playlists.showCreate()">New Playlist</button>
+                    <button class="modal-btn modal-btn-ghost" @click="$store.playlists.picker = null">{{ t.player_cancel }}</button>
+                    <button class="modal-btn modal-btn-primary" @click="$store.playlists.picker = null; $store.playlists.showCreate()">{{ t.player_new_playlist }}</button>
                 </div>
             </div>
         </div>
@@ -59,7 +59,7 @@
             <div class="modal-box torrent-modal">
                 <div class="torrent-modal-head">
                     <div>
-                        <h3>Torrent manager</h3>
+                        <h3>{{ t.player_torrent_manager }}</h3>
                         <p class="torrent-message" style="margin:4px 0 0"
                            :class="{ error: $store.torrents.error }"
                            x-text="$store.torrents.message"></p>
@@ -68,6 +68,11 @@
                         <span class="torrent-status-pill"
                               :class="{ active: $store.torrents.activeCount() > 0 }"
                               x-text="$store.torrents.clientSummary()"></span>
+                        <span class="torrent-status-pill torrent-agent-pill"
+                              :class="{ active: $store.torrents.agentBusy() }">
+                            <span class="torrent-agent-dot"></span>
+                            <span x-text="$store.torrents.agentSummary()"></span>
+                        </span>
                         <span class="torrent-status-pill"
                               x-text="$store.torrents.sessions.length + ' saved'"></span>
                     </div>
@@ -76,27 +81,36 @@
                 <div class="torrent-manager-layout">
                     <aside class="torrent-manager-sidebar">
                         <div class="torrent-manager-title">
-                            <span>Saved torrents</span>
+                            <span>{{ t.player_saved_torrents }}</span>
                             <button class="modal-btn modal-btn-ghost" style="padding:4px 8px"
                                     @click="$store.torrents.loadSessions()"
-                                    :disabled="$store.torrents.loading">Refresh</button>
+                                    :disabled="$store.torrents.loading">{{ t.player_refresh }}</button>
                         </div>
                         <div class="torrent-session-list">
                             <template x-if="!$store.torrents.loadingSessions && $store.torrents.sessions.length === 0">
                                 <div class="empty-state" style="padding:28px 12px">
-                                    <p>No saved torrents</p>
+                                    <p>{{ t.player_no_saved_torrents }}</p>
                                 </div>
                             </template>
                             <template x-for="job in $store.torrents.sessions" :key="job.id">
                                 <div class="torrent-session-row"
                                      :class="{ active: $store.torrents.previewData && $store.torrents.previewData.id === job.id }"
                                      @click="$store.torrents.openSession(job.id)">
-                                    <div style="min-width:0">
-                                        <div class="torrent-session-name" x-text="job.name"></div>
+                                    <div class="torrent-session-main">
+                                        <div class="torrent-session-topline">
+                                            <div class="torrent-session-name" x-text="job.name"></div>
+                                            <span class="torrent-status-badge"
+                                                  :class="$store.torrents.statusBadgeClass(job)"
+                                                  x-text="$store.torrents.statusLabel(job)"></span>
+                                        </div>
                                         <div class="torrent-session-meta" x-text="$store.torrents.sessionMeta(job)"></div>
+                                        <div class="torrent-session-progress">
+                                            <div class="torrent-session-progress-bar"
+                                                 :style="'width:' + $store.torrents.progressValue(job) + '%'"></div>
+                                        </div>
                                     </div>
                                     <button class="torrent-session-remove"
-                                            @click.stop="$store.torrents.removeSession(job.id)">Delete</button>
+                                            @click.stop="$store.torrents.removeSession(job.id)">{{ t.player_delete }}</button>
                                 </div>
                             </template>
                         </div>
@@ -105,12 +119,12 @@
                     <section class="torrent-workspace">
                         <div class="torrent-modal-grid">
                             <div>
-                                <label for="torrent-file-input">Torrent file</label>
+                                <label for="torrent-file-input">{{ t.player_torrent_file }}</label>
                                 <input id="torrent-file-input" type="file" accept=".torrent,application/x-bittorrent"
                                        @change="$store.torrents.file = $event.target.files[0] || null">
                             </div>
                             <div>
-                                <label for="torrent-magnet-input">Magnet link</label>
+                                <label for="torrent-magnet-input">{{ t.player_magnet_link }}</label>
                                 <input id="torrent-magnet-input" type="text"
                                        x-model="$store.torrents.magnet"
                                        placeholder="magnet:?xt=urn:btih:...">
@@ -118,20 +132,20 @@
                         </div>
                         <div class="torrent-actions">
                             <button class="modal-btn modal-btn-primary" @click="$store.torrents.preview()" :disabled="$store.torrents.loading">
-                                Preview content
+                                {{ t.player_preview_content }}
                             </button>
-                            <button class="modal-btn modal-btn-ghost" @click="$store.torrents.clearSelection()" :disabled="!$store.torrents.previewData">Clear</button>
+                            <button class="modal-btn modal-btn-ghost" @click="$store.torrents.clearSelection()" :disabled="!$store.torrents.previewData">{{ t.player_clear }}</button>
                         </div>
 
                         <template x-if="$store.torrents.currentJob">
                             <div class="torrent-progress-card">
                                 <div class="torrent-progress-head">
                                     <span x-text="$store.torrents.statusText($store.torrents.currentJob)"></span>
-                                    <span x-text="$store.torrents.currentJob.progress_percent.toFixed(1) + '%'"></span>
+                                    <span x-text="$store.torrents.progressValue($store.torrents.currentJob).toFixed(1) + '%'"></span>
                                 </div>
                                 <div class="torrent-progress-track">
                                     <div class="torrent-progress-bar"
-                                         :style="'width:' + Math.max(0, Math.min(100, $store.torrents.currentJob.progress_percent || 0)) + '%'"></div>
+                                         :style="'width:' + $store.torrents.progressValue($store.torrents.currentJob) + '%'"></div>
                                 </div>
                                 <div class="torrent-progress-details">
                                     <span x-text="$store.torrents.bytes($store.torrents.currentJob.downloaded_bytes) + ' / ' + $store.torrents.bytes($store.torrents.currentJob.selected_size || $store.torrents.currentJob.total_size)"></span>
@@ -146,18 +160,21 @@
                             <div style="min-width:0">
                                 <div class="torrent-preview-title" x-text="$store.torrents.previewData.name"></div>
                                 <div class="torrent-preview-meta"
-                                     x-text="$store.torrents.previewData.files.length + ' files - ' + $store.torrents.bytes($store.torrents.previewData.total_size)"></div>
+                                     x-text="$store.torrents.previewData.files.length + ' {{ t.player_files_count }} - ' + $store.torrents.bytes($store.torrents.previewData.total_size)"></div>
                             </div>
-                            <button class="modal-btn modal-btn-primary" @click="$store.torrents.start()" :disabled="$store.torrents.loading">
-                                Download selected
+                            <button class="modal-btn"
+                                    :class="$store.torrents.isCurrentDownloading() ? 'modal-btn-pause' : 'modal-btn-primary'"
+                                    @click="$store.torrents.isCurrentDownloading() ? $store.torrents.pause() : $store.torrents.start()"
+                                    :disabled="$store.torrents.loading">
+                                <span x-text="$store.torrents.isCurrentDownloading() ? '{{ t.player_pause_download }}' : '{{ t.player_download_selected }}'"></span>
                             </button>
                         </div>
                         <div class="torrent-tree-toolbar">
                             <div class="torrent-selected-summary"
-                                 x-text="$store.torrents.selected.size + ' selected - ' + $store.torrents.bytes($store.torrents.selectedBytes())"></div>
+                                 x-text="$store.torrents.selected.size + ' {{ t.player_selected }} - ' + $store.torrents.bytes($store.torrents.selectedBytes())"></div>
                             <div class="torrent-actions" style="margin-top:0">
-                                <button class="modal-btn modal-btn-ghost" @click="$store.torrents.expandAll(true)">Expand all</button>
-                                <button class="modal-btn modal-btn-ghost" @click="$store.torrents.expandAll(false)">Collapse</button>
+                                <button class="modal-btn modal-btn-ghost" @click="$store.torrents.expandAll(true)">{{ t.player_expand_all }}</button>
+                                <button class="modal-btn modal-btn-ghost" @click="$store.torrents.expandAll(false)">{{ t.player_collapse }}</button>
                             </div>
                         </div>
                         <div class="torrent-file-tree">
@@ -215,20 +232,20 @@
     <template x-if="$store.history.modal">
         <div class="modal-overlay" @click.self="$store.history.close()">
             <div class="modal-box history-modal">
-                <h3>Play history</h3>
+                <h3>{{ t.player_play_history }}</h3>
                 <p class="torrent-message" :class="{ error: $store.history.error }"
                    x-text="$store.history.message"></p>
                 <div class="history-list">
                     <template x-if="!$store.history.loading && $store.history.items.length === 0">
                         <div class="empty-state" style="padding:32px 16px">
-                            <p>No plays yet</p>
+                            <p>{{ t.player_no_plays_yet }}</p>
                         </div>
                     </template>
                     <template x-for="item in $store.history.items" :key="item.id">
                         <div class="history-row">
                             <div style="min-width:0">
                                 <div class="history-title" x-text="item.track_title"></div>
-                                <div class="history-release" x-text="item.release_title || 'Unknown release'"></div>
+                                <div class="history-release" x-text="item.release_title || '{{ t.player_unknown_release }}'"></div>
                             </div>
                             <div>
                                 <div class="history-date" x-text="$store.history.date(item.played_at)"></div>
@@ -241,18 +258,17 @@
                     <button class="modal-btn modal-btn-ghost"
                             @click="$store.history.load($store.history.page - 1)"
                             :disabled="$store.history.loading || $store.history.page <= 1">
-                        Previous
+                        {{ t.player_previous }}
                     </button>
                     <span class="history-release"
-                          x-text="'Page ' + $store.history.page + ' of ' + $store.history.totalPages()"></span>
+                          x-text="'{{ t.player_page }} ' + $store.history.page + ' {{ t.player_of }} ' + $store.history.totalPages()"></span>
                     <button class="modal-btn modal-btn-primary"
                             @click="$store.history.load($store.history.page + 1)"
                             :disabled="$store.history.loading || $store.history.page >= $store.history.totalPages()">
-                        Next
+                        {{ t.player_next }}
                     </button>
                 </div>
             </div>
         </div>
     </template>
 </div>
-

@@ -163,6 +163,12 @@ pub(super) struct UserProfile {
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
+pub(super) struct AgentQueueStatus {
+    pub(super) queued_count: i64,
+    pub(super) processing_count: i64,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
 pub(super) struct PlayHistoryItem {
     pub(super) id: i64,
     pub(super) track_id: i64,

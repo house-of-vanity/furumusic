@@ -106,6 +106,36 @@ async fn me_handler(
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/player/agent-queue
+// ---------------------------------------------------------------------------
+
+async fn agent_queue_handler(
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+) -> cot::Result<cot::response::Response> {
+    let Some(_user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+
+    let (queued_count, processing_count): (i64, i64) = sqlx::query_as(
+        r#"SELECT
+              COUNT(*) FILTER (WHERE status = 'queued') AS queued_count,
+              COUNT(*) FILTER (WHERE status = 'processing') AS processing_count
+           FROM furumusic__pending_review"#,
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    Json(AgentQueueStatus {
+        queued_count,
+        processing_count,
+    })
+    .into_response()
+}
+
+// ---------------------------------------------------------------------------
 // GET /api/player/artists?page=N&limit=N
 // ---------------------------------------------------------------------------
 
@@ -2134,6 +2164,30 @@ impl App for PlayerApp {
                 },
                 "player_me",
             ),
+            Route::with_handler_and_name(
+                "/agent-queue",
+                {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    get(move |session: Session, db: Database| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            agent_queue_handler(session, db, pg_pool).await
+                        }
+                    })
+                },
+                "player_agent_queue",
+            ),
             // -- Torrent import widget --
             Route::with_handler_and_name(
                 "/torrents",
@@ -2369,6 +2423,50 @@ impl App for PlayerApp {
                     )
                 },
                 "player_torrent_start",
+            ),
+            Route::with_handler_and_name(
+                "/torrents/{id}/pause",
+                {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    let torrent_service = Arc::clone(&torrent_service);
+                    let scheduler_handle = Arc::clone(&self.scheduler_handle);
+                    post(move |session: Session, db: Database, path: Path<PathStringId>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        let torrent_service = Arc::clone(&torrent_service);
+                        let scheduler_handle = Arc::clone(&scheduler_handle);
+                        async move {
+                            let Some(user) = auth::get_session_user(&session, &db).await else {
+                                return Ok(json_error(
+                                    StatusCode::UNAUTHORIZED,
+                                    "not authenticated",
+                                ));
+                            };
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            let service = torrent_service
+                                .get_or_init(|| async {
+                                    Arc::new(TorrentService::new(Arc::clone(&scheduler_handle)))
+                                })
+                                .await;
+                            match service.pause(pg_pool, user.id, &path.0.id).await {
+                                Ok(job) => Json(job).into_response(),
+                                Err(err) => {
+                                    Ok(json_error(StatusCode::BAD_REQUEST, &err.to_string()))
+                                }
+                            }
+                        }
+                    })
+                },
+                "player_torrent_pause",
             ),
             Route::with_handler_and_name(
                 "/torrents/{id}/status",

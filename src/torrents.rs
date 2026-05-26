@@ -210,6 +210,11 @@ impl TorrentSessionRow {
         let progress_percent = progress_percent(downloaded_bytes, total_bytes)
             .unwrap_or(self.progress_percent)
             .clamp(0.0, 100.0);
+        let progress_percent = if status == "complete" {
+            100.0
+        } else {
+            progress_percent
+        };
         let live = stats.as_ref().and_then(|s| s.live.as_ref());
         let peer_stats = live.map(|l| &l.snapshot.peer_stats);
 
@@ -334,9 +339,13 @@ impl TorrentJob {
             selected_size: self.selected_size(),
             downloaded_bytes,
             uploaded_bytes,
-            progress_percent: progress_percent(downloaded_bytes, total_bytes)
+            progress_percent: if self.status == TorrentJobStatus::Complete {
+                100.0
+            } else {
+                progress_percent(downloaded_bytes, total_bytes)
                 .unwrap_or(self.progress_percent)
-                .clamp(0.0, 100.0),
+                    .clamp(0.0, 100.0)
+            },
             download_speed_mbps: live.map(|l| l.download_speed.mbps),
             upload_speed_mbps: live.map(|l| l.upload_speed.mbps),
             peers_live: peer_stats.map(|p| p.live),
@@ -687,6 +696,9 @@ impl TorrentService {
         let id = id.to_string();
         tokio::spawn(async move {
             if let Err(err) = handle.wait_until_completed().await {
+                if service.is_paused(&id).await {
+                    return;
+                }
                 service.stop_torrent(&handle).await;
                 service.fail_job(&pool, &id, err.to_string()).await;
                 return;
@@ -700,6 +712,34 @@ impl TorrentService {
             }
         });
 
+        Ok(dto)
+    }
+
+    pub async fn pause(
+        &self,
+        pool: &PgPool,
+        user_id: i64,
+        id: &str,
+    ) -> anyhow::Result<TorrentJobDto> {
+        self.ensure_memory_job(pool, user_id, id).await?;
+
+        let (dto, handle) = {
+            let mut jobs = self.jobs.lock().await;
+            let job = jobs.get_mut(id).context("torrent job not found")?;
+            if job.user_id != user_id {
+                bail!("torrent job not found");
+            }
+            job.refresh_progress();
+            job.status = TorrentJobStatus::Paused;
+            job.updated_at = now_string();
+            let handle = job.handle.take();
+            (job.dto(), handle)
+        };
+
+        persist_progress(pool, &dto).await?;
+        if let Some(handle) = handle {
+            self.stop_torrent(&handle).await;
+        }
         Ok(dto)
     }
 
@@ -731,6 +771,13 @@ impl TorrentService {
         let jobs = self.jobs.lock().await;
         let job = jobs.get(id).context("torrent job not found")?;
         Ok(job.dto())
+    }
+
+    async fn is_paused(&self, id: &str) -> bool {
+        let jobs = self.jobs.lock().await;
+        jobs.get(id)
+            .map(|job| job.status == TorrentJobStatus::Paused)
+            .unwrap_or(false)
     }
 
     async fn fail_job(&self, pool: &PgPool, id: &str, error: String) {
@@ -824,6 +871,8 @@ impl TorrentService {
             let job = jobs.get_mut(id).context("torrent job not found")?;
             job.refresh_progress();
             job.status = TorrentJobStatus::Complete;
+            job.downloaded_bytes = job.selected_size();
+            job.progress_percent = 100.0;
             job.completed_at = Some(now_string());
             job.updated_at = now_string();
             let dto = job.dto();

@@ -1232,6 +1232,20 @@ button.user-stat:hover {
     white-space: nowrap;
 }
 
+.player-version-chip {
+    width: 100%;
+    max-width: 600px;
+    margin-top: -2px;
+    padding-left: 0;
+    color: var(--text-subdued);
+    opacity: 0.55;
+    font-size: 9px;
+    line-height: 1;
+    font-weight: 500;
+    text-align: center;
+    pointer-events: none;
+}
+
 .mobile-account-chip {
     display: none;
     align-items: center;
@@ -1707,6 +1721,10 @@ button.user-stat:hover {
 
 .modal-btn:hover { filter: brightness(1.1); }
 .modal-btn-primary { background: var(--accent); color: #000; }
+.modal-btn-pause {
+    background: #f0b84d;
+    color: #111;
+}
 .modal-btn-ghost { background: transparent; color: var(--text-secondary); }
 
 .modal-footer {
@@ -1764,6 +1782,23 @@ button.user-stat:hover {
     color: #9ff0b9;
 }
 
+.torrent-agent-pill.active {
+    border-color: rgba(240,184,77,0.45);
+    color: #ffd78a;
+}
+
+.torrent-agent-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--text-subdued);
+}
+
+.torrent-agent-pill.active .torrent-agent-dot {
+    background: #f0b84d;
+    box-shadow: 0 0 0 3px rgba(240,184,77,0.14);
+}
+
 .torrent-manager-layout {
     display: grid;
     grid-template-columns: minmax(210px, 260px) minmax(0, 1fr);
@@ -1818,6 +1853,17 @@ button.user-stat:hover {
 .torrent-session-row:hover,
 .torrent-session-row.active { background: var(--bg-hover); }
 
+.torrent-session-main {
+    min-width: 0;
+}
+
+.torrent-session-topline {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+}
+
 .torrent-session-name {
     min-width: 0;
     color: var(--text-primary);
@@ -1828,6 +1874,45 @@ button.user-stat:hover {
     white-space: nowrap;
 }
 
+.torrent-status-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 20px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 900;
+    line-height: 1;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.torrent-status-badge.status-preview {
+    background: rgba(122,162,255,0.14);
+    color: #a8c0ff;
+}
+
+.torrent-status-badge.status-downloading,
+.torrent-status-badge.status-moving {
+    background: rgba(29,185,84,0.16);
+    color: #9ff0b9;
+}
+
+.torrent-status-badge.status-completed {
+    background: rgba(105,214,161,0.2);
+    color: #b8ffd2;
+}
+
+.torrent-status-badge.status-paused {
+    background: rgba(240,184,77,0.18);
+    color: #ffd78a;
+}
+
+.torrent-status-badge.status-failed {
+    background: rgba(229,96,96,0.18);
+    color: #ffb9b9;
+}
+
 .torrent-session-meta {
     margin-top: 4px;
     color: var(--text-subdued);
@@ -1835,6 +1920,22 @@ button.user-stat:hover {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.torrent-session-progress {
+    height: 5px;
+    margin-top: 7px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--bg-secondary);
+}
+
+.torrent-session-progress-bar {
+    height: 100%;
+    width: 0%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--accent), #7ee4a2);
+    transition: width 0.25s ease;
 }
 
 .torrent-session-remove {
@@ -2256,10 +2357,6 @@ button.user-stat:hover {
         display: block;
     }
 
-    .version-chip {
-        display: none;
-    }
-
     .torrent-modal {
         width: calc(100vw - 24px);
     }
@@ -2395,6 +2492,13 @@ button.user-stat:hover {
     .player-timeline {
         max-width: none;
         gap: 6px;
+    }
+
+    .player-version-chip {
+        max-width: none;
+        padding-left: 0;
+        opacity: 0.62;
+        font-size: 9px;
     }
 
     .player-time {
@@ -2702,6 +2806,12 @@ button.user-stat:hover {
     .player-track-title { font-size: 12px; }
     .player-track-artist { font-size: 10px; }
     .player-buttons { gap: 10px; }
+
+    .player-version-chip {
+        padding-left: 0;
+        font-size: 8px;
+        opacity: 0.58;
+    }
 
     .volume-control {
         gap: 4px;

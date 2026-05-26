@@ -16,7 +16,7 @@
                         <div class="user-name" x-text="$store.user.profile?.name || ''"></div>
                         <div class="user-role" x-text="$store.user.profile?.role || ''"></div>
                     </div>
-                    <button class="user-logout-btn" @click="$store.user.logout()" title="Log out">
+                    <button class="user-logout-btn" @click="$store.user.logout()" title="{{ t.player_log_out }}">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
                             <polyline points="16 17 21 12 16 7"/>
@@ -27,37 +27,37 @@
                 <div class="user-stats">
                     <button class="user-stat" @click="$store.history.open()">
                         <span class="user-stat-value" x-text="$store.user.format($store.user.profile?.stats?.plays)"></span>
-                        <span class="user-stat-label">plays</span>
+                        <span class="user-stat-label">{{ t.player_plays_count }}</span>
                     </button>
                     <div class="user-stat">
                         <span class="user-stat-value" x-text="$store.user.format($store.user.profile?.stats?.liked_tracks)"></span>
-                        <span class="user-stat-label">likes</span>
+                        <span class="user-stat-label">{{ t.player_likes_count }}</span>
                     </div>
                     <div class="user-stat">
                         <span class="user-stat-value" x-text="$store.user.duration($store.user.profile?.stats?.listened_minutes)"></span>
-                        <span class="user-stat-label">listened</span>
+                        <span class="user-stat-label">{{ t.player_listened }}</span>
                     </div>
                 </div>
             </div>
             <div class="sidebar-header">
-                <h2>Library</h2>
+                <h2>{{ t.player_library }}</h2>
             </div>
             <div class="sidebar-nav">
                 <div class="sidebar-nav-item"
                      :class="{ active: $store.library.view === 'artists' }"
                      @click="$store.library.goArtists()">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 10-16 0"/></svg>
-                    Artists
+                    {{ t.player_artists }}
                 </div>
             </div>
             <div class="sidebar-section">
                 <div class="sidebar-section-title">
-                    Following
+                    {{ t.player_following }}
                     <span x-show="$store.follows.artists.length > 0"
                           x-text="'(' + $store.follows.artists.length + ')'"></span>
                 </div>
                 <template x-if="$store.follows.artists.length === 0">
-                    <div class="following-empty">No followed artists</div>
+                    <div class="following-empty">{{ t.player_no_followed_artists }}</div>
                 </template>
                 <div class="following-list" x-show="$store.follows.artists.length > 0" x-cloak>
                     <template x-for="artist in $store.follows.artists" :key="artist.id">
@@ -84,20 +84,20 @@
                             <template x-if="pl.kind === 'likes'">
                                 <span style="display:flex;align-items:center;gap:6px">
                                     <svg viewBox="0 0 24 24" fill="var(--accent)" stroke="none" width="14" height="14"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z"/></svg>
-                                    <span x-text="pl.title"></span>
+                                    <span x-text="$store.playlists.displayTitle(pl)"></span>
                                 </span>
                             </template>
                             <template x-if="pl.kind !== 'likes'">
-                                <span x-text="pl.title"></span>
+                                <span x-text="$store.playlists.displayTitle(pl)"></span>
                             </template>
-                            <span class="playlist-count" x-text="pl.track_count + ' tracks'"></span>
+                            <span class="playlist-count" x-text="pl.track_count + ' {{ t.player_tracks_count }}'"></span>
                         </div>
                         <template x-if="pl.is_own && pl.kind === 'user'">
                             <div class="playlist-item-actions">
-                                <button class="playlist-action-btn" @click.stop="$store.playlists.startRename(pl)" title="Rename">
+                                <button class="playlist-action-btn" @click.stop="$store.playlists.startRename(pl)" title="{{ t.player_rename }}">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                                 </button>
-                                <button class="playlist-action-btn" @click.stop="$store.playlists.deletePlaylist(pl.id)" title="Delete">
+                                <button class="playlist-action-btn" @click.stop="$store.playlists.deletePlaylist(pl.id)" title="{{ t.player_delete }}">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
                                 </button>
                             </div>
@@ -106,22 +106,22 @@
                 </template>
                 <button class="sidebar-create-btn" @click="$store.playlists.showCreate()">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                    New Playlist
+                    {{ t.player_new_playlist }}
                 </button>
                 <template x-if="$store.playlists.publishedList().length > 0">
                     <div class="playlist-public-section">
-                        <div class="sidebar-section-title playlist-subtitle">Published Playlists</div>
+                        <div class="sidebar-section-title playlist-subtitle">{{ t.player_published_playlists }}</div>
                         <template x-for="pl in $store.playlists.publishedList()" :key="'published-' + pl.id">
                             <div class="playlist-item-row">
                                 <div class="playlist-item playlist-item-public" @click="$store.library.openPlaylist(pl.id)">
                                     <div class="playlist-title-line">
-                                        <span class="playlist-title-text" x-text="pl.title"></span>
-                                        <span class="playlist-public-badge">Public</span>
+                                        <span class="playlist-title-text" x-text="$store.playlists.displayTitle(pl)"></span>
+                                        <span class="playlist-public-badge">{{ t.player_public }}</span>
                                     </div>
                                     <div class="playlist-meta-line">
-                                        <span class="playlist-owner" x-show="pl.owner_name" x-text="'by ' + pl.owner_name"></span>
+                                        <span class="playlist-owner" x-show="pl.owner_name" x-text="'{{ t.player_by }} ' + pl.owner_name"></span>
                                         <span x-show="pl.owner_name">&middot;</span>
-                                        <span x-text="pl.track_count + ' tracks'"></span>
+                                        <span x-text="pl.track_count + ' {{ t.player_tracks_count }}'"></span>
                                     </div>
                                 </div>
                             </div>
@@ -130,7 +130,7 @@
                 </template>
             </div>
             <div class="sidebar-bottom">
-                <a href="/admin/">Admin Panel</a>
+                <a href="/admin/">{{ t.player_admin_panel }}</a>
             </div>
         </div>
 
@@ -139,10 +139,10 @@
                 <aside class="mobile-library-drawer">
                     <div class="mobile-drawer-head">
                         <div>
-                            <div class="mobile-drawer-title">Library</div>
-                            <div class="playlist-count">Playlists and followed artists</div>
+                            <div class="mobile-drawer-title">{{ t.player_library }}</div>
+                            <div class="playlist-count">{{ t.player_playlists }} / {{ t.player_following }}</div>
                         </div>
-                        <button class="mobile-list-action" @click="$store.mobile.closeLibrary()" title="Close">
+                        <button class="mobile-list-action" @click="$store.mobile.closeLibrary()" title="{{ t.player_close }}">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <line x1="18" y1="6" x2="6" y2="18"/>
                                 <line x1="6" y1="6" x2="18" y2="18"/>
@@ -155,18 +155,18 @@
                                  :class="{ active: $store.library.view === 'artists' }"
                                  @click="$store.library.goArtists(); $store.mobile.closeLibrary()">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 10-16 0"/></svg>
-                                Artists
+                                {{ t.player_artists }}
                             </div>
                         </div>
 
                         <div class="mobile-drawer-section">
                             <div class="sidebar-section-title">
-                                Following
+                                {{ t.player_following }}
                                 <span x-show="$store.follows.artists.length > 0"
                                       x-text="'(' + $store.follows.artists.length + ')'"></span>
                             </div>
                             <template x-if="$store.follows.artists.length === 0">
-                                <div class="following-empty">No followed artists</div>
+                                <div class="following-empty">{{ t.player_no_followed_artists }}</div>
                             </template>
                             <div class="following-list" x-show="$store.follows.artists.length > 0" x-cloak>
                                 <template x-for="artist in $store.follows.artists" :key="'mobile-follow-' + artist.id">
@@ -186,7 +186,7 @@
                                         </div>
                                         <button class="mobile-list-action"
                                                 @click.stop="$store.follows.toggle(artist.id)"
-                                                title="Unfollow artist">
+                                                title="{{ t.player_unfollow_artist }}">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                                 <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/>
                                                 <circle cx="9" cy="7" r="4"/>
@@ -199,27 +199,27 @@
                         </div>
 
                         <div class="mobile-drawer-section">
-                            <div class="sidebar-section-title">Playlists</div>
+                            <div class="sidebar-section-title">{{ t.player_playlists }}</div>
                             <template x-for="pl in $store.playlists.regularList()" :key="'mobile-playlist-' + pl.id">
                                 <div class="playlist-item-row">
                                     <div class="playlist-item" @click="$store.library.openPlaylist(pl.id); $store.mobile.closeLibrary()">
                                         <template x-if="pl.kind === 'likes'">
                                             <span style="display:flex;align-items:center;gap:6px">
                                                 <svg viewBox="0 0 24 24" fill="var(--accent)" stroke="none" width="14" height="14"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z"/></svg>
-                                                <span x-text="pl.title"></span>
+                                                <span x-text="$store.playlists.displayTitle(pl)"></span>
                                             </span>
                                         </template>
                                         <template x-if="pl.kind !== 'likes'">
-                                            <span x-text="pl.title"></span>
+                                            <span x-text="$store.playlists.displayTitle(pl)"></span>
                                         </template>
-                                        <span class="playlist-count" x-text="pl.track_count + ' tracks'"></span>
+                                        <span class="playlist-count" x-text="pl.track_count + ' {{ t.player_tracks_count }}'"></span>
                                     </div>
                                     <template x-if="pl.is_own && pl.kind === 'user'">
                                         <div class="playlist-item-actions">
-                                            <button class="playlist-action-btn" @click.stop="$store.mobile.closeLibrary(); $store.playlists.startRename(pl)" title="Rename">
+                                            <button class="playlist-action-btn" @click.stop="$store.mobile.closeLibrary(); $store.playlists.startRename(pl)" title="{{ t.player_rename }}">
                                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                                             </button>
-                                            <button class="playlist-action-btn" @click.stop="$store.playlists.deletePlaylist(pl.id)" title="Delete">
+                                            <button class="playlist-action-btn" @click.stop="$store.playlists.deletePlaylist(pl.id)" title="{{ t.player_delete }}">
                                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
                                             </button>
                                         </div>
@@ -228,22 +228,22 @@
                             </template>
                             <button class="sidebar-create-btn" @click="$store.mobile.closeLibrary(); $store.playlists.showCreate()">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                                New Playlist
+                                {{ t.player_new_playlist }}
                             </button>
                             <template x-if="$store.playlists.publishedList().length > 0">
                                 <div class="playlist-public-section">
-                                    <div class="sidebar-section-title playlist-subtitle">Published Playlists</div>
+                                    <div class="sidebar-section-title playlist-subtitle">{{ t.player_published_playlists }}</div>
                                     <template x-for="pl in $store.playlists.publishedList()" :key="'mobile-published-' + pl.id">
                                         <div class="playlist-item-row">
                                             <div class="playlist-item playlist-item-public" @click="$store.library.openPlaylist(pl.id); $store.mobile.closeLibrary()">
                                                 <div class="playlist-title-line">
-                                                    <span class="playlist-title-text" x-text="pl.title"></span>
-                                                    <span class="playlist-public-badge">Public</span>
+                                                    <span class="playlist-title-text" x-text="$store.playlists.displayTitle(pl)"></span>
+                                                    <span class="playlist-public-badge">{{ t.player_public }}</span>
                                                 </div>
                                                 <div class="playlist-meta-line">
-                                                    <span class="playlist-owner" x-show="pl.owner_name" x-text="'by ' + pl.owner_name"></span>
+                                                    <span class="playlist-owner" x-show="pl.owner_name" x-text="'{{ t.player_by }} ' + pl.owner_name"></span>
                                                     <span x-show="pl.owner_name">&middot;</span>
-                                                    <span x-text="pl.track_count + ' tracks'"></span>
+                                                    <span x-text="pl.track_count + ' {{ t.player_tracks_count }}'"></span>
                                                 </div>
                                             </div>
                                         </div>
@@ -262,7 +262,7 @@
             <div class="content-topbar" @click.outside="$store.user.menuOpen = false">
                 <button class="mobile-library-btn"
                         @click="$store.user.menuOpen = false; $store.mobile.toggleLibrary()"
-                        title="Library">
+                        title="{{ t.player_library }}">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M4 19.5A2.5 2.5 0 016.5 17H20"/>
                         <path d="M4 4.5A2.5 2.5 0 016.5 2H20v20H6.5A2.5 2.5 0 014 19.5z"/>
@@ -270,7 +270,7 @@
                 </button>
                 <div class="search-bar">
                     <span class="search-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
-                    <input id="search-input" type="text" placeholder="Search artists, releases, tracks..."
+                    <input id="search-input" type="text" placeholder="{{ t.player_search_placeholder }}"
                            x-model="$store.library.searchQuery"
                            @input.debounce.300ms="$store.library.search($store.library.searchQuery)"
                            @keydown.escape="$store.library.clearSearch(); $el.blur()">
@@ -285,14 +285,13 @@
                 </div>
                 <button class="torrent-import-btn"
                         @click="$store.torrents.open()"
-                        title="Import torrent">
+                        title="{{ t.player_import_torrent }}">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
                         <polyline points="7 10 12 15 17 10"/>
                         <line x1="12" y1="15" x2="12" y2="3"/>
                     </svg>
                 </button>
-                <span class="version-chip">v{{ t.app_version() }}</span>
                 <button class="mobile-account-chip"
                         x-show="$store.user.profile"
                         x-cloak
@@ -314,20 +313,20 @@
                     <div class="user-stats">
                         <button class="user-stat" @click="$store.history.open(); $store.user.menuOpen = false">
                             <span class="user-stat-value" x-text="$store.user.format($store.user.profile?.stats?.plays)"></span>
-                            <span class="user-stat-label">plays</span>
+                            <span class="user-stat-label">{{ t.player_plays_count }}</span>
                         </button>
                         <div class="user-stat">
                             <span class="user-stat-value" x-text="$store.user.format($store.user.profile?.stats?.liked_tracks)"></span>
-                            <span class="user-stat-label">likes</span>
+                            <span class="user-stat-label">{{ t.player_likes_count }}</span>
                         </div>
                         <div class="user-stat">
                             <span class="user-stat-value" x-text="$store.user.duration($store.user.profile?.stats?.listened_minutes)"></span>
-                            <span class="user-stat-label">listened</span>
+                            <span class="user-stat-label">{{ t.player_listened }}</span>
                         </div>
                     </div>
                     <button class="modal-btn modal-btn-primary mobile-account-logout"
                             @click="$store.user.logout()">
-                        Log out
+                        {{ t.player_log_out }}
                     </button>
                 </div>
             </div>
@@ -343,13 +342,13 @@
                             <template x-if="$store.library.searchResults.artists.length === 0 && $store.library.searchResults.releases.length === 0 && $store.library.searchResults.tracks.length === 0">
                                 <div class="empty-state">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                                    <p>No results found</p>
+                                    <p>{{ t.player_no_results }}</p>
                                 </div>
                             </template>
                             <!-- Artists section -->
                             <template x-if="$store.library.searchResults.artists.length > 0">
                                 <div class="search-section">
-                                    <h2 class="search-section-title">Artists</h2>
+                                    <h2 class="search-section-title">{{ t.player_artists }}</h2>
                                     <div class="search-artists-row">
                                         <template x-for="artist in $store.library.searchResults.artists" :key="artist.id">
                                             <div class="search-artist-card" @click="$store.library.openArtist(artist.id)">
@@ -363,7 +362,7 @@
                                                     <button class="artist-follow-card-btn"
                                                             :class="{ followed: $store.follows.has(artist.id) }"
                                                             @click.stop="$store.follows.toggle(artist.id)"
-                                                            :title="$store.follows.has(artist.id) ? 'Unfollow artist' : 'Follow artist'">
+                                                            :title="$store.follows.has(artist.id) ? '{{ t.player_unfollow_artist }}' : '{{ t.player_follow_artist }}'">
                                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                                             <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/>
                                                             <circle cx="9" cy="7" r="4"/>
@@ -381,7 +380,7 @@
                             <!-- Releases section -->
                             <template x-if="$store.library.searchResults.releases.length > 0">
                                 <div class="search-section">
-                                    <h2 class="search-section-title">Releases</h2>
+                                    <h2 class="search-section-title">{{ t.player_releases }}</h2>
                                     <div class="search-releases-row">
                                         <template x-for="release in $store.library.searchResults.releases" :key="release.id">
                                             <div class="search-release-card" @click="$store.library.openRelease(release.id)" style="position:relative">
@@ -392,7 +391,7 @@
                                                     <template x-if="!release.cover_url">
                                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="12" r="4"/></svg>
                                                     </template>
-                                                    <button class="card-info-btn" @click.stop="$store.info.open('Release info', $store.library.releaseInfo(release))" :title="$store.library.releaseInfo(release)" aria-label="Release info">
+                                                    <button class="card-info-btn" @click.stop="$store.info.open('{{ t.player_release_info }}', $store.library.releaseInfo(release))" :title="$store.library.releaseInfo(release)" aria-label="{{ t.player_release_info }}">
                                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
                                                     </button>
                                                 </div>
@@ -409,13 +408,13 @@
                             <!-- Tracks section -->
                             <template x-if="$store.library.searchResults.tracks.length > 0">
                                 <div class="search-section">
-                                    <h2 class="search-section-title">Tracks</h2>
+                                    <h2 class="search-section-title">{{ t.player_tracks }}</h2>
                                     <div class="track-list-header">
                                         <span>#</span>
-                                        <span>Title</span>
+                                        <span>{{ t.player_title }}</span>
                                         <span></span>
                                         <span></span>
-                                        <span style="text-align:right">Duration</span>
+                                        <span style="text-align:right">{{ t.player_duration }}</span>
                                     </div>
                                     <template x-for="(track, idx) in $store.library.searchResults.tracks" :key="track.id">
                                         <div class="track-row"
@@ -435,22 +434,22 @@
                                             </div>
                                             <span></span>
                                             <div class="track-actions">
-                                                <button class="track-action-btn info-btn" @click.stop="$store.info.open('Track info', $store.library.trackInfo(track))" :title="$store.library.trackInfo(track)" aria-label="Track info">
+                                                <button class="track-action-btn info-btn" @click.stop="$store.info.open('{{ t.player_track_info }}', $store.library.trackInfo(track))" :title="$store.library.trackInfo(track)" aria-label="{{ t.player_track_info }}">
                                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
                                                 </button>
-                                                <button class="track-action-btn play-btn" @click.stop="$store.library.playSearchTrack(idx)" title="Play">
+                                                <button class="track-action-btn play-btn" @click.stop="$store.library.playSearchTrack(idx)" title="{{ t.player_play }}">
                                                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                                                 </button>
-                                                <button class="like-btn" :class="{ liked: $store.likes.has(track.id) }" @click.stop="$store.likes.toggle(track.id)" title="Like">
+                                                <button class="like-btn" :class="{ liked: $store.likes.has(track.id) }" @click.stop="$store.likes.toggle(track.id)" title="{{ t.player_like }}">
                                                     <svg viewBox="0 0 24 24" :fill="$store.likes.has(track.id) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z"/></svg>
                                                 </button>
-                                                <button class="track-action-btn" @click.stop="$store.queue.addNextInQueue([track])" title="Play next">
+                                                <button class="track-action-btn" @click.stop="$store.queue.addNextInQueue([track])" title="{{ t.player_play_next }}">
                                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h8M5 18h14"/><path d="M17 10l4 3-4 3" fill="currentColor" stroke="none"/></svg>
                                                 </button>
-                                                <button class="track-action-btn" @click.stop="$store.queue.addToEnd([track])" title="Add to queue">
+                                                <button class="track-action-btn" @click.stop="$store.queue.addToEnd([track])" title="{{ t.player_add_to_queue }}">
                                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                                                 </button>
-                                                <button class="track-action-btn" @click.stop="$store.playlists.showPicker([track.id])" title="Add to playlist">
+                                                <button class="track-action-btn" @click.stop="$store.playlists.showPicker([track.id])" title="{{ t.player_add_to_playlist }}">
                                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
                                                 </button>
                                             </div>
@@ -467,7 +466,7 @@
             <!-- Artists Grid -->
             <template x-if="$store.library.view === 'artists'">
                 <div>
-                    <h1 class="section-title">Artists</h1>
+                    <h1 class="section-title">{{ t.player_artists }}</h1>
                     <div class="card-grid">
                         <template x-for="artist in $store.library.artists" :key="artist.id">
                             <div class="card" @click="$store.library.openArtist(artist.id)">
@@ -481,7 +480,7 @@
                                     <button class="artist-follow-card-btn"
                                             :class="{ followed: $store.follows.has(artist.id) }"
                                             @click.stop="$store.follows.toggle(artist.id)"
-                                            :title="$store.follows.has(artist.id) ? 'Unfollow artist' : 'Follow artist'">
+                                            :title="$store.follows.has(artist.id) ? '{{ t.player_unfollow_artist }}' : '{{ t.player_follow_artist }}'">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/>
                                             <circle cx="9" cy="7" r="4"/>
@@ -491,7 +490,7 @@
                                     </button>
                                 </div>
                                 <div class="card-title" x-text="artist.name"></div>
-                                <div class="card-subtitle" x-text="artist.release_count + ' releases · ' + artist.track_count + ' tracks'"></div>
+                                <div class="card-subtitle" x-text="artist.release_count + ' {{ t.player_releases_count }} · ' + artist.track_count + ' {{ t.player_tracks_count }}'"></div>
                             </div>
                         </template>
                     </div>
@@ -506,7 +505,7 @@
             <template x-if="$store.library.view === 'artist_detail' && $store.library.currentArtist">
                 <div>
                     <div class="breadcrumb">
-                        <a @click="$store.library.goArtists()">Artists</a>
+                        <a @click="$store.library.goArtists()">{{ t.player_artists }}</a>
                         <span>/</span>
                         <span x-text="$store.library.currentArtist.name"></span>
                     </div>
@@ -522,24 +521,24 @@
                         <div>
                             <div class="artist-name" x-text="$store.library.currentArtist.name"></div>
                             <div class="artist-stats">
-                                <span x-text="$store.library.currentArtist.releases.length + ' releases'"></span>
+                                <span x-text="$store.library.currentArtist.releases.length + ' {{ t.player_releases_count }}'"></span>
                                 <span>•</span>
-                                <span x-text="$store.library.currentArtist.total_track_count + ' tracks'"></span>
+                                <span x-text="$store.library.currentArtist.total_track_count + ' {{ t.player_tracks_count }}'"></span>
                                 <span>•</span>
-                                <span x-text="$store.library.currentArtist.total_play_count + ' plays'"></span>
+                                <span x-text="$store.library.currentArtist.total_play_count + ' {{ t.player_plays_count }}'"></span>
                             </div>
                             <div class="release-actions">
                                 <button class="release-action-btn secondary"
                                         :class="{ followed: $store.follows.has($store.library.currentArtist.id) }"
                                         @click="$store.follows.toggle($store.library.currentArtist.id)"
-                                        :title="$store.follows.has($store.library.currentArtist.id) ? 'Unfollow artist' : 'Follow artist'">
+                                        :title="$store.follows.has($store.library.currentArtist.id) ? '{{ t.player_unfollow_artist }}' : '{{ t.player_follow_artist }}'">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/>
                                         <circle cx="9" cy="7" r="4"/>
                                         <path x-show="!$store.follows.has($store.library.currentArtist.id)" d="M19 8v6M16 11h6"/>
                                         <path x-show="$store.follows.has($store.library.currentArtist.id)" d="M16 11l2 2 4-5"/>
                                     </svg>
-                                    <span x-text="$store.follows.has($store.library.currentArtist.id) ? 'Following' : 'Follow'"></span>
+                                    <span x-text="$store.follows.has($store.library.currentArtist.id) ? '{{ t.player_followed }}' : '{{ t.player_follow }}'"></span>
                                 </button>
                             </div>
                         </div>
@@ -557,10 +556,10 @@
                                             <template x-if="!release.cover_url">
                                                 <span class="placeholder-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="12" r="4"/></svg></span>
                                             </template>
-                                            <button class="card-info-btn" @click.stop="$store.info.open('Release info', $store.library.releaseInfo(release))" :title="$store.library.releaseInfo(release)" aria-label="Release info">
+                                            <button class="card-info-btn" @click.stop="$store.info.open('{{ t.player_release_info }}', $store.library.releaseInfo(release))" :title="$store.library.releaseInfo(release)" aria-label="{{ t.player_release_info }}">
                                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
                                             </button>
-                                            <button class="card-enqueue-btn" @click.stop="$store.library.enqueueRelease(release.id)" title="Add to queue">
+                                            <button class="card-enqueue-btn" @click.stop="$store.library.enqueueRelease(release.id)" title="{{ t.player_add_to_queue }}">
                                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                                             </button>
                                             <button class="card-play-btn" @click.stop="$store.library.playRelease(release.id)">
@@ -570,7 +569,7 @@
                                         <div class="card-title" x-text="release.title"></div>
                                         <div class="card-subtitle">
                                             <span x-text="release.year || ''"></span>
-                                            <span x-text="release.track_count + ' tracks'"></span>
+                                            <span x-text="release.track_count + ' {{ t.player_tracks_count }}'"></span>
                                         </div>
                                     </div>
                                 </template>
@@ -579,13 +578,13 @@
                     </template>
                     <template x-if="$store.library.currentArtist.featured_tracks && $store.library.currentArtist.featured_tracks.length > 0">
                         <section class="artist-release-group">
-                            <h2 class="artist-release-group-title">Appears on</h2>
+                            <h2 class="artist-release-group-title">{{ t.player_appears_on }}</h2>
                             <div class="track-list-header">
                                 <span>#</span>
-                                <span>Title</span>
+                                <span>{{ t.player_title }}</span>
                                 <span></span>
                                 <span></span>
-                                <span style="text-align:right">Duration</span>
+                                <span style="text-align:right">{{ t.player_duration }}</span>
                             </div>
                             <template x-for="(track, idx) in $store.library.currentArtist.featured_tracks" :key="track.id">
                                 <div class="track-row"
@@ -609,22 +608,22 @@
                                     </div>
                                     <span></span>
                                     <div class="track-actions">
-                                        <button class="track-action-btn info-btn" @click.stop="$store.info.open('Track info', $store.library.trackInfo(track))" :title="$store.library.trackInfo(track)" aria-label="Track info">
+                                        <button class="track-action-btn info-btn" @click.stop="$store.info.open('{{ t.player_track_info }}', $store.library.trackInfo(track))" :title="$store.library.trackInfo(track)" aria-label="{{ t.player_track_info }}">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
                                         </button>
-                                        <button class="track-action-btn play-btn" @click.stop="$store.queue.playRelease($store.library.currentArtist.featured_tracks, idx)" title="Play">
+                                        <button class="track-action-btn play-btn" @click.stop="$store.queue.playRelease($store.library.currentArtist.featured_tracks, idx)" title="{{ t.player_play }}">
                                             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                                         </button>
-                                        <button class="like-btn" :class="{ liked: $store.likes.has(track.id) }" @click.stop="$store.likes.toggle(track.id)" title="Like">
+                                        <button class="like-btn" :class="{ liked: $store.likes.has(track.id) }" @click.stop="$store.likes.toggle(track.id)" title="{{ t.player_like }}">
                                             <svg viewBox="0 0 24 24" :fill="$store.likes.has(track.id) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z"/></svg>
                                         </button>
-                                        <button class="track-action-btn" @click.stop="$store.queue.addNextInQueue([track])" title="Play next">
+                                        <button class="track-action-btn" @click.stop="$store.queue.addNextInQueue([track])" title="{{ t.player_play_next }}">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h8M5 18h14"/><path d="M17 10l4 3-4 3" fill="currentColor" stroke="none"/></svg>
                                         </button>
-                                        <button class="track-action-btn" @click.stop="$store.queue.addToEnd([track])" title="Add to queue">
+                                        <button class="track-action-btn" @click.stop="$store.queue.addToEnd([track])" title="{{ t.player_add_to_queue }}">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                                         </button>
-                                        <button class="track-action-btn" @click.stop="$store.playlists.showPicker([track.id])" title="Add to playlist">
+                                        <button class="track-action-btn" @click.stop="$store.playlists.showPicker([track.id])" title="{{ t.player_add_to_playlist }}">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
                                         </button>
                                     </div>
@@ -640,7 +639,7 @@
             <template x-if="$store.library.view === 'release_detail' && $store.library.currentRelease">
                 <div>
                     <div class="breadcrumb">
-                        <a @click="$store.library.goArtists()">Artists</a>
+                        <a @click="$store.library.goArtists()">{{ t.player_artists }}</a>
                         <span>/</span>
                         <template x-if="$store.library.currentRelease.artists.length > 0">
                             <a @click="$store.library.openArtist($store.library.currentRelease.artists[0].id)" x-text="$store.library.currentRelease.artists[0].name"></a>
@@ -671,29 +670,29 @@
                             <div class="release-year" x-text="$store.library.currentRelease.year || ''"></div>
                             <div class="release-actions">
                                 <button class="release-action-btn secondary"
-                                        @click.stop="$store.info.open('Release info', $store.library.releaseInfo($store.library.currentRelease))"
+                                        @click.stop="$store.info.open('{{ t.player_release_info }}', $store.library.releaseInfo($store.library.currentRelease))"
                                         :title="$store.library.releaseInfo($store.library.currentRelease)"
-                                        aria-label="Release info">
+                                        aria-label="{{ t.player_release_info }}">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-                                    Info
+                                    {{ t.player_info }}
                                 </button>
                                 <button class="release-action-btn primary" @click="$store.queue.playRelease($store.library.currentRelease.tracks, 0)">
                                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-                                    Play
+                                    {{ t.player_play }}
                                 </button>
                                 <button class="like-btn like-btn-lg" style="margin-left:4px"
                                         :class="{ liked: $store.likes.isReleaseLiked($store.library.currentRelease) }"
                                         @click.stop="$store.likes.toggleRelease($store.library.currentRelease.id)"
-                                        title="Like">
+                                        title="{{ t.player_like }}">
                                     <svg viewBox="0 0 24 24" :fill="$store.likes.isReleaseLiked($store.library.currentRelease) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z"/></svg>
                                 </button>
-                                <button class="release-action-btn secondary" @click="$store.queue.addToEnd($store.library.currentRelease.tracks)" title="Add to end of queue">
+                                <button class="release-action-btn secondary" @click="$store.queue.addToEnd($store.library.currentRelease.tracks)" title="{{ t.player_add_to_end_queue }}">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                                    Queue
+                                    {{ t.player_queue }}
                                 </button>
-                                <button class="release-action-btn secondary" @click="$store.queue.addNextInQueue($store.library.currentRelease.tracks)" title="Play next">
+                                <button class="release-action-btn secondary" @click="$store.queue.addNextInQueue($store.library.currentRelease.tracks)" title="{{ t.player_play_next }}">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h8M5 18h14"/><path d="M17 10l4 3-4 3" fill="currentColor" stroke="none"/></svg>
-                                    Next
+                                    {{ t.player_next }}
                                 </button>
                             </div>
                         </div>
@@ -701,10 +700,10 @@
                     <!-- Track list -->
                     <div class="track-list-header">
                         <span>#</span>
-                        <span>Title</span>
+                        <span>{{ t.player_title }}</span>
                         <span></span>
                         <span></span>
-                        <span style="text-align:right">Duration</span>
+                        <span style="text-align:right">{{ t.player_duration }}</span>
                     </div>
                     <template x-for="(track, idx) in $store.library.currentRelease.tracks" :key="track.id">
                         <div class="track-row"
@@ -724,22 +723,22 @@
                             </div>
                             <span></span>
                             <div class="track-actions">
-                                <button class="track-action-btn info-btn" @click.stop="$store.info.open('Track info', $store.library.trackInfo(track))" :title="$store.library.trackInfo(track)" aria-label="Track info">
+                                <button class="track-action-btn info-btn" @click.stop="$store.info.open('{{ t.player_track_info }}', $store.library.trackInfo(track))" :title="$store.library.trackInfo(track)" aria-label="{{ t.player_track_info }}">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
                                 </button>
-                                <button class="track-action-btn play-btn" @click.stop="$store.queue.playRelease($store.library.currentRelease.tracks, idx)" title="Play">
+                                <button class="track-action-btn play-btn" @click.stop="$store.queue.playRelease($store.library.currentRelease.tracks, idx)" title="{{ t.player_play }}">
                                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                                 </button>
-                                <button class="like-btn" :class="{ liked: $store.likes.has(track.id) }" @click.stop="$store.likes.toggle(track.id)" title="Like">
+                                <button class="like-btn" :class="{ liked: $store.likes.has(track.id) }" @click.stop="$store.likes.toggle(track.id)" title="{{ t.player_like }}">
                                     <svg viewBox="0 0 24 24" :fill="$store.likes.has(track.id) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z"/></svg>
                                 </button>
-                                <button class="track-action-btn" @click.stop="$store.queue.addNextInQueue([track])" title="Play next">
+                                <button class="track-action-btn" @click.stop="$store.queue.addNextInQueue([track])" title="{{ t.player_play_next }}">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h8M5 18h14"/><path d="M17 10l4 3-4 3" fill="currentColor" stroke="none"/></svg>
                                 </button>
-                                <button class="track-action-btn" @click.stop="$store.queue.addToEnd([track])" title="Add to queue">
+                                <button class="track-action-btn" @click.stop="$store.queue.addToEnd([track])" title="{{ t.player_add_to_queue }}">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                                 </button>
-                                <button class="track-action-btn" @click.stop="$store.playlists.showPicker([track.id])" title="Add to playlist">
+                                <button class="track-action-btn" @click.stop="$store.playlists.showPicker([track.id])" title="{{ t.player_add_to_playlist }}">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
                                 </button>
                             </div>
@@ -753,28 +752,28 @@
             <template x-if="$store.library.view === 'playlist_detail' && $store.library.currentPlaylist">
                 <div>
                     <div class="breadcrumb">
-                        <a @click="$store.library.goArtists()">Library</a>
+                        <a @click="$store.library.goArtists()">{{ t.player_library }}</a>
                         <span>/</span>
-                        <span x-text="$store.library.currentPlaylist.title"></span>
+                        <span x-text="$store.playlists.displayTitle($store.library.currentPlaylist)"></span>
                     </div>
-                    <h1 class="section-title" x-text="$store.library.currentPlaylist.title"></h1>
+                    <h1 class="section-title" x-text="$store.playlists.displayTitle($store.library.currentPlaylist)"></h1>
                     <div class="playlist-detail-meta"
                          x-show="$store.library.currentPlaylist.owner_name || $store.library.currentPlaylist.is_public">
                         <span x-show="$store.library.currentPlaylist.owner_name"
-                              x-text="'by ' + $store.library.currentPlaylist.owner_name"></span>
+                              x-text="'{{ t.player_by }} ' + $store.library.currentPlaylist.owner_name"></span>
                         <span x-show="$store.library.currentPlaylist.owner_name && $store.library.currentPlaylist.is_public">&middot;</span>
                         <span class="playlist-public-badge"
-                              x-show="$store.library.currentPlaylist.is_public">Published</span>
+                              x-show="$store.library.currentPlaylist.is_public">{{ t.player_published }}</span>
                     </div>
                     <template x-if="$store.library.currentPlaylist.description">
                         <p style="color:var(--text-subdued);margin-bottom:16px" x-text="$store.library.currentPlaylist.description"></p>
                     </template>
                     <div class="track-list-header">
                         <span>#</span>
-                        <span>Title</span>
+                        <span>{{ t.player_title }}</span>
                         <span></span>
                         <span></span>
-                        <span style="text-align:right">Duration</span>
+                        <span style="text-align:right">{{ t.player_duration }}</span>
                     </div>
                     <template x-for="(track, idx) in $store.library.currentPlaylist.tracks" :key="track.id">
                         <div class="track-row"
@@ -794,22 +793,22 @@
                             </div>
                             <span></span>
                             <div class="track-actions">
-                                <button class="track-action-btn info-btn" @click.stop="$store.info.open('Track info', $store.library.trackInfo(track))" :title="$store.library.trackInfo(track)" aria-label="Track info">
+                                <button class="track-action-btn info-btn" @click.stop="$store.info.open('{{ t.player_track_info }}', $store.library.trackInfo(track))" :title="$store.library.trackInfo(track)" aria-label="{{ t.player_track_info }}">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
                                 </button>
-                                <button class="track-action-btn play-btn" @click.stop="$store.queue.playRelease($store.library.currentPlaylist.tracks, idx)" title="Play">
+                                <button class="track-action-btn play-btn" @click.stop="$store.queue.playRelease($store.library.currentPlaylist.tracks, idx)" title="{{ t.player_play }}">
                                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                                 </button>
-                                <button class="like-btn" :class="{ liked: $store.likes.has(track.id) }" @click.stop="$store.likes.toggle(track.id)" title="Like">
+                                <button class="like-btn" :class="{ liked: $store.likes.has(track.id) }" @click.stop="$store.likes.toggle(track.id)" title="{{ t.player_like }}">
                                     <svg viewBox="0 0 24 24" :fill="$store.likes.has(track.id) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z"/></svg>
                                 </button>
-                                <button class="track-action-btn" @click.stop="$store.queue.addNextInQueue([track])" title="Play next">
+                                <button class="track-action-btn" @click.stop="$store.queue.addNextInQueue([track])" title="{{ t.player_play_next }}">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h8M5 18h14"/><path d="M17 10l4 3-4 3" fill="currentColor" stroke="none"/></svg>
                                 </button>
-                                <button class="track-action-btn" @click.stop="$store.queue.addToEnd([track])" title="Add to queue">
+                                <button class="track-action-btn" @click.stop="$store.queue.addToEnd([track])" title="{{ t.player_add_to_queue }}">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                                 </button>
-                                <button class="track-action-btn" @click.stop="$store.playlists.showPicker([track.id])" title="Add to playlist">
+                                <button class="track-action-btn" @click.stop="$store.playlists.showPicker([track.id])" title="{{ t.player_add_to_playlist }}">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
                                 </button>
                             </div>
@@ -827,14 +826,14 @@
              @click="$store.queue.visible = false"></div>
         <div class="queue-panel" :class="{ hidden: !$store.queue.visible }">
             <div class="queue-header">
-                <h3>Queue</h3>
-                <button class="queue-clear-btn" @click="$store.queue.clear()">Clear</button>
+                <h3>{{ t.player_queue }}</h3>
+                <button class="queue-clear-btn" @click="$store.queue.clear()">{{ t.player_clear }}</button>
             </div>
             <div class="queue-tracks">
                 <template x-if="$store.queue.tracks.length === 0">
                     <div class="empty-state">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-                        <p>Queue is empty</p>
+                        <p>{{ t.player_queue_empty }}</p>
                     </div>
                 </template>
                 <template x-for="(track, idx) in $store.queue.tracks" :key="idx + '-' + track.id">
@@ -870,10 +869,10 @@
                             </div>
                         </div>
                         <div class="queue-track-actions">
-                            <button class="queue-track-remove info-btn" @click.stop="$store.info.open('Track info', $store.library.trackInfo(track))" :title="$store.library.trackInfo(track)" aria-label="Track info">
+                            <button class="queue-track-remove info-btn" @click.stop="$store.info.open('{{ t.player_track_info }}', $store.library.trackInfo(track))" :title="$store.library.trackInfo(track)" aria-label="{{ t.player_track_info }}">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
                             </button>
-                            <button class="queue-track-remove" @click.stop="$store.queue.remove(idx)" title="Remove">
+                            <button class="queue-track-remove" @click.stop="$store.queue.remove(idx)" title="{{ t.player_remove }}">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                             </button>
                         </div>
@@ -916,10 +915,10 @@
 
         <div class="player-controls">
             <div class="player-buttons">
-                <button class="player-btn" :class="{ active: $store.player.shuffle }" @click="$store.player.toggleShuffle()" title="Shuffle">
+                <button class="player-btn" :class="{ active: $store.player.shuffle }" @click="$store.player.toggleShuffle()" title="{{ t.player_shuffle }}">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
                 </button>
-                <button class="player-btn" @click="$store.player.prev()" title="Previous">
+                <button class="player-btn" @click="$store.player.prev()" title="{{ t.player_previous }}">
                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
                 </button>
                 <button class="player-btn player-btn-play" @click="$store.player.toggle()">
@@ -930,10 +929,10 @@
                         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>
                     </template>
                 </button>
-                <button class="player-btn" @click="$store.player.next()" title="Next">
+                <button class="player-btn" @click="$store.player.next()" title="{{ t.player_next }}">
                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
                 </button>
-                <button class="player-btn" :class="{ active: $store.player.repeatMode !== 'off' }" @click="$store.player.cycleRepeat()" title="Repeat">
+                <button class="player-btn" :class="{ active: $store.player.repeatMode !== 'off' }" @click="$store.player.cycleRepeat()" title="{{ t.player_repeat }}">
                     <template x-if="$store.player.repeatMode !== 'one'">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>
                     </template>
@@ -951,6 +950,7 @@
                 </div>
                 <span class="player-time" x-text="formatTime($store.player.duration)"></span>
             </div>
+            <div class="player-version-chip">v{{ t.app_version() }}</div>
         </div>
 
         <div class="player-right">
@@ -968,13 +968,13 @@
                 </button>
                 <div class="volume-slider"
                      @pointerdown.prevent="$store.player.startVolumeDrag($event)"
-                     aria-label="Volume">
+                     aria-label="{{ t.player_volume }}">
                     <div class="volume-slider-fill" :style="'width:' + ($store.player.volume * 100) + '%'">
                         <div class="volume-slider-thumb"></div>
                     </div>
                 </div>
             </div>
-            <button class="queue-toggle-btn" :class="{ active: $store.queue.visible }" @click="$store.queue.visible = !$store.queue.visible" title="Queue">
+            <button class="queue-toggle-btn" :class="{ active: $store.queue.visible }" @click="$store.queue.visible = !$store.queue.visible" title="{{ t.player_queue }}">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
             </button>
         </div>
