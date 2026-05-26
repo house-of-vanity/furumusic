@@ -357,6 +357,8 @@ translations! {
     player_saved_torrents:   "Saved torrents"                  , "Сохранённые торренты";
     player_refresh:          "Refresh"                         , "Обновить";
     player_no_saved_torrents: "No saved torrents"              , "Сохранённых торрентов нет";
+    player_add_torrent:      "Add torrent"                     , "Добавить торрент";
+    player_choose_saved_or_add_torrent: "Choose a saved torrent or add a new one." , "Выберите сохранённый торрент или добавьте новый.";
     player_torrent_file:     "Torrent file"                    , "Torrent-файл";
     player_magnet_link:      "Magnet link"                     , "Magnet-ссылка";
     player_preview_content:  "Preview content"                 , "Предпросмотр";
@@ -372,6 +374,8 @@ translations! {
     player_failed:           "Failed"                          , "Ошибка";
     player_paused:           "Paused"                          , "Пауза";
     player_no_torrent_selected: "No torrent selected"          , "Торрент не выбран";
+    player_downloaded:        "Downloaded"                     , "Загружено";
+    player_speed:             "Speed"                          , "Скорость";
     player_down:             "down"                            , "вниз";
     player_up:               "up"                              , "вверх";
     player_peers:            "peers"                           , "пиры";

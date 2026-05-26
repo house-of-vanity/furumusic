@@ -194,10 +194,14 @@ impl TorrentSessionRow {
             self.status.as_str()
         };
         let stats = handle.map(|h| h.stats());
-        let downloaded_bytes = stats
+        let mut downloaded_bytes = stats
             .as_ref()
             .map(|s| s.progress_bytes)
             .unwrap_or_else(|| i64_to_u64(self.downloaded_bytes));
+        let selected_size = i64_to_u64(self.selected_size);
+        if status == "complete" {
+            downloaded_bytes = selected_size;
+        }
         let uploaded_bytes = stats
             .as_ref()
             .map(|s| s.uploaded_bytes)
@@ -225,7 +229,7 @@ impl TorrentSessionRow {
             status: status.to_string(),
             client_state: stats.as_ref().map(|s| s.state.to_string()),
             total_size: i64_to_u64(self.total_size),
-            selected_size: i64_to_u64(self.selected_size),
+            selected_size,
             downloaded_bytes,
             uploaded_bytes,
             progress_percent,
@@ -313,10 +317,14 @@ impl TorrentJob {
 
     fn dto(&self) -> TorrentJobDto {
         let stats = self.handle.as_ref().map(|h| h.stats());
-        let downloaded_bytes = stats
+        let mut downloaded_bytes = stats
             .as_ref()
             .map(|s| s.progress_bytes)
             .unwrap_or(self.downloaded_bytes);
+        let selected_size = self.selected_size();
+        if self.status == TorrentJobStatus::Complete {
+            downloaded_bytes = selected_size;
+        }
         let uploaded_bytes = stats
             .as_ref()
             .map(|s| s.uploaded_bytes)
@@ -336,7 +344,7 @@ impl TorrentJob {
             status: self.status.as_str().to_string(),
             client_state: stats.as_ref().map(|s| s.state.to_string()),
             total_size: self.total_size(),
-            selected_size: self.selected_size(),
+            selected_size,
             downloaded_bytes,
             uploaded_bytes,
             progress_percent: if self.status == TorrentJobStatus::Complete {

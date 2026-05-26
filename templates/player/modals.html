@@ -74,7 +74,7 @@
                             <span x-text="$store.torrents.agentSummary()"></span>
                         </span>
                         <span class="torrent-status-pill"
-                              x-text="$store.torrents.sessions.length + ' saved'"></span>
+                              x-text="$store.torrents.sessions.length + ' ' + T.saved"></span>
                     </div>
                 </div>
 
@@ -94,7 +94,7 @@
                             </template>
                             <template x-for="job in $store.torrents.sessions" :key="job.id">
                                 <div class="torrent-session-row"
-                                     :class="{ active: $store.torrents.previewData && $store.torrents.previewData.id === job.id }"
+                                     :class="{ active: $store.torrents.workspaceMode === 'session' && $store.torrents.previewData && $store.torrents.previewData.id === job.id }"
                                      @click="$store.torrents.openSession(job.id)">
                                     <div class="torrent-session-main">
                                         <div class="torrent-session-topline">
@@ -113,29 +113,46 @@
                                             @click.stop="$store.torrents.removeSession(job.id)">{{ t.player_delete }}</button>
                                 </div>
                             </template>
+                            <button type="button"
+                                    class="torrent-session-row torrent-session-add"
+                                    :class="{ active: $store.torrents.isImporting() }"
+                                    @click="$store.torrents.addNew()"
+                                    :disabled="$store.torrents.loading">
+                                <span class="torrent-session-add-icon">+</span>
+                                <span>{{ t.player_add_torrent }}</span>
+                            </button>
                         </div>
                     </aside>
 
                     <section class="torrent-workspace">
-                        <div class="torrent-modal-grid">
-                            <div>
-                                <label for="torrent-file-input">{{ t.player_torrent_file }}</label>
-                                <input id="torrent-file-input" type="file" accept=".torrent,application/x-bittorrent"
-                                       @change="$store.torrents.file = $event.target.files[0] || null">
+                        <template x-if="$store.torrents.workspaceMode === 'empty'">
+                            <div class="empty-state torrent-workspace-empty">
+                                <p x-text="T.chooseSavedOrAddTorrent"></p>
                             </div>
-                            <div>
-                                <label for="torrent-magnet-input">{{ t.player_magnet_link }}</label>
-                                <input id="torrent-magnet-input" type="text"
-                                       x-model="$store.torrents.magnet"
-                                       placeholder="magnet:?xt=urn:btih:...">
+                        </template>
+
+                        <template x-if="$store.torrents.isImporting()">
+                            <div class="torrent-import-panel">
+                                <div class="torrent-modal-grid">
+                                    <div>
+                                        <label for="torrent-file-input">{{ t.player_torrent_file }}</label>
+                                        <input id="torrent-file-input" type="file" accept=".torrent,application/x-bittorrent"
+                                               @change="$store.torrents.file = $event.target.files[0] || null">
+                                    </div>
+                                    <div>
+                                        <label for="torrent-magnet-input">{{ t.player_magnet_link }}</label>
+                                        <input id="torrent-magnet-input" type="text"
+                                               x-model="$store.torrents.magnet"
+                                               placeholder="magnet:?xt=urn:btih:...">
+                                    </div>
+                                </div>
+                                <div class="torrent-actions">
+                                    <button class="modal-btn modal-btn-primary" @click="$store.torrents.preview()" :disabled="$store.torrents.loading">
+                                        {{ t.player_preview_content }}
+                                    </button>
+                                </div>
                             </div>
-                        </div>
-                        <div class="torrent-actions">
-                            <button class="modal-btn modal-btn-primary" @click="$store.torrents.preview()" :disabled="$store.torrents.loading">
-                                {{ t.player_preview_content }}
-                            </button>
-                            <button class="modal-btn modal-btn-ghost" @click="$store.torrents.clearSelection()" :disabled="!$store.torrents.previewData">{{ t.player_clear }}</button>
-                        </div>
+                        </template>
 
                         <template x-if="$store.torrents.currentJob">
                             <div class="torrent-progress-card">
@@ -147,10 +164,32 @@
                                     <div class="torrent-progress-bar"
                                          :style="'width:' + $store.torrents.progressValue($store.torrents.currentJob) + '%'"></div>
                                 </div>
-                                <div class="torrent-progress-details">
-                                    <span x-text="$store.torrents.bytes($store.torrents.currentJob.downloaded_bytes) + ' / ' + $store.torrents.bytes($store.torrents.currentJob.selected_size || $store.torrents.currentJob.total_size)"></span>
-                                    <span x-text="$store.torrents.speedText($store.torrents.currentJob)"></span>
-                                    <span x-text="$store.torrents.peerText($store.torrents.currentJob)"></span>
+                                <div class="torrent-progress-details"
+                                     :class="{ completed: $store.torrents.isCompleted($store.torrents.currentJob) }">
+                                    <span class="torrent-progress-metric">
+                                        <span class="torrent-progress-label"
+                                              x-text="$store.torrents.isCompleted($store.torrents.currentJob) ? T.size : T.downloaded"></span>
+                                        <span class="torrent-progress-value"
+                                              x-text="$store.torrents.progressDetailText($store.torrents.currentJob)"></span>
+                                    </span>
+                                    <span class="torrent-progress-metric"
+                                          x-show="!$store.torrents.isCompleted($store.torrents.currentJob)">
+                                        <span class="torrent-progress-label" x-text="T.speed"></span>
+                                        <span class="torrent-progress-value"
+                                              x-text="$store.torrents.speedText($store.torrents.currentJob)"></span>
+                                    </span>
+                                    <span class="torrent-progress-metric"
+                                          x-show="!$store.torrents.isCompleted($store.torrents.currentJob)">
+                                        <span class="torrent-progress-label" x-text="T.peers"></span>
+                                        <span class="torrent-progress-value"
+                                              x-text="$store.torrents.peerText($store.torrents.currentJob)"></span>
+                                    </span>
+                                    <span class="torrent-progress-metric"
+                                          x-show="!$store.torrents.isCompleted($store.torrents.currentJob) && $store.torrents.etaText($store.torrents.currentJob)">
+                                        <span class="torrent-progress-label" x-text="T.eta"></span>
+                                        <span class="torrent-progress-value"
+                                              x-text="$store.torrents.etaText($store.torrents.currentJob)"></span>
+                                    </span>
                                 </div>
                             </div>
                         </template>
@@ -163,10 +202,10 @@
                                      x-text="$store.torrents.previewData.files.length + ' {{ t.player_files_count }} - ' + $store.torrents.bytes($store.torrents.previewData.total_size)"></div>
                             </div>
                             <button class="modal-btn"
-                                    :class="$store.torrents.isCurrentDownloading() ? 'modal-btn-pause' : 'modal-btn-primary'"
-                                    @click="$store.torrents.isCurrentDownloading() ? $store.torrents.pause() : $store.torrents.start()"
-                                    :disabled="$store.torrents.loading">
-                                <span x-text="$store.torrents.isCurrentDownloading() ? '{{ t.player_pause_download }}' : '{{ t.player_download_selected }}'"></span>
+                                    :class="$store.torrents.actionButtonClass()"
+                                    @click="$store.torrents.toggleDownloadAction()"
+                                    :disabled="$store.torrents.actionButtonDisabled()">
+                                <span x-text="$store.torrents.actionButtonText()"></span>
                             </button>
                         </div>
                         <div class="torrent-tree-toolbar">

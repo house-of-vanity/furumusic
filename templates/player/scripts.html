@@ -29,6 +29,7 @@ const T = {
     processing: "{{ t.player_processing }}",
     queued: "{{ t.player_queued }}",
     saved: "{{ t.player_saved }}",
+    chooseSavedOrAddTorrent: "{{ t.player_choose_saved_or_add_torrent }}",
     preview: "{{ t.player_preview }}",
     downloading: "{{ t.player_downloading }}",
     moving: "{{ t.player_moving }}",
@@ -36,6 +37,8 @@ const T = {
     failed: "{{ t.player_failed }}",
     paused: "{{ t.player_paused }}",
     noTorrentSelected: "{{ t.player_no_torrent_selected }}",
+    downloaded: "{{ t.player_downloaded }}",
+    speed: "{{ t.player_speed }}",
     down: "{{ t.player_down }}",
     up: "{{ t.player_up }}",
     peers: "{{ t.player_peers }}",
@@ -43,6 +46,8 @@ const T = {
     seen: "{{ t.player_seen }}",
     eta: "{{ t.player_eta }}",
     selected: "{{ t.player_selected }}",
+    downloadSelected: "{{ t.player_download_selected }}",
+    pauseDownload: "{{ t.player_pause_download }}",
     chooseTorrent: "{{ t.player_choose_torrent }}",
     readingTorrent: "{{ t.player_reading_torrent }}",
     resolvingMagnet: "{{ t.player_resolving_magnet }}",
@@ -1083,6 +1088,7 @@ document.addEventListener('alpine:init', () => {
         loadingSessions: false,
         currentJob: null,
         previewData: null,
+        workspaceMode: 'empty',
         treeRoot: null,
         selected: new Set(),
         expanded: new Set(),
@@ -1090,6 +1096,7 @@ document.addEventListener('alpine:init', () => {
         message: '',
         error: false,
         _pollTimer: null,
+        _pollJobId: null,
         _refreshTimer: null,
         queuedTasks: 0,
         processingTasks: 0,
@@ -1107,6 +1114,31 @@ document.addEventListener('alpine:init', () => {
         close() {
             this.modal = false;
             this._stopRefresh();
+            this._stopPoll();
+        },
+
+        _stopPoll() {
+            if (this._pollTimer) clearInterval(this._pollTimer);
+            this._pollTimer = null;
+            this._pollJobId = null;
+        },
+
+        isImporting() {
+            return this.workspaceMode === 'new';
+        },
+
+        addNew() {
+            if (this.loading) return;
+            this._stopPoll();
+            this.workspaceMode = 'new';
+            this.file = null;
+            this.magnet = '';
+            this.currentJob = null;
+            this.previewData = null;
+            this.treeRoot = null;
+            this.selected = new Set();
+            this.expanded = new Set();
+            this._setMessage(T.chooseTorrent);
         },
 
         _setMessage(message, error = false) {
@@ -1136,6 +1168,35 @@ document.addEventListener('alpine:init', () => {
 
         isCurrentDownloading() {
             return this.isDownloading(this.currentJob);
+        },
+
+        isCompleted(job) {
+            return this.normalizedStatus(job) === 'completed';
+        },
+
+        isCurrentCompleted() {
+            return this.isCompleted(this.currentJob);
+        },
+
+        selectedArray() {
+            return [...this.selected].sort((a, b) => Number(a) - Number(b));
+        },
+
+        selectionMatchesJob(job) {
+            if (!job) return false;
+            const saved = Array.isArray(job.selected_files) ? job.selected_files : [];
+            const selected = this.selectedArray();
+            if (saved.length !== selected.length) return false;
+            const savedSet = new Set(saved.map(index => Number(index)));
+            return selected.every(index => savedSet.has(Number(index)));
+        },
+
+        hasCurrentSelectionChanges() {
+            return !!this.currentJob && !this.selectionMatchesJob(this.currentJob);
+        },
+
+        isCurrentCompletedLocked() {
+            return this.isCurrentCompleted() && !this.hasCurrentSelectionChanges();
         },
 
         normalizedStatus(job) {
@@ -1195,15 +1256,45 @@ document.addEventListener('alpine:init', () => {
         speedText(job) {
             if (!job) return '0 B/s';
             const down = Number(job.download_speed_mbps || 0);
-            const up = Number(job.upload_speed_mbps || 0);
-            return T.down + ' ' + down.toFixed(2) + ' MiB/s - ' + T.up + ' ' + up.toFixed(2) + ' MiB/s';
+            return down.toFixed(2) + ' MiB/s';
         },
 
         peerText(job) {
-            if (!job) return T.peers + ' n/a';
+            if (!job) return 'n/a';
             const live = job.peers_live == null ? '?' : job.peers_live;
             const seen = job.peers_seen == null ? '?' : job.peers_seen;
-            return T.peers + ' ' + live + ' ' + T.live + ' / ' + seen + ' ' + T.seen + (job.eta ? ' - ' + T.eta + ' ' + job.eta : '');
+            return live + ' ' + T.live + ' / ' + seen + ' ' + T.seen;
+        },
+
+        etaText(job) {
+            return job && job.eta ? job.eta : '';
+        },
+
+        progressDetailText(job) {
+            if (!job) return '';
+            const size = this.bytes(job.selected_size || job.total_size);
+            if (this.isCompleted(job)) return size;
+            return this.bytes(job.downloaded_bytes) + ' / ' + size;
+        },
+
+        actionButtonClass() {
+            if (this.isCurrentCompletedLocked()) return 'modal-btn-ghost';
+            return this.isCurrentDownloading() ? 'modal-btn-pause' : 'modal-btn-primary';
+        },
+
+        actionButtonText() {
+            if (this.isCurrentCompletedLocked()) return T.completed;
+            return this.isCurrentDownloading() ? T.pauseDownload : T.downloadSelected;
+        },
+
+        actionButtonDisabled() {
+            return this.loading || this.isCurrentCompletedLocked();
+        },
+
+        toggleDownloadAction() {
+            if (this.isCurrentCompletedLocked()) return;
+            if (this.isCurrentDownloading()) this.pause();
+            else this.start();
         },
 
         sessionMeta(job) {
@@ -1249,9 +1340,26 @@ document.addEventListener('alpine:init', () => {
             if (this.currentJob && this.currentJob.id === job.id) this.currentJob = job;
         },
 
+        _isSelectedJob(id) {
+            return this.workspaceMode === 'session'
+                && this.currentJob
+                && this.currentJob.id === id
+                && this.previewData
+                && this.previewData.id === id;
+        },
+
+        _syncCurrentJobFromSessions() {
+            if (!this.currentJob || !this.previewData) return;
+            const selected = this.sessions.find(job => job.id === this.currentJob.id && job.id === this.previewData.id);
+            if (selected) this.currentJob = selected;
+        },
+
         _applySession(data) {
             const preview = data.preview || data;
             const job = data.job || null;
+            this.workspaceMode = 'session';
+            this.file = null;
+            this.magnet = '';
             this.previewData = preview;
             this.currentJob = job;
             const selected = Array.isArray(data.selected_files) && data.selected_files.length
@@ -1269,6 +1377,7 @@ document.addEventListener('alpine:init', () => {
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.error || T.loadTorrentsFailed);
                 this.sessions = Array.isArray(data) ? data : [];
+                this._syncCurrentJobFromSessions();
             } catch (err) {
                 this._setMessage(err.message || String(err), true);
             } finally {
@@ -1278,6 +1387,7 @@ document.addEventListener('alpine:init', () => {
 
         async openSession(id) {
             if (!id || this.loading) return;
+            this._stopPoll();
             this.loading = true;
             this._setMessage(T.openingSavedTorrent);
             try {
@@ -1310,6 +1420,7 @@ document.addEventListener('alpine:init', () => {
                     this.currentJob = null;
                     this.treeRoot = null;
                     this.selected = new Set();
+                    this.workspaceMode = this.sessions.length ? 'empty' : 'new';
                 }
                 this._setMessage(T.torrentRemoved);
             } catch (err) {
@@ -1343,6 +1454,7 @@ document.addEventListener('alpine:init', () => {
             this.previewData = null;
             this.treeRoot = null;
             this.currentJob = null;
+            this.workspaceMode = 'new';
             this.selected = new Set();
             this.expanded = new Set();
             this._setMessage(this.file ? T.readingTorrent : T.resolvingMagnet);
@@ -1554,7 +1666,7 @@ document.addEventListener('alpine:init', () => {
 
         async start() {
             if (!this.previewData || this.loading) return;
-            const selected = [...this.selected];
+            const selected = this.selectedArray();
             if (selected.length === 0) {
                 this._setMessage(T.selectOneFile, true);
                 return;
@@ -1596,8 +1708,7 @@ document.addEventListener('alpine:init', () => {
                 this.currentJob = data;
                 this._rememberJob(data);
                 this._setMessage(T.downloadPaused);
-                if (this._pollTimer) clearInterval(this._pollTimer);
-                this._pollTimer = null;
+                this._stopPoll();
                 await this.loadSessions();
             } catch (err) {
                 this._setMessage(err.message || String(err), true);
@@ -1607,28 +1718,29 @@ document.addEventListener('alpine:init', () => {
         },
 
         _poll(id) {
-            if (this._pollTimer) clearInterval(this._pollTimer);
+            this._stopPoll();
+            this._pollJobId = id;
             this._pollTimer = setInterval(async () => {
                 try {
                     const res = await fetch(`/api/player/torrents/${id}/status`);
                     const data = await res.json();
                     if (!res.ok) throw new Error(data.error || T.statusFailed);
-                    this.currentJob = data;
                     this._rememberJob(data);
-                    this._setMessage(
-                        this.statusLabel(data) + ' - ' + this.progressValue(data).toFixed(1) + '% - ' + this.bytes(data.downloaded_bytes),
-                        data.status === 'failed'
-                    );
+                    if (this._isSelectedJob(id)) {
+                        this.currentJob = data;
+                        this._setMessage(
+                            this.statusLabel(data) + ' - ' + this.progressValue(data).toFixed(1) + '% - ' + this.bytes(data.downloaded_bytes),
+                            data.status === 'failed'
+                        );
+                    }
                     if (data.status === 'complete' || data.status === 'failed') {
-                        clearInterval(this._pollTimer);
-                        this._pollTimer = null;
+                        this._stopPoll();
                         this.loadSessions();
                         this.loadAgentStatus();
                     }
                 } catch (err) {
-                    this._setMessage(err.message || String(err), true);
-                    clearInterval(this._pollTimer);
-                    this._pollTimer = null;
+                    if (this._isSelectedJob(id)) this._setMessage(err.message || String(err), true);
+                    this._stopPoll();
                 }
             }, 2000);
         },
