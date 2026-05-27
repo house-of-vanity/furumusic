@@ -887,6 +887,9 @@ pub async fn finalize_approved(
                     crate::agent::cover_art::CoverSource::Embedded(p) => {
                         format!("embedded in: {}", p.display())
                     }
+                    crate::agent::cover_art::CoverSource::Remote(url) => {
+                        format!("remote: {url}")
+                    }
                 };
                 match crate::agent::cover_art::save_cover_to_storage(
                     db,

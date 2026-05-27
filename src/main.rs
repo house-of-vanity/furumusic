@@ -50,10 +50,7 @@ fn build_registry() -> Arc<JobRegistry> {
     registry.register(jobs::inbox_discover::InboxDiscoverJob);
     registry.register(jobs::inbox_process::InboxProcessJob);
     registry.register(jobs::inbox_process::FileProcessJob);
-    registry.register(jobs::cover_backfill::CoverBackfillJob);
-    registry.register(jobs::artist_image_backfill::ArtistImageBackfillJob);
-    registry.register(jobs::artist_track_image_backfill::ArtistTrackImageBackfillJob);
-    registry.register(jobs::cover_variant_backfill::CoverVariantBackfillJob);
+    registry.register(jobs::artwork_backfill::ArtworkBackfillJob);
     registry.register(jobs::metadata_backfill::MetadataBackfillJob);
     registry.register(jobs::lastfm_popularity::LastfmPopularityJob);
     registry.register(jobs::lastfm_scrobble::LastfmScrobbleJob);

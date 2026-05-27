@@ -356,7 +356,6 @@ document.addEventListener('alpine:init', () => {
         _saveTimer: null,
         _historyRecorded: false,
         _nowPlayingSent: false,
-        _scrobbleSent: false,
         _playbackStartedAt: null,
         _listenedSeconds: 0,
         _lastAudioTime: 0,
@@ -369,12 +368,10 @@ document.addEventListener('alpine:init', () => {
                 this.duration = audio.duration || 0;
                 this.progress = this.duration > 0 ? (this.currentTime / this.duration) * 100 : 0;
                 this._trackListenedDelta();
-                this._maybeScrobble();
             });
 
             audio.addEventListener('ended', () => {
                 this._trackListenedDelta();
-                this._maybeScrobble(true);
                 this._recordHistory(true);
                 this.next();
             });
@@ -645,12 +642,14 @@ document.addEventListener('alpine:init', () => {
         _recordHistory(completed) {
             if (this._historyRecorded || !this.currentTrack) return;
             this._historyRecorded = true;
+            const listenedSeconds = this._historyListenedSeconds(completed);
             fetch('/api/player/history', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     track_id: this.currentTrack.id,
-                    duration_listened: Math.floor(this.currentTime),
+                    started_at: this._playbackStartedAt,
+                    duration_listened: listenedSeconds,
                     completed: completed,
                 }),
             }).catch(() => {});
@@ -658,7 +657,6 @@ document.addEventListener('alpine:init', () => {
 
         _resetPlaybackTracking() {
             this._nowPlayingSent = false;
-            this._scrobbleSent = false;
             this._playbackStartedAt = null;
             this._listenedSeconds = 0;
             this._lastAudioTime = 0;
@@ -696,6 +694,19 @@ document.addEventListener('alpine:init', () => {
             return Math.min(duration / 2, 240);
         },
 
+        _historyListenedSeconds(completed) {
+            const duration = this._trackDuration();
+            const listened = Number(this._listenedSeconds || 0);
+            const finalGrace = completed ? 1 : 0;
+            const precise = Math.floor(listened + finalGrace);
+            if (precise > 0) return precise;
+            const current = Number(audio.currentTime || this.currentTime || 0);
+            if (duration > 0 && Number.isFinite(current)) {
+                return Math.floor(Math.min(current, duration));
+            }
+            return Math.floor(current || 0);
+        },
+
         _sendNowPlaying() {
             if (this._nowPlayingSent || !this.currentTrack) return;
             const lastfm = Alpine.store('user')?.lastfm;
@@ -706,35 +717,6 @@ document.addEventListener('alpine:init', () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ track_id: this.currentTrack.id }),
             }).catch(() => {});
-        },
-
-        _maybeScrobble(force = false) {
-            if (this._scrobbleSent || !this.currentTrack) return;
-            const lastfm = Alpine.store('user')?.lastfm;
-            if (!lastfm?.configured || !lastfm?.connected || lastfm?.reauth_required) return;
-            const duration = this._trackDuration();
-            if (!duration || duration <= 30) return;
-            const threshold = this._scrobbleThreshold(duration);
-            const listened = force ? this._listenedSeconds + 1 : this._listenedSeconds;
-            if (listened < threshold) return;
-            this._listenedSeconds = Math.max(this._listenedSeconds, listened);
-            this._sendScrobble();
-        },
-
-        _sendScrobble() {
-            if (this._scrobbleSent || !this.currentTrack) return;
-            this._scrobbleSent = true;
-            fetch('/api/player/lastfm/scrobble', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    track_id: this.currentTrack.id,
-                    started_at: this._playbackStartedAt || Math.floor(Date.now() / 1000),
-                    listened_seconds: Math.floor(this._listenedSeconds),
-                }),
-            }).catch(() => {
-                this._scrobbleSent = false;
-            });
         },
     });
 

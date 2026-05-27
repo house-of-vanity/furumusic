@@ -3,6 +3,7 @@
 //! Sources (in priority order):
 //! 1. Standalone image files in the album folder (cover.jpg, folder.jpg, etc.)
 //! 2. Embedded cover art in audio file metadata (ID3 APIC, Vorbis METADATA_BLOCK_PICTURE, etc.)
+//! 3. Remote metadata providers used by background backfill jobs.
 //!
 //! The first usable image found is saved as a MediaFile with file_type="cover_art"
 //! and linked to the Release via cover_file_id.
@@ -26,6 +27,8 @@ pub enum CoverSource {
     FolderFile(PathBuf),
     /// Embedded in an audio file's metadata.
     Embedded(PathBuf),
+    /// Downloaded from a remote metadata provider.
+    Remote(String),
 }
 
 /// Well-known cover art filenames, in priority order.

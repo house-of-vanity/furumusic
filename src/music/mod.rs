@@ -1769,6 +1769,52 @@ pub mod db_migrations {
             &[Operation::custom(create_lastfm_scrobbling).build()];
     }
 
+    // -- M0034: Artwork lookup state --------------------------------------
+
+    #[cot::db::migrations::migration_op]
+    async fn create_artwork_lookup_state(
+        ctx: migrations::MigrationContext<'_>,
+    ) -> cot::db::Result<()> {
+        ctx.db
+            .raw(
+                "CREATE TABLE IF NOT EXISTS furumusic__artwork_lookup_state (
+                    id BIGSERIAL PRIMARY KEY,
+                    entity_kind VARCHAR(32) NOT NULL,
+                    entity_id BIGINT NOT NULL,
+                    source VARCHAR(32) NOT NULL,
+                    status VARCHAR(32) NOT NULL,
+                    attempt_count INTEGER NOT NULL DEFAULT 0,
+                    last_attempt_at VARCHAR(32) NOT NULL,
+                    last_error TEXT,
+                    source_url TEXT,
+                    UNIQUE(entity_kind, entity_id, source)
+                )",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE INDEX IF NOT EXISTS idx_artwork_lookup_state_retry
+                   ON furumusic__artwork_lookup_state (entity_kind, source, status, last_attempt_at)",
+            )
+            .await?;
+        Ok(())
+    }
+
+    #[derive(Debug, Copy, Clone)]
+    pub struct M0034CreateArtworkLookupState;
+
+    impl migrations::Migration for M0034CreateArtworkLookupState {
+        const APP_NAME: &'static str = "furumusic";
+        const MIGRATION_NAME: &'static str = "m_0034_create_artwork_lookup_state";
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
+                "furumusic",
+                "m_0033_create_lastfm_scrobbling",
+            )];
+        const OPERATIONS: &'static [Operation] =
+            &[Operation::custom(create_artwork_lookup_state).build()];
+    }
+
     pub const MIGRATIONS: &[&SyncDynMigration] = &[
         &M0006CreateMediaFile,
         &M0007CreateArtist,
@@ -1793,5 +1839,6 @@ pub mod db_migrations {
         &M0031CreateTorrentSession,
         &M0032CreateLastfmTrackPopularity,
         &M0033CreateLastfmScrobbling,
+        &M0034CreateArtworkLookupState,
     ];
 }
