@@ -661,11 +661,20 @@ button.user-stat:hover {
     display: flex;
     align-items: center;
     gap: 2px;
-    opacity: 0;
+    opacity: 1;
     transition: opacity 0.15s;
 }
 
-.track-row:hover .track-actions { opacity: 1; }
+.track-actions > :not(.popularity-info-btn) {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s;
+}
+
+.track-row:hover .track-actions > * {
+    opacity: 1;
+    pointer-events: auto;
+}
 
 .track-action-btn {
     background: none;
@@ -690,6 +699,43 @@ button.user-stat:hover {
 
 .info-btn:hover {
     color: var(--text-primary);
+}
+
+.popularity-info-btn {
+    min-width: 26px;
+    height: 20px;
+    padding: 0 3px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
+}
+
+.popularity-info-btn.has-popularity {
+    color: var(--popularity-fg, var(--text-primary));
+    background: transparent;
+}
+
+.popularity-info-btn.has-popularity:hover {
+    color: var(--popularity-fg, var(--text-primary));
+    background: transparent;
+}
+
+.popularity-info-btn.no-popularity {
+    min-width: 18px;
+    width: 18px;
+    padding: 0;
+}
+
+.popularity-info-btn .info-letter {
+    font-size: 12px;
+    font-weight: 800;
+    font-style: normal;
+    line-height: 1;
 }
 
 .card-info-btn {
@@ -926,12 +972,21 @@ button.user-stat:hover {
     display: flex;
     align-items: center;
     gap: 2px;
-    opacity: 0;
+    opacity: 1;
     transition: opacity 0.15s;
     flex-shrink: 0;
 }
 
-.queue-track:hover .queue-track-actions { opacity: 1; }
+.queue-track-actions > :not(.popularity-info-btn) {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s;
+}
+
+.queue-track:hover .queue-track-actions > * {
+    opacity: 1;
+    pointer-events: auto;
+}
 
 .queue-track-remove {
     background: none;
@@ -947,6 +1002,20 @@ button.user-stat:hover {
 }
 
 .queue-track-remove:hover { color: var(--text-primary); background: var(--bg-hover); }
+
+.queue-track-remove.popularity-info-btn {
+    min-width: 26px;
+    width: auto;
+    height: 20px;
+    padding: 0 3px;
+    border-radius: 0;
+}
+
+.queue-track-remove.popularity-info-btn.no-popularity {
+    min-width: 18px;
+    width: 18px;
+    padding: 0;
+}
 
 /* Drag handle */
 .queue-drag-handle {
@@ -2805,6 +2874,24 @@ button.user-stat:hover {
     .track-action-btn,
     .like-btn {
         padding: 6px;
+    }
+
+    .popularity-info-btn {
+        min-width: 28px;
+        height: 22px;
+        padding: 0 3px;
+    }
+
+    .popularity-info-btn.no-popularity {
+        min-width: 20px;
+        width: 20px;
+        padding: 0;
+    }
+
+    .track-actions > *,
+    .queue-track-actions > * {
+        opacity: 1;
+        pointer-events: auto;
     }
 
     .track-action-btn svg,

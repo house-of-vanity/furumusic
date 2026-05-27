@@ -434,8 +434,14 @@
                                             </div>
                                             <span></span>
                                             <div class="track-actions">
-                                                <button class="track-action-btn info-btn" @click.stop="$store.info.open('{{ t.player_track_info }}', $store.library.trackInfo(track))" :title="$store.library.trackInfo(track)" aria-label="{{ t.player_track_info }}">
-                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                                                <button class="track-action-btn info-btn popularity-info-btn"
+                                                        :class="{ 'has-popularity': $store.library.hasPopularity(track), 'no-popularity': !$store.library.hasPopularity(track) }"
+                                                        :style="$store.library.popularityStyle(track)"
+                                                        @click.stop="$store.library.openTrackInfo(track)"
+                                                        :title="$store.library.trackInfoTitle(track)"
+                                                        aria-label="{{ t.player_track_info }}">
+                                                    <span x-show="$store.library.hasPopularity(track)" x-text="$store.library.popularityLabel(track)"></span>
+                                                    <span x-show="!$store.library.hasPopularity(track)" class="info-letter">i</span>
                                                 </button>
                                                 <button class="track-action-btn play-btn" @click.stop="$store.library.playSearchTrack(idx)" title="{{ t.player_play }}">
                                                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
@@ -608,8 +614,14 @@
                                     </div>
                                     <span></span>
                                     <div class="track-actions">
-                                        <button class="track-action-btn info-btn" @click.stop="$store.info.open('{{ t.player_track_info }}', $store.library.trackInfo(track))" :title="$store.library.trackInfo(track)" aria-label="{{ t.player_track_info }}">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                                        <button class="track-action-btn info-btn popularity-info-btn"
+                                                :class="{ 'has-popularity': $store.library.hasPopularity(track), 'no-popularity': !$store.library.hasPopularity(track) }"
+                                                :style="$store.library.popularityStyle(track)"
+                                                @click.stop="$store.library.openTrackInfo(track)"
+                                                :title="$store.library.trackInfoTitle(track)"
+                                                aria-label="{{ t.player_track_info }}">
+                                            <span x-show="$store.library.hasPopularity(track)" x-text="$store.library.popularityLabel(track)"></span>
+                                            <span x-show="!$store.library.hasPopularity(track)" class="info-letter">i</span>
                                         </button>
                                         <button class="track-action-btn play-btn" @click.stop="$store.queue.playRelease($store.library.currentArtist.featured_tracks, idx)" title="{{ t.player_play }}">
                                             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
@@ -725,8 +737,14 @@
                             </div>
                             <span></span>
                             <div class="track-actions">
-                                <button class="track-action-btn info-btn" @click.stop="$store.info.open('{{ t.player_track_info }}', $store.library.trackInfo(track))" :title="$store.library.trackInfo(track)" aria-label="{{ t.player_track_info }}">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                                <button class="track-action-btn info-btn popularity-info-btn"
+                                        :class="{ 'has-popularity': $store.library.hasPopularity(track), 'no-popularity': !$store.library.hasPopularity(track) }"
+                                        :style="$store.library.popularityStyle(track)"
+                                        @click.stop="$store.library.openTrackInfo(track)"
+                                        :title="$store.library.trackInfoTitle(track)"
+                                        aria-label="{{ t.player_track_info }}">
+                                    <span x-show="$store.library.hasPopularity(track)" x-text="$store.library.popularityLabel(track)"></span>
+                                    <span x-show="!$store.library.hasPopularity(track)" class="info-letter">i</span>
                                 </button>
                                 <button class="track-action-btn play-btn" @click.stop="$store.queue.playRelease($store.library.currentRelease.tracks, idx)" title="{{ t.player_play }}">
                                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
@@ -795,8 +813,14 @@
                             </div>
                             <span></span>
                             <div class="track-actions">
-                                <button class="track-action-btn info-btn" @click.stop="$store.info.open('{{ t.player_track_info }}', $store.library.trackInfo(track))" :title="$store.library.trackInfo(track)" aria-label="{{ t.player_track_info }}">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                                <button class="track-action-btn info-btn popularity-info-btn"
+                                        :class="{ 'has-popularity': $store.library.hasPopularity(track), 'no-popularity': !$store.library.hasPopularity(track) }"
+                                        :style="$store.library.popularityStyle(track)"
+                                        @click.stop="$store.library.openTrackInfo(track)"
+                                        :title="$store.library.trackInfoTitle(track)"
+                                        aria-label="{{ t.player_track_info }}">
+                                    <span x-show="$store.library.hasPopularity(track)" x-text="$store.library.popularityLabel(track)"></span>
+                                    <span x-show="!$store.library.hasPopularity(track)" class="info-letter">i</span>
                                 </button>
                                 <button class="track-action-btn play-btn" @click.stop="$store.queue.playRelease($store.library.currentPlaylist.tracks, idx)" title="{{ t.player_play }}">
                                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
@@ -871,8 +895,14 @@
                             </div>
                         </div>
                         <div class="queue-track-actions">
-                            <button class="queue-track-remove info-btn" @click.stop="$store.info.open('{{ t.player_track_info }}', $store.library.trackInfo(track))" :title="$store.library.trackInfo(track)" aria-label="{{ t.player_track_info }}">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                            <button class="queue-track-remove info-btn popularity-info-btn"
+                                    :class="{ 'has-popularity': $store.library.hasPopularity(track), 'no-popularity': !$store.library.hasPopularity(track) }"
+                                    :style="$store.library.popularityStyle(track)"
+                                    @click.stop="$store.library.openTrackInfo(track)"
+                                    :title="$store.library.trackInfoTitle(track)"
+                                    aria-label="{{ t.player_track_info }}">
+                                <span x-show="$store.library.hasPopularity(track)" x-text="$store.library.popularityLabel(track)"></span>
+                                <span x-show="!$store.library.hasPopularity(track)" class="info-letter">i</span>
                             </button>
                             <button class="queue-track-remove" @click.stop="$store.queue.remove(idx)" title="{{ t.player_remove }}">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>

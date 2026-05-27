@@ -3,6 +3,7 @@
 const T = {
     info: "{{ t.player_info }}",
     noDetails: "{{ t.player_no_details }}",
+    trackInfoTitle: "{{ t.player_track_info }}",
     loadingHistory: "{{ t.player_loading_history }}",
     failedLoadHistory: "{{ t.player_failed_load_history }}",
     totalPlays: "{{ t.player_total_plays }}",
@@ -853,6 +854,47 @@ document.addEventListener('alpine:init', () => {
             return (idx === 0 ? size.toFixed(0) : size.toFixed(1)) + ' ' + units[idx];
         },
 
+        trackPopularityValue(track) {
+            const value = Number(track?.lastfm_rating);
+            return Number.isFinite(value) && value > 0 ? value : null;
+        },
+
+        hasPopularity(track) {
+            return this.trackPopularityValue(track) != null;
+        },
+
+        popularityLabel(track) {
+            const value = this.trackPopularityValue(track);
+            if (value == null) return 'i';
+            if (value >= 10000) return Math.round(value / 1000) + 'k';
+            if (value >= 1000) return (value / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+            return Math.round(value).toString();
+        },
+
+        popularityStyle(track) {
+            const value = this.trackPopularityValue(track);
+            if (value == null) return '';
+            const t = Math.max(0, Math.min(1, Math.log1p(value) / Math.log1p(180)));
+            const hue = 210 - (190 * t);
+            const saturation = 42 + (46 * t);
+            const lightness = 30 + (16 * t);
+            const bg = `hsla(${hue.toFixed(0)}, ${saturation.toFixed(0)}%, ${lightness.toFixed(0)}%, 0.28)`;
+            const hoverBg = `hsla(${hue.toFixed(0)}, ${saturation.toFixed(0)}%, ${Math.min(54, lightness + 6).toFixed(0)}%, 0.36)`;
+            const border = `hsla(${hue.toFixed(0)}, ${saturation.toFixed(0)}%, ${Math.min(66, lightness + 16).toFixed(0)}%, 0.52)`;
+            const fg = `hsl(${hue.toFixed(0)}, ${Math.min(96, saturation + 8).toFixed(0)}%, ${Math.min(86, lightness + 34).toFixed(0)}%)`;
+            return `--popularity-bg:${bg};--popularity-hover-bg:${hoverBg};--popularity-border:${border};--popularity-fg:${fg}`;
+        },
+
+        trackInfoTitle(track) {
+            const value = this.trackPopularityValue(track);
+            if (value == null) return this.trackInfo(track);
+            return `${T.lastfmRating}: ${Math.round(value)}\n${this.trackInfo(track)}`;
+        },
+
+        openTrackInfo(track) {
+            Alpine.store('info').open(T.trackInfoTitle, this.trackInfo(track));
+        },
+
         uploadersInfo(uploaders) {
             const rows = uploaders || [];
             if (!rows.length) return 'UFO';
@@ -893,7 +935,7 @@ document.addEventListener('alpine:init', () => {
             ];
             if (track.lastfm_rating != null || track.lastfm_listeners != null || track.lastfm_playcount != null) {
                 const rating = Number(track.lastfm_rating || 0);
-                lines.push(`${T.lastfmRating}: ${Number.isFinite(rating) ? rating.toFixed(2) : T.unknown}`);
+                lines.push(`${T.lastfmRating}: ${Number.isFinite(rating) ? Math.round(rating) : T.unknown}`);
                 lines.push(`${T.lastfmListeners}: ${new Intl.NumberFormat().format(track.lastfm_listeners || 0)}`);
                 lines.push(`${T.lastfmPlaycount}: ${new Intl.NumberFormat().format(track.lastfm_playcount || 0)}`);
                 if (track.lastfm_updated_at) lines.push(`${T.lastfmUpdated}: ${track.lastfm_updated_at}`);
