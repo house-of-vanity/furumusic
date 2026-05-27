@@ -460,6 +460,16 @@ impl PendingReview {
         self.save(db).await
     }
 
+    pub async fn set_result_json(
+        &mut self,
+        db: &Database,
+        result_json: String,
+    ) -> cot::db::Result<()> {
+        self.result_json = Some(result_json);
+        self.updated_at = now_iso();
+        self.save(db).await
+    }
+
     pub async fn set_failed(&mut self, db: &Database, error: &str) -> cot::db::Result<()> {
         self.status = LimitedString::new("failed").unwrap();
         self.error_message = Some(error.to_owned());

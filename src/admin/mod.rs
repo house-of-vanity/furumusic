@@ -20,8 +20,8 @@ use crate::i18n::I18n;
 use crate::scheduler::{JobRegistry, SchedulerHandle};
 use crate::user::User;
 use views::{
-    ArtistForm, CronForm, MetadataBackfillForm, OidcSettingsForm, ReleaseForm, ReviewsBulkForm,
-    SetImageBody, SetupForm, UploadImageBody, UserForm,
+    ArtistForm, CronForm, MetadataBackfillForm, OidcSettingsForm, ReleaseForm, ReviewApproveForm,
+    ReviewsBulkForm, SetImageBody, SetupForm, UploadImageBody, UserForm,
 };
 
 #[derive(Debug, Deserialize)]
@@ -226,6 +226,35 @@ impl App for AdminApp {
                     )
                 },
                 "admin_v2_reviews_bulk",
+            ),
+            Route::with_handler_and_name(
+                "/v2/api/reviews/{id}/approve",
+                {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    cot::router::method::post(
+                        move |session: Session,
+                              db: Database,
+                              path: Path<PathId>,
+                              json: Json<v2::ReviewEditDto>| {
+                            let pool = Arc::clone(&pool);
+                            let pool_config = Arc::clone(&pool_config);
+                            async move {
+                                let pg_pool = pool
+                                    .get_or_init(|| async {
+                                        sqlx::postgres::PgPoolOptions::new()
+                                            .max_connections(5)
+                                            .connect(&pool_config.database_url)
+                                            .await
+                                            .expect("admin pool")
+                                    })
+                                    .await;
+                                v2::approve_review(session, db, pg_pool, path.0.id, json).await
+                            }
+                        },
+                    )
+                },
+                "admin_v2_review_approve",
             ),
             Route::with_handler_and_name(
                 "/v2/api/jobs",
@@ -1048,7 +1077,8 @@ impl App for AdminApp {
                     let config = Arc::clone(&self.config);
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database, path: Path<PathId>| {
+                    move |session: Session, db: Database, path: Path<PathId>,
+                          form: RequestForm<ReviewApproveForm>| {
                         let config = Arc::clone(&config);
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
@@ -1064,7 +1094,7 @@ impl App for AdminApp {
                                     .await
                                     .expect("admin pool")
                             }).await;
-                            views::review_approve(admin, &config, &db, pg_pool, path.0.id).await
+                            views::review_approve(admin, &config, &db, pg_pool, path.0.id, form).await
                         }
                     }
                 }),

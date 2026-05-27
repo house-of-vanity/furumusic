@@ -851,7 +851,8 @@ tbody tr:hover {
 }
 
 .field input,
-.field textarea {
+.field textarea,
+.field select {
     width: 100%;
     min-height: 34px;
     padding: 8px 10px;
@@ -1673,7 +1674,60 @@ tbody tr:hover {
                     <label>Error</label>
                     <textarea readonly x-text="activeReview?.error_message || ''"></textarea>
                 </div>
+                <div x-show="activeReview?.status === 'pending'">
+                    <div class="field">
+                        <label>Artist</label>
+                        <input x-model="reviewDraft.artist" />
+                    </div>
+                    <div class="field">
+                        <label>Album</label>
+                        <input x-model="reviewDraft.album" />
+                    </div>
+                    <div class="field">
+                        <label>Title</label>
+                        <input x-model="reviewDraft.title" />
+                    </div>
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                        <div class="field">
+                            <label>Year</label>
+                            <input type="number" min="0" max="3000" x-model="reviewDraft.year" />
+                        </div>
+                        <div class="field">
+                            <label>Track</label>
+                            <input type="number" min="0" x-model="reviewDraft.track_number" />
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label>Genre</label>
+                        <input x-model="reviewDraft.genre" />
+                    </div>
+                    <div class="field">
+                        <label>Featured artists</label>
+                        <input x-model="reviewDraft.featured_artists" />
+                    </div>
+                    <div class="field">
+                        <label>Release type</label>
+                        <select x-model="reviewDraft.release_type">
+                            <option value="album">Album</option>
+                            <option value="single">Single</option>
+                            <option value="ep">EP</option>
+                            <option value="compilation">Compilation</option>
+                            <option value="soundtrack">Soundtrack</option>
+                            <option value="live">Live</option>
+                            <option value="remix">Remix</option>
+                            <option value="unknown">Unknown</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label>Notes</label>
+                        <textarea x-model="reviewDraft.notes"></textarea>
+                    </div>
+                </div>
                 <div class="toolbar">
+                    <button class="btn primary" x-show="activeReview?.status === 'pending'" @click="approveActiveReview()">
+                        <i data-lucide="check"></i>
+                        Approve
+                    </button>
                     <button class="btn warn" @click="bulkOneReview('requeue', activeReview)">
                         <i data-lucide="rotate-ccw"></i>
                         Requeue
@@ -1751,6 +1805,17 @@ function adminV2() {
         selectedReviewIds: {},
         reviewSelectionScope: 'ids',
         activeReview: null,
+        reviewDraft: {
+            title: '',
+            artist: '',
+            album: '',
+            year: '',
+            track_number: '',
+            genre: '',
+            featured_artists: '',
+            release_type: 'album',
+            notes: ''
+        },
         reviewModalOpen: false,
         reviewStatuses: [
             { value: null, label: 'All' },
@@ -2072,6 +2137,17 @@ function adminV2() {
 
         openReview(row) {
             this.activeReview = row;
+            this.reviewDraft = Object.assign({
+                title: '',
+                artist: '',
+                album: '',
+                year: '',
+                track_number: '',
+                genre: '',
+                featured_artists: '',
+                release_type: 'album',
+                notes: ''
+            }, row.normalized || {});
             this.activeRunDetail = null;
             this.reviewModalOpen = true;
         },
@@ -2163,6 +2239,23 @@ function adminV2() {
             this.selectedReviewIds = { [row.id]: row.status };
             await this.bulkReviews(action);
             this.reviewModalOpen = false;
+        },
+
+        async approveActiveReview() {
+            if (!this.activeReview) return;
+            try {
+                await this.request(`${this.apiBase}/reviews/${this.activeReview.id}/approve`, {
+                    method: 'POST',
+                    body: JSON.stringify(this.reviewDraft)
+                });
+                this.showToast('Review approved');
+                this.reviewModalOpen = false;
+                this.activeReview = null;
+                await this.loadReviews(false);
+                await this.loadLibrary(false);
+            } catch (error) {
+                this.showToast(error.message);
+            }
         },
 
         async runJob(job) {

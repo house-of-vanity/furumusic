@@ -156,8 +156,22 @@ struct ReviewDto {
     token_count: Option<i64>,
     tags: Vec<TagDto>,
     error_message: Option<String>,
+    normalized: ReviewEditDto,
     created_at: String,
     updated_at: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+pub(super) struct ReviewEditDto {
+    title: String,
+    artist: String,
+    album: String,
+    year: String,
+    track_number: String,
+    genre: String,
+    featured_artists: String,
+    release_type: String,
+    notes: String,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -531,6 +545,65 @@ pub async fn bulk_reviews(
     };
 
     Json(BulkReviewsResponse { ok: true, affected }).into_response()
+}
+
+pub async fn approve_review(
+    session: Session,
+    db: Database,
+    pool: &PgPool,
+    review_id: i64,
+    Json(body): Json<ReviewEditDto>,
+) -> cot::Result<cot::response::Response> {
+    if let Err(response) = require_admin_json(&session, &db).await {
+        return Ok(response);
+    }
+
+    let mut review = crate::scheduler::PendingReview::get_by_id(&db, review_id)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?
+        .ok_or_else(|| cot::Error::internal("review not found"))?;
+    let normalized = normalized_from_review_edit(&body);
+    let result_json = serde_json::to_string(&normalized)
+        .map_err(|e| cot::Error::internal(format!("failed to serialize review fields: {e}")))?;
+    review
+        .set_result_json(&db, result_json)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    let context: serde_json::Value =
+        serde_json::from_str(review.context_json_str()).unwrap_or_default();
+    let input_path = review.input_path_str().to_owned();
+    let (live_config, _) = AppConfig::load_with_db(&db).await;
+    let stats = crate::scheduler::ProcessingStats::get_by_review_id(&db, review_id)
+        .await
+        .unwrap_or(None);
+    let model_name = stats.as_ref().map(|s| s.model_name.to_string());
+
+    match crate::jobs::inbox_process::finalize_approved(
+        &db,
+        pool,
+        &live_config,
+        &input_path,
+        &normalized,
+        &context,
+        &live_config.agent_storage_dir,
+        model_name.as_deref(),
+    )
+    .await
+    {
+        Ok(()) => {
+            let _ = review.set_approved(&db).await;
+            Json(serde_json::json!({ "ok": true })).into_response()
+        }
+        Err(error) => {
+            tracing::error!(?error, "review approval failed");
+            let _ = review.set_rejected(&db).await;
+            Ok(json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "review approval failed",
+            ))
+        }
+    }
 }
 
 pub async fn jobs(
@@ -1209,6 +1282,11 @@ fn review_dto(
         .as_deref()
         .and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok())
         .and_then(|value| value.get("confidence").and_then(|v| v.as_f64()));
+    let normalized = row
+        .result_json
+        .as_deref()
+        .map(review_edit_dto_from_json)
+        .unwrap_or_default();
 
     ReviewDto {
         id: row.id,
@@ -1224,8 +1302,69 @@ fn review_dto(
         token_count: stat.map(|s| s.prompt_tokens + s.completion_tokens),
         tags,
         error_message: row.error_message,
+        normalized,
         created_at: row.created_at,
         updated_at: row.updated_at,
+    }
+}
+
+fn review_edit_dto_from_json(result_json: &str) -> ReviewEditDto {
+    let Ok(normalized) = serde_json::from_str::<crate::agent::dto::NormalizedFields>(result_json)
+    else {
+        return ReviewEditDto::default();
+    };
+    ReviewEditDto {
+        title: normalized.title.unwrap_or_default(),
+        artist: normalized.artist.unwrap_or_default(),
+        album: normalized.album.unwrap_or_default(),
+        year: normalized.year.map(|v| v.to_string()).unwrap_or_default(),
+        track_number: normalized
+            .track_number
+            .map(|v| v.to_string())
+            .unwrap_or_default(),
+        genre: normalized.genre.unwrap_or_default(),
+        featured_artists: normalized.featured_artists.join(", "),
+        release_type: normalized
+            .release_type
+            .unwrap_or_else(|| "album".to_owned()),
+        notes: normalized.notes.unwrap_or_default(),
+    }
+}
+
+fn optional_trimmed(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_owned())
+    }
+}
+
+fn parse_optional_i32(value: &str) -> Option<i32> {
+    value.trim().parse::<i32>().ok()
+}
+
+fn parse_featured_artists(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+fn normalized_from_review_edit(edit: &ReviewEditDto) -> crate::agent::dto::NormalizedFields {
+    crate::agent::dto::NormalizedFields {
+        title: optional_trimmed(&edit.title),
+        artist: optional_trimmed(&edit.artist),
+        album: optional_trimmed(&edit.album),
+        year: parse_optional_i32(&edit.year),
+        track_number: parse_optional_i32(&edit.track_number),
+        genre: optional_trimmed(&edit.genre),
+        featured_artists: parse_featured_artists(&edit.featured_artists),
+        release_type: optional_trimmed(&edit.release_type).or_else(|| Some("album".to_owned())),
+        confidence: Some(1.0),
+        notes: optional_trimmed(&edit.notes),
     }
 }
 

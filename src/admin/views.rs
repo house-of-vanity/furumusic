@@ -1794,10 +1794,102 @@ struct ReviewDetailTemplate {
     user_name: String,
     user_role: String,
     review: PendingReview,
+    edit: ReviewEditFields,
+    release_types: &'static [(&'static str, &'static str, &'static str)],
+    lang_code: &'static str,
     context_pretty: String,
     result_pretty: String,
     error_message: String,
     stats: Option<scheduler::ProcessingStats>,
+}
+
+#[derive(Debug, Default)]
+struct ReviewEditFields {
+    title: String,
+    artist: String,
+    album: String,
+    year: String,
+    track_number: String,
+    genre: String,
+    featured_artists: String,
+    release_type: String,
+    notes: String,
+}
+
+#[derive(Debug, Form)]
+pub struct ReviewApproveForm {
+    title: String,
+    artist: String,
+    album: String,
+    year: String,
+    track_number: String,
+    genre: String,
+    featured_artists: String,
+    release_type: String,
+    notes: String,
+}
+
+fn optional_trimmed(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_owned())
+    }
+}
+
+fn parse_optional_i32(value: &str) -> Option<i32> {
+    value.trim().parse::<i32>().ok()
+}
+
+fn parse_featured_artists(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+fn edit_fields_from_normalized(
+    normalized: &crate::agent::dto::NormalizedFields,
+) -> ReviewEditFields {
+    ReviewEditFields {
+        title: normalized.title.clone().unwrap_or_default(),
+        artist: normalized.artist.clone().unwrap_or_default(),
+        album: normalized.album.clone().unwrap_or_default(),
+        year: normalized.year.map(|v| v.to_string()).unwrap_or_default(),
+        track_number: normalized
+            .track_number
+            .map(|v| v.to_string())
+            .unwrap_or_default(),
+        genre: normalized.genre.clone().unwrap_or_default(),
+        featured_artists: normalized.featured_artists.join(", "),
+        release_type: normalized
+            .release_type
+            .clone()
+            .unwrap_or_else(|| "album".to_owned()),
+        notes: normalized.notes.clone().unwrap_or_default(),
+    }
+}
+
+fn normalized_from_result_json(result_json: &str) -> crate::agent::dto::NormalizedFields {
+    serde_json::from_str(result_json).unwrap_or_default()
+}
+
+fn normalized_from_review_form(form: &ReviewApproveForm) -> crate::agent::dto::NormalizedFields {
+    crate::agent::dto::NormalizedFields {
+        title: optional_trimmed(&form.title),
+        artist: optional_trimmed(&form.artist),
+        album: optional_trimmed(&form.album),
+        year: parse_optional_i32(&form.year),
+        track_number: parse_optional_i32(&form.track_number),
+        genre: optional_trimmed(&form.genre),
+        featured_artists: parse_featured_artists(&form.featured_artists),
+        release_type: optional_trimmed(&form.release_type).or_else(|| Some("album".to_owned())),
+        confidence: Some(1.0),
+        notes: optional_trimmed(&form.notes),
+    }
 }
 
 pub async fn review_detail(
@@ -1830,12 +1922,17 @@ pub async fn review_detail(
     let stats = scheduler::ProcessingStats::get_by_review_id(db, review_id)
         .await
         .unwrap_or(None);
+    let normalized = normalized_from_result_json(review.result_json_str());
+    let edit = edit_fields_from_normalized(&normalized);
 
     let template = ReviewDetailTemplate {
         t: i18n.t,
         user_name: admin.name,
         user_role: admin.role.code().to_owned(),
         review,
+        edit,
+        release_types: RELEASE_TYPES,
+        lang_code: i18n.t.lang.code(),
         context_pretty,
         result_pretty,
         error_message,
@@ -1850,23 +1947,28 @@ pub async fn review_approve(
     db: &Database,
     pool: &sqlx::PgPool,
     review_id: i64,
+    form: RequestForm<ReviewApproveForm>,
 ) -> cot::Result<cot::http::Response<Body>> {
     let mut review = PendingReview::get_by_id(db, review_id)
         .await
         .map_err(|e| cot::Error::internal(format!("db error: {e}")))?
         .ok_or_else(|| cot::Error::internal("review not found"))?;
 
-    let result_str = review.result_json_str().to_owned();
+    let RequestForm(form_result) = form;
+    let normalized = match form_result {
+        FormResult::Ok(data) => normalized_from_review_form(&data),
+        FormResult::ValidationError(_) => {
+            return Ok(auth::redirect(&format!("/admin/reviews/{review_id}")));
+        }
+    };
+    let result_str = serde_json::to_string(&normalized)
+        .map_err(|e| cot::Error::internal(format!("failed to serialize review fields: {e}")))?;
+    review
+        .set_result_json(db, result_str)
+        .await
+        .map_err(|e| cot::Error::internal(format!("db error: {e}")))?;
     let context_str = review.context_json_str().to_owned();
     let input_path = review.input_path_str().to_owned();
-
-    if result_str.is_empty() {
-        let _ = review.set_rejected(db).await;
-        return Ok(auth::redirect(&format!("/admin/reviews/{review_id}")));
-    }
-
-    let normalized: crate::agent::dto::NormalizedFields = serde_json::from_str(&result_str)
-        .map_err(|e| cot::Error::internal(format!("invalid result_json: {e}")))?;
 
     let context: serde_json::Value = serde_json::from_str(&context_str).unwrap_or_default();
 
