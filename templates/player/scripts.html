@@ -373,6 +373,8 @@ document.addEventListener('alpine:init', () => {
             });
 
             audio.addEventListener('ended', () => {
+                this._trackListenedDelta();
+                this._maybeScrobble(true);
                 this._recordHistory(true);
                 this.next();
             });
@@ -677,6 +679,23 @@ document.addEventListener('alpine:init', () => {
             this._lastAudioTime = current;
         },
 
+        _trackDuration() {
+            const candidates = [
+                this.currentTrack?.duration_seconds,
+                this.duration,
+                audio.duration,
+            ];
+            for (const value of candidates) {
+                const duration = Number(value || 0);
+                if (Number.isFinite(duration) && duration > 0) return duration;
+            }
+            return 0;
+        },
+
+        _scrobbleThreshold(duration) {
+            return Math.min(duration / 2, 240);
+        },
+
         _sendNowPlaying() {
             if (this._nowPlayingSent || !this.currentTrack) return;
             const lastfm = Alpine.store('user')?.lastfm;
@@ -689,14 +708,16 @@ document.addEventListener('alpine:init', () => {
             }).catch(() => {});
         },
 
-        _maybeScrobble() {
+        _maybeScrobble(force = false) {
             if (this._scrobbleSent || !this.currentTrack) return;
             const lastfm = Alpine.store('user')?.lastfm;
             if (!lastfm?.configured || !lastfm?.connected || lastfm?.reauth_required) return;
-            const duration = Number(this.duration || audio.duration || this.currentTrack.duration_seconds || 0);
+            const duration = this._trackDuration();
             if (!duration || duration <= 30) return;
-            const threshold = Math.min(duration / 2, 240);
-            if (this._listenedSeconds < threshold) return;
+            const threshold = this._scrobbleThreshold(duration);
+            const listened = force ? this._listenedSeconds + 1 : this._listenedSeconds;
+            if (listened < threshold) return;
+            this._listenedSeconds = Math.max(this._listenedSeconds, listened);
             this._sendScrobble();
         },
 
