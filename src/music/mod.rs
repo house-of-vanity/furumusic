@@ -1692,6 +1692,83 @@ pub mod db_migrations {
             &[Operation::custom(create_lastfm_track_popularity).build()];
     }
 
+    // -- M0033: Last.fm scrobbling -----------------------------------------
+
+    #[cot::db::migrations::migration_op]
+    async fn create_lastfm_scrobbling(
+        ctx: migrations::MigrationContext<'_>,
+    ) -> cot::db::Result<()> {
+        ctx.db
+            .raw(
+                "CREATE TABLE IF NOT EXISTS furumusic__lastfm_account (
+                    user_id BIGINT PRIMARY KEY,
+                    lastfm_username VARCHAR(255) NOT NULL,
+                    session_key TEXT NOT NULL,
+                    connected_at VARCHAR(32) NOT NULL,
+                    updated_at VARCHAR(32) NOT NULL,
+                    last_error TEXT,
+                    reauth_required BOOLEAN NOT NULL DEFAULT FALSE
+                )",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE TABLE IF NOT EXISTS furumusic__lastfm_auth_state (
+                    state VARCHAR(64) PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    created_at VARCHAR(32) NOT NULL
+                )",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE TABLE IF NOT EXISTS furumusic__lastfm_scrobble_outbox (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    track_id BIGINT NOT NULL,
+                    started_at BIGINT NOT NULL,
+                    listened_seconds INTEGER NOT NULL,
+                    duration_seconds INTEGER NOT NULL,
+                    status VARCHAR(32) NOT NULL,
+                    attempt_count INTEGER NOT NULL DEFAULT 0,
+                    last_error TEXT,
+                    created_at VARCHAR(32) NOT NULL,
+                    updated_at VARCHAR(32) NOT NULL,
+                    scrobbled_at VARCHAR(32),
+                    dedupe_key VARCHAR(128) NOT NULL UNIQUE
+                )",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE INDEX IF NOT EXISTS idx_lastfm_scrobble_outbox_status
+                   ON furumusic__lastfm_scrobble_outbox (status, created_at, id)",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE INDEX IF NOT EXISTS idx_lastfm_scrobble_outbox_user
+                   ON furumusic__lastfm_scrobble_outbox (user_id, status, created_at)",
+            )
+            .await?;
+        Ok(())
+    }
+
+    #[derive(Debug, Copy, Clone)]
+    pub struct M0033CreateLastfmScrobbling;
+
+    impl migrations::Migration for M0033CreateLastfmScrobbling {
+        const APP_NAME: &'static str = "furumusic";
+        const MIGRATION_NAME: &'static str = "m_0033_create_lastfm_scrobbling";
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
+                "furumusic",
+                "m_0032_create_lastfm_track_popularity",
+            )];
+        const OPERATIONS: &'static [Operation] =
+            &[Operation::custom(create_lastfm_scrobbling).build()];
+    }
+
     pub const MIGRATIONS: &[&SyncDynMigration] = &[
         &M0006CreateMediaFile,
         &M0007CreateArtist,
@@ -1715,5 +1792,6 @@ pub mod db_migrations {
         &M0030AddMediaFileUploader,
         &M0031CreateTorrentSession,
         &M0032CreateLastfmTrackPopularity,
+        &M0033CreateLastfmScrobbling,
     ];
 }

@@ -134,6 +134,7 @@ pub struct ConfigSources {
     pub agent_context_limit: ConfigSource,
     pub agent_concurrency: ConfigSource,
     pub lastfm_api_key: ConfigSource,
+    pub lastfm_shared_secret: ConfigSource,
 }
 
 impl Default for ConfigSources {
@@ -160,6 +161,7 @@ impl Default for ConfigSources {
             agent_context_limit: ConfigSource::Default,
             agent_concurrency: ConfigSource::Default,
             lastfm_api_key: ConfigSource::Default,
+            lastfm_shared_secret: ConfigSource::Default,
         }
     }
 }
@@ -266,6 +268,8 @@ pub struct AppConfig {
     pub agent_concurrency: u64,
     /// Last.fm API key for weekly popularity enrichment.
     pub lastfm_api_key: String,
+    /// Last.fm shared secret for authenticated scrobbling calls.
+    pub lastfm_shared_secret: String,
 }
 
 impl Default for AppConfig {
@@ -292,6 +296,7 @@ impl Default for AppConfig {
             agent_context_limit: 8192,
             agent_concurrency: 2,
             lastfm_api_key: String::new(),
+            lastfm_shared_secret: String::new(),
         }
     }
 }
@@ -319,6 +324,7 @@ impl_env_overrides!(
     agent_context_limit,
     agent_concurrency,
     lastfm_api_key,
+    lastfm_shared_secret,
 );
 
 impl AppConfig {
@@ -403,6 +409,7 @@ impl AppConfig {
         apply_db_field!(agent_context_limit);
         apply_db_field!(agent_concurrency);
         apply_db_field!(lastfm_api_key);
+        apply_db_field!(lastfm_shared_secret);
     }
 }
 

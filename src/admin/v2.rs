@@ -260,6 +260,8 @@ struct AdminSettingsDto {
     values: AdminSettingsValues,
     sources: AdminSettingsSources,
     lastfm_api_key_configured: bool,
+    lastfm_shared_secret_configured: bool,
+    lastfm_scrobbling_configured: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -274,6 +276,7 @@ struct AdminSettingsValues {
     oidc_user_groups: String,
     swagger_enabled: bool,
     lastfm_api_key: String,
+    lastfm_shared_secret: String,
     agent_enabled: bool,
     agent_inbox_dir: String,
     agent_storage_dir: String,
@@ -297,6 +300,7 @@ struct AdminSettingsSources {
     oidc_user_groups: &'static str,
     swagger_enabled: &'static str,
     lastfm_api_key: &'static str,
+    lastfm_shared_secret: &'static str,
     agent_enabled: &'static str,
     agent_inbox_dir: &'static str,
     agent_storage_dir: &'static str,
@@ -320,6 +324,7 @@ pub(super) struct UpdateSettingsRequest {
     oidc_user_groups: String,
     swagger_enabled: bool,
     lastfm_api_key: String,
+    lastfm_shared_secret: String,
     agent_enabled: bool,
     agent_inbox_dir: String,
     agent_storage_dir: String,
@@ -709,6 +714,10 @@ pub async fn update_settings(
         ("oidc_user_groups", body.oidc_user_groups.trim().to_string()),
         ("swagger_enabled", body.swagger_enabled.to_string()),
         ("lastfm_api_key", body.lastfm_api_key.trim().to_string()),
+        (
+            "lastfm_shared_secret",
+            body.lastfm_shared_secret.trim().to_string(),
+        ),
         ("agent_enabled", body.agent_enabled.to_string()),
         ("agent_inbox_dir", body.agent_inbox_dir.trim().to_string()),
         (
@@ -785,6 +794,9 @@ pub async fn settings_probe(
 fn settings_dto(config: AppConfig, sources: ConfigSources) -> AdminSettingsDto {
     AdminSettingsDto {
         lastfm_api_key_configured: !config.lastfm_api_key.trim().is_empty(),
+        lastfm_shared_secret_configured: !config.lastfm_shared_secret.trim().is_empty(),
+        lastfm_scrobbling_configured: !config.lastfm_api_key.trim().is_empty()
+            && !config.lastfm_shared_secret.trim().is_empty(),
         values: AdminSettingsValues {
             auth_password_enabled: config.auth_password_enabled,
             auth_sso_enabled: config.auth_sso_enabled,
@@ -796,6 +808,7 @@ fn settings_dto(config: AppConfig, sources: ConfigSources) -> AdminSettingsDto {
             oidc_user_groups: config.oidc_user_groups,
             swagger_enabled: config.swagger_enabled,
             lastfm_api_key: config.lastfm_api_key,
+            lastfm_shared_secret: config.lastfm_shared_secret,
             agent_enabled: config.agent_enabled,
             agent_inbox_dir: config.agent_inbox_dir,
             agent_storage_dir: config.agent_storage_dir,
@@ -817,6 +830,7 @@ fn settings_dto(config: AppConfig, sources: ConfigSources) -> AdminSettingsDto {
             oidc_user_groups: sources.oidc_user_groups.code(),
             swagger_enabled: sources.swagger_enabled.code(),
             lastfm_api_key: sources.lastfm_api_key.code(),
+            lastfm_shared_secret: sources.lastfm_shared_secret.code(),
             agent_enabled: sources.agent_enabled.code(),
             agent_inbox_dir: sources.agent_inbox_dir.code(),
             agent_storage_dir: sources.agent_storage_dir.code(),

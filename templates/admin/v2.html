@@ -1136,7 +1136,7 @@ tbody tr:hover {
             <button class="nav-btn" :class="{active: activeView === 'settings'}" @click="openSettings()">
                 <i data-lucide="settings"></i>
                 <span>Settings</span>
-                <span class="nav-count" x-text="settings.lastfm_api_key_configured ? 'ok' : ''"></span>
+                <span class="nav-count" x-text="settings.lastfm_scrobbling_configured ? 'ok' : ''"></span>
             </button>
         </div>
 
@@ -1734,7 +1734,7 @@ tbody tr:hover {
                                     <strong>API</strong>
                                     <span>Developer and enrichment integrations</span>
                                 </div>
-                                <span class="badge" :class="settings.lastfm_api_key_configured ? 'ok' : 'disabled'" x-text="settings.lastfm_api_key_configured ? 'Last.fm configured' : 'Last.fm missing'"></span>
+                                <span class="badge" :class="settings.lastfm_scrobbling_configured ? 'ok' : 'disabled'" x-text="settings.lastfm_scrobbling_configured ? 'Last.fm configured' : 'Last.fm missing'"></span>
                             </div>
                             <div class="settings-grid">
                                 <div class="setting-toggle">
@@ -1750,11 +1750,19 @@ tbody tr:hover {
                                 </div>
                                 <div class="setting-field">
                                     <label>
-                                        <span>Last.fm API key</span>
+                                        <span>{{ t.settings_lastfm_api_key }}</span>
                                         <span class="source-pill" :class="sourceClass('lastfm_api_key')" x-text="settingSource('lastfm_api_key')"></span>
                                     </label>
                                     <input type="password" x-model="settingsDraft.lastfm_api_key" autocomplete="off" />
-                                    <div class="setting-help">Used by the weekly Last.fm popularity task.</div>
+                                    <div class="setting-help">{{ t.settings_lastfm_api_key_help }}</div>
+                                </div>
+                                <div class="setting-field">
+                                    <label>
+                                        <span>{{ t.settings_lastfm_shared_secret }}</span>
+                                        <span class="source-pill" :class="sourceClass('lastfm_shared_secret')" x-text="settingSource('lastfm_shared_secret')"></span>
+                                    </label>
+                                    <input type="password" x-model="settingsDraft.lastfm_shared_secret" autocomplete="off" />
+                                    <div class="setting-help">{{ t.settings_lastfm_shared_secret_help }}</div>
                                 </div>
                             </div>
                         </section>
@@ -2093,7 +2101,7 @@ function adminV2() {
         editorArtistToAdd: '',
         editorDetail: null,
         editorDraft: { title: '', hidden: 'false', release_type: 'album', year: '', artist_ids: [] },
-        settings: { values: {}, sources: {}, lastfm_api_key_configured: false },
+        settings: { values: {}, sources: {}, lastfm_api_key_configured: false, lastfm_shared_secret_configured: false, lastfm_scrobbling_configured: false },
         settingsDraft: {
             auth_password_enabled: false,
             auth_sso_enabled: false,
@@ -2105,6 +2113,7 @@ function adminV2() {
             oidc_user_groups: '',
             swagger_enabled: false,
             lastfm_api_key: '',
+            lastfm_shared_secret: '',
             agent_enabled: false,
             agent_inbox_dir: '',
             agent_storage_dir: '',

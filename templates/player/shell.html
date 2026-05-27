@@ -38,6 +38,13 @@
                         <span class="user-stat-label">{{ t.player_listened }}</span>
                     </div>
                 </div>
+                <button class="lastfm-profile-action"
+                        :class="$store.user.lastfmClass()"
+                        :disabled="$store.user.lastfmBusy || !$store.user.lastfm?.configured"
+                        @click="$store.user.handleLastfm()">
+                    <span class="lastfm-dot"></span>
+                    <span class="lastfm-profile-text" x-text="$store.user.lastfmLabel()"></span>
+                </button>
             </div>
             <div class="sidebar-header">
                 <h2>{{ t.player_library }}</h2>
@@ -324,6 +331,13 @@
                             <span class="user-stat-label">{{ t.player_listened }}</span>
                         </div>
                     </div>
+                    <button class="lastfm-profile-action"
+                            :class="$store.user.lastfmClass()"
+                            :disabled="$store.user.lastfmBusy || !$store.user.lastfm?.configured"
+                            @click="$store.user.handleLastfm()">
+                        <span class="lastfm-dot"></span>
+                        <span class="lastfm-profile-text" x-text="$store.user.lastfmLabel()"></span>
+                    </button>
                     <button class="modal-btn modal-btn-primary mobile-account-logout"
                             @click="$store.user.logout()">
                         {{ t.player_log_out }}

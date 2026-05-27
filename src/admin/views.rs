@@ -184,6 +184,16 @@ fn config_display_entries(config: &AppConfig, sources: &ConfigSources) -> Vec<Co
             config.agent_concurrency.to_string(),
             defaults.agent_concurrency.to_string()
         ),
+        entry!(
+            lastfm_api_key,
+            config.lastfm_api_key.clone(),
+            defaults.lastfm_api_key.clone()
+        ),
+        entry!(
+            lastfm_shared_secret,
+            config.lastfm_shared_secret.clone(),
+            defaults.lastfm_shared_secret.clone()
+        ),
     ]
 }
 
@@ -258,6 +268,10 @@ struct SettingsTemplate {
     agent_context_limit_source: &'static str,
     agent_concurrency: String,
     agent_concurrency_source: &'static str,
+    lastfm_api_key: String,
+    lastfm_api_key_source: &'static str,
+    lastfm_shared_secret: String,
+    lastfm_shared_secret_source: &'static str,
 }
 
 pub async fn settings_handler(
@@ -310,6 +324,10 @@ pub async fn settings_handler(
         agent_context_limit_source: sources.agent_context_limit.code(),
         agent_concurrency: config.agent_concurrency.to_string(),
         agent_concurrency_source: sources.agent_concurrency.code(),
+        lastfm_api_key: config.lastfm_api_key.clone(),
+        lastfm_api_key_source: sources.lastfm_api_key.code(),
+        lastfm_shared_secret: config.lastfm_shared_secret.clone(),
+        lastfm_shared_secret_source: sources.lastfm_shared_secret.code(),
     };
     Ok(Html::new(template.render()?))
 }
@@ -334,6 +352,8 @@ pub struct OidcSettingsForm {
     agent_confidence_threshold: Option<String>,
     agent_context_limit: Option<String>,
     agent_concurrency: Option<String>,
+    lastfm_api_key: Option<String>,
+    lastfm_shared_secret: Option<String>,
 }
 
 pub async fn settings_submit(
@@ -380,7 +400,9 @@ pub async fn settings_submit(
             let agent_confidence_threshold = data.agent_confidence_threshold.unwrap_or_default();
             let agent_context_limit = data.agent_context_limit.unwrap_or_default();
             let agent_concurrency = data.agent_concurrency.unwrap_or_default();
-            let fields: [(&str, &str); 18] = [
+            let lastfm_api_key = data.lastfm_api_key.unwrap_or_default();
+            let lastfm_shared_secret = data.lastfm_shared_secret.unwrap_or_default();
+            let fields: [(&str, &str); 20] = [
                 ("auth_password_enabled", pw_enabled),
                 ("auth_sso_enabled", sso_enabled),
                 ("oidc_button_text", &oidc_button_text),
@@ -399,6 +421,8 @@ pub async fn settings_submit(
                 ("agent_confidence_threshold", &agent_confidence_threshold),
                 ("agent_context_limit", &agent_context_limit),
                 ("agent_concurrency", &agent_concurrency),
+                ("lastfm_api_key", &lastfm_api_key),
+                ("lastfm_shared_secret", &lastfm_shared_secret),
             ];
             for (key, value) in fields {
                 let mut entry = ConfigEntry::new(key.to_owned(), value.to_owned());

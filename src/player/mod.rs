@@ -16,6 +16,7 @@ use cot::{App, Body, Template};
 use crate::auth;
 use crate::config::AppConfig;
 use crate::i18n::Translations;
+use crate::lastfm::{LastfmClient, LastfmCredentials, LastfmTrackPayload};
 use crate::scheduler::SchedulerHandle;
 use crate::torrents::{TorrentPreviewRequest, TorrentService, TorrentStartRequest};
 
@@ -47,6 +48,36 @@ struct LocalUploadResponse {
     ok: bool,
     filename: String,
     size: u64,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct LastfmAccountApiRow {
+    session_key: String,
+    reauth_required: bool,
+    last_error: Option<String>,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct LastfmStatusRow {
+    username: String,
+    reauth_required: bool,
+    last_error: Option<String>,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct LastfmTrackMetaRow {
+    title: String,
+    duration_seconds: f64,
+    track_number: Option<i32>,
+    album_title: Option<String>,
+    artist_name: Option<String>,
+    album_artist_name: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct LastfmCallbackQuery {
+    token: Option<String>,
+    state: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -110,6 +141,493 @@ async fn me_handler(
             plays: plays.0,
             listened_minutes: listened_seconds.unwrap_or(0) / 60,
         },
+    })
+    .into_response()
+}
+
+// ---------------------------------------------------------------------------
+// Last.fm account + scrobbling
+// ---------------------------------------------------------------------------
+
+fn redirect_response(location: &str) -> cot::response::Response {
+    cot::http::Response::builder()
+        .status(StatusCode::SEE_OTHER)
+        .header(cot::http::header::LOCATION, location)
+        .body(Body::fixed(""))
+        .expect("valid response")
+}
+
+fn request_origin(request: &cot::request::Request) -> Option<String> {
+    let headers = request.headers();
+    let host = headers
+        .get("x-forwarded-host")
+        .or_else(|| headers.get("host"))?
+        .to_str()
+        .ok()?;
+    let proto = headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("http");
+    Some(format!("{proto}://{host}"))
+}
+
+async fn lastfm_status_handler(
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    let (config, _) = AppConfig::load_with_db(&db).await;
+    let configured = crate::lastfm::is_configured(&config);
+    let account = sqlx::query_as::<_, LastfmStatusRow>(
+        r#"SELECT lastfm_username::text AS username,
+                  reauth_required,
+                  last_error::text AS last_error
+             FROM furumusic__lastfm_account
+            WHERE user_id = $1"#,
+    )
+    .bind(user.id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    Json(LastfmStatus {
+        configured,
+        connected: account.is_some(),
+        username: account.as_ref().map(|row| row.username.clone()),
+        reauth_required: account
+            .as_ref()
+            .map(|row| row.reauth_required)
+            .unwrap_or(false),
+        last_error: account.and_then(|row| row.last_error),
+    })
+    .into_response()
+}
+
+async fn lastfm_connect_handler(
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+    request: cot::request::Request,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(redirect_response("/login"));
+    };
+    let (config, _) = AppConfig::load_with_db(&db).await;
+    let Some(credentials) = LastfmCredentials::from_config(&config) else {
+        return Ok(redirect_response("/?lastfm=not_configured"));
+    };
+    let Some(origin) = request_origin(&request) else {
+        return Ok(redirect_response("/?lastfm=bad_origin"));
+    };
+
+    let state = uuid::Uuid::new_v4().simple().to_string();
+    let now = chrono::Utc::now();
+    let stale = (now - chrono::Duration::hours(1))
+        .format("%Y-%m-%dT%H:%M:%SZ")
+        .to_string();
+    sqlx::query("DELETE FROM furumusic__lastfm_auth_state WHERE created_at < $1")
+        .bind(stale)
+        .execute(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    sqlx::query(
+        r#"INSERT INTO furumusic__lastfm_auth_state (state, user_id, created_at)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (state) DO NOTHING"#,
+    )
+    .bind(&state)
+    .bind(user.id)
+    .bind(now.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+    .execute(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    let callback = format!("{origin}/api/player/lastfm/callback?state={state}");
+    let mut url = reqwest::Url::parse("https://www.last.fm/api/auth/")
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    url.query_pairs_mut()
+        .append_pair("api_key", credentials.api_key())
+        .append_pair("cb", &callback);
+    Ok(redirect_response(url.as_str()))
+}
+
+async fn lastfm_callback_handler(
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+    query: cot::request::extractors::UrlQuery<LastfmCallbackQuery>,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(redirect_response("/login"));
+    };
+    let Some(token) = query
+        .0
+        .token
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    else {
+        return Ok(redirect_response("/?lastfm=missing_token"));
+    };
+    let Some(state) = query
+        .0
+        .state
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    else {
+        return Ok(redirect_response("/?lastfm=missing_state"));
+    };
+
+    let state_user_id = sqlx::query_scalar::<_, i64>(
+        "SELECT user_id FROM furumusic__lastfm_auth_state WHERE state = $1",
+    )
+    .bind(state)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    if state_user_id != Some(user.id) {
+        return Ok(redirect_response("/?lastfm=bad_state"));
+    }
+    sqlx::query("DELETE FROM furumusic__lastfm_auth_state WHERE state = $1")
+        .bind(state)
+        .execute(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    let (config, _) = AppConfig::load_with_db(&db).await;
+    let Some(credentials) = LastfmCredentials::from_config(&config) else {
+        return Ok(redirect_response("/?lastfm=not_configured"));
+    };
+    let client = LastfmClient::new(credentials).map_err(|e| cot::Error::internal(e.to_string()))?;
+    match client.get_session(token).await {
+        Ok(lastfm_session) => {
+            let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+            sqlx::query(
+                r#"INSERT INTO furumusic__lastfm_account
+                      (user_id, lastfm_username, session_key, connected_at, updated_at, last_error, reauth_required)
+                   VALUES ($1, $2, $3, $4, $4, NULL, false)
+                   ON CONFLICT (user_id) DO UPDATE SET
+                      lastfm_username = EXCLUDED.lastfm_username,
+                      session_key = EXCLUDED.session_key,
+                      updated_at = EXCLUDED.updated_at,
+                      last_error = NULL,
+                      reauth_required = false"#,
+            )
+            .bind(user.id)
+            .bind(&lastfm_session.username)
+            .bind(&lastfm_session.session_key)
+            .bind(&now)
+            .execute(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
+            Ok(redirect_response("/?lastfm=connected"))
+        }
+        Err(err) => {
+            tracing::warn!("Last.fm auth failed for user {}: {err}", user.id);
+            Ok(redirect_response("/?lastfm=auth_failed"))
+        }
+    }
+}
+
+async fn lastfm_disconnect_handler(
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    sqlx::query("DELETE FROM furumusic__lastfm_account WHERE user_id = $1")
+        .bind(user.id)
+        .execute(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    sqlx::query(
+        r#"UPDATE furumusic__lastfm_scrobble_outbox
+              SET status = 'blocked',
+                  last_error = 'Last.fm account disconnected',
+                  updated_at = $2
+            WHERE user_id = $1 AND status IN ('pending', 'retry')"#,
+    )
+    .bind(user.id)
+    .bind(now)
+    .execute(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    Json(serde_json::json!({"ok": true})).into_response()
+}
+
+async fn load_lastfm_account(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+) -> cot::Result<Option<LastfmAccountApiRow>> {
+    sqlx::query_as::<_, LastfmAccountApiRow>(
+        r#"SELECT session_key::text AS session_key,
+                  reauth_required,
+                  last_error::text AS last_error
+             FROM furumusic__lastfm_account
+            WHERE user_id = $1"#,
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))
+}
+
+async fn load_lastfm_track_payload(
+    pool: &sqlx::PgPool,
+    track_id: i64,
+) -> cot::Result<Option<LastfmTrackPayload>> {
+    let row = sqlx::query_as::<_, LastfmTrackMetaRow>(
+        r#"SELECT t.title::text AS title,
+                  t.duration_seconds,
+                  t.track_number,
+                  r.title::text AS album_title,
+                  (
+                    SELECT a.name::text
+                      FROM furumusic__track_artist ta
+                      JOIN furumusic__artist a ON a.id = ta.artist_id
+                     WHERE ta.track_id = t.id AND ta.role <> 'featuring'
+                     ORDER BY ta.position
+                     LIMIT 1
+                  ) AS artist_name,
+                  (
+                    SELECT a.name::text
+                      FROM furumusic__release_artist ra
+                      JOIN furumusic__artist a ON a.id = ra.artist_id
+                     WHERE ra.release_id = r.id
+                     ORDER BY ra.position
+                     LIMIT 1
+                  ) AS album_artist_name
+             FROM furumusic__track t
+             LEFT JOIN furumusic__release r ON r.id = t.release_id
+            WHERE t.id = $1 AND t.is_hidden = false"#,
+    )
+    .bind(track_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    Ok(row.and_then(|row| {
+        let artist = row
+            .artist_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())?
+            .to_string();
+        Some(LastfmTrackPayload {
+            artist,
+            track: row.title,
+            album: row
+                .album_title
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            album_artist: row
+                .album_artist_name
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            track_number: row.track_number,
+            duration_seconds: Some(row.duration_seconds.round() as i32),
+        })
+    }))
+}
+
+async fn update_lastfm_account_error(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+    error: &str,
+    reauth_required: bool,
+) -> cot::Result<()> {
+    sqlx::query(
+        r#"UPDATE furumusic__lastfm_account
+              SET last_error = $2,
+                  reauth_required = $3,
+                  updated_at = $4
+            WHERE user_id = $1"#,
+    )
+    .bind(user_id)
+    .bind(error)
+    .bind(reauth_required)
+    .bind(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string())
+    .execute(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    Ok(())
+}
+
+async fn lastfm_now_playing_handler(
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+    Json(entry): Json<LastfmNowPlayingRequest>,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    let (config, _) = AppConfig::load_with_db(&db).await;
+    let Some(credentials) = LastfmCredentials::from_config(&config) else {
+        return Json(LastfmActionResponse {
+            ok: false,
+            queued: false,
+            sent: false,
+            message: Some("Last.fm is not configured".to_string()),
+        })
+        .into_response();
+    };
+    let Some(account) = load_lastfm_account(pool, user.id).await? else {
+        return Json(LastfmActionResponse {
+            ok: false,
+            queued: false,
+            sent: false,
+            message: Some("Last.fm account is not connected".to_string()),
+        })
+        .into_response();
+    };
+    if account.reauth_required {
+        return Json(LastfmActionResponse {
+            ok: false,
+            queued: false,
+            sent: false,
+            message: account.last_error,
+        })
+        .into_response();
+    }
+    let Some(track) = load_lastfm_track_payload(pool, entry.track_id).await? else {
+        return Json(LastfmActionResponse {
+            ok: false,
+            queued: false,
+            sent: false,
+            message: Some("Track has no primary artist for Last.fm".to_string()),
+        })
+        .into_response();
+    };
+    let client = LastfmClient::new(credentials).map_err(|e| cot::Error::internal(e.to_string()))?;
+    match client
+        .update_now_playing(&account.session_key, &track)
+        .await
+    {
+        Ok(()) => Json(LastfmActionResponse {
+            ok: true,
+            queued: false,
+            sent: true,
+            message: None,
+        })
+        .into_response(),
+        Err(err) => {
+            let reauth_required = err.is_invalid_session();
+            update_lastfm_account_error(pool, user.id, &err.to_string(), reauth_required).await?;
+            Json(LastfmActionResponse {
+                ok: false,
+                queued: false,
+                sent: false,
+                message: Some(err.to_string()),
+            })
+            .into_response()
+        }
+    }
+}
+
+async fn lastfm_scrobble_handler(
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+    Json(entry): Json<LastfmScrobbleRequest>,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    let (config, _) = AppConfig::load_with_db(&db).await;
+    if !crate::lastfm::is_configured(&config) {
+        return Json(LastfmActionResponse {
+            ok: false,
+            queued: false,
+            sent: false,
+            message: Some("Last.fm is not configured".to_string()),
+        })
+        .into_response();
+    }
+    if load_lastfm_account(pool, user.id).await?.is_none() {
+        return Json(LastfmActionResponse {
+            ok: false,
+            queued: false,
+            sent: false,
+            message: Some("Last.fm account is not connected".to_string()),
+        })
+        .into_response();
+    }
+    let Some(track) = load_lastfm_track_payload(pool, entry.track_id).await? else {
+        return Json(LastfmActionResponse {
+            ok: false,
+            queued: false,
+            sent: false,
+            message: Some("Track has no primary artist for Last.fm".to_string()),
+        })
+        .into_response();
+    };
+    let duration_seconds = track.duration_seconds.unwrap_or(0).max(0);
+    if duration_seconds <= 30 {
+        return Json(LastfmActionResponse {
+            ok: false,
+            queued: false,
+            sent: false,
+            message: Some("Track is too short to scrobble".to_string()),
+        })
+        .into_response();
+    }
+    let threshold = ((duration_seconds as f64 / 2.0).min(240.0)).ceil() as i32;
+    let listened_seconds = entry.listened_seconds.max(0);
+    if listened_seconds < threshold {
+        return Json(LastfmActionResponse {
+            ok: false,
+            queued: false,
+            sent: false,
+            message: Some("Scrobble threshold has not been reached".to_string()),
+        })
+        .into_response();
+    }
+
+    let now_ts = chrono::Utc::now().timestamp();
+    let started_at = entry
+        .started_at
+        .unwrap_or(now_ts - listened_seconds as i64)
+        .min(now_ts);
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let dedupe_key = format!("{}:{}:{}", user.id, entry.track_id, started_at);
+    sqlx::query(
+        r#"INSERT INTO furumusic__lastfm_scrobble_outbox
+              (user_id, track_id, started_at, listened_seconds, duration_seconds, status, created_at, updated_at, dedupe_key)
+           VALUES ($1, $2, $3, $4, $5, 'pending', $6, $6, $7)
+           ON CONFLICT (dedupe_key) DO NOTHING"#,
+    )
+    .bind(user.id)
+    .bind(entry.track_id)
+    .bind(started_at)
+    .bind(listened_seconds)
+    .bind(duration_seconds)
+    .bind(&now)
+    .bind(&dedupe_key)
+    .execute(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    let sent =
+        match crate::lastfm::process_pending_scrobbles(pool, &config, Some(user.id), 10).await {
+            Ok(summary) => summary.sent > 0,
+            Err(err) => {
+                tracing::warn!("Last.fm immediate scrobble send failed: {err:#}");
+                false
+            }
+        };
+    Json(LastfmActionResponse {
+        ok: true,
+        queued: true,
+        sent,
+        message: None,
     })
     .into_response()
 }
@@ -2436,6 +2954,152 @@ impl App for PlayerApp {
                     })
                 },
                 "player_me",
+            ),
+            Route::with_handler_and_name(
+                "/lastfm/status",
+                get({
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    move |session: Session, db: Database| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            lastfm_status_handler(session, db, pg_pool).await
+                        }
+                    }
+                }),
+                "player_lastfm_status",
+            ),
+            Route::with_handler_and_name(
+                "/lastfm/connect",
+                get({
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    move |session: Session, db: Database, request: cot::request::Request| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            lastfm_connect_handler(session, db, pg_pool, request).await
+                        }
+                    }
+                }),
+                "player_lastfm_connect",
+            ),
+            Route::with_handler_and_name(
+                "/lastfm/callback",
+                get({
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    move |session: Session,
+                          db: Database,
+                          query: cot::request::extractors::UrlQuery<LastfmCallbackQuery>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            lastfm_callback_handler(session, db, pg_pool, query).await
+                        }
+                    }
+                }),
+                "player_lastfm_callback",
+            ),
+            Route::with_handler_and_name(
+                "/lastfm/disconnect",
+                post({
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    move |session: Session, db: Database| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            lastfm_disconnect_handler(session, db, pg_pool).await
+                        }
+                    }
+                }),
+                "player_lastfm_disconnect",
+            ),
+            Route::with_handler_and_name(
+                "/lastfm/now-playing",
+                post({
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    move |session: Session, db: Database, json: Json<LastfmNowPlayingRequest>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            lastfm_now_playing_handler(session, db, pg_pool, json).await
+                        }
+                    }
+                }),
+                "player_lastfm_now_playing",
+            ),
+            Route::with_handler_and_name(
+                "/lastfm/scrobble",
+                post({
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    move |session: Session, db: Database, json: Json<LastfmScrobbleRequest>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            lastfm_scrobble_handler(session, db, pg_pool, json).await
+                        }
+                    }
+                }),
+                "player_lastfm_scrobble",
             ),
             Route::with_handler_and_name(
                 "/agent-queue",

@@ -30,6 +30,14 @@ const T = {
     lastfmPlaycount: "{{ t.player_lastfm_playcount }}",
     lastfmUpdated: "{{ t.player_lastfm_updated }}",
     lastfmNotLoaded: "{{ t.player_lastfm_not_loaded }}",
+    lastfmProfile: "{{ t.player_lastfm_profile }}",
+    lastfmConnect: "{{ t.player_lastfm_connect }}",
+    lastfmConnected: "{{ t.player_lastfm_connected }}",
+    lastfmReconnect: "{{ t.player_lastfm_reconnect }}",
+    lastfmNotConfigured: "{{ t.player_lastfm_not_configured }}",
+    lastfmDisconnectConfirm: "{{ t.player_lastfm_disconnect_confirm }}",
+    lastfmConnectFailed: "{{ t.player_lastfm_connect_failed }}",
+    lastfmDisconnectFailed: "{{ t.player_lastfm_disconnect_failed }}",
     trackWord: "{{ t.player_tracks_count }}",
     clientIdle: "{{ t.player_client_idle }}",
     active: "{{ t.player_active }}",
@@ -162,9 +170,12 @@ document.addEventListener('alpine:init', () => {
     Alpine.store('user', {
         profile: null,
         menuOpen: false,
+        lastfm: { configured: false, connected: false, username: null, reauth_required: false, last_error: null },
+        lastfmBusy: false,
 
         init() {
             this.load();
+            this.loadLastfm();
         },
 
         async load() {
@@ -174,6 +185,56 @@ document.addEventListener('alpine:init', () => {
                 this.profile = await res.json();
             } catch {
                 this.profile = null;
+            }
+        },
+
+        async loadLastfm() {
+            try {
+                const res = await fetch('/api/player/lastfm/status');
+                if (!res.ok) throw new Error('failed');
+                this.lastfm = await res.json();
+                const player = Alpine.store('player');
+                if (player?.isPlaying) player._sendNowPlaying();
+            } catch {
+                this.lastfm = { configured: false, connected: false, username: null, reauth_required: false, last_error: null };
+            }
+        },
+
+        lastfmLabel() {
+            if (!this.lastfm?.configured) return T.lastfmNotConfigured;
+            if (this.lastfm?.connected && this.lastfm?.reauth_required) return T.lastfmReconnect;
+            if (this.lastfm?.connected) {
+                const user = this.lastfm.username || T.unknown;
+                return T.lastfmConnected.replace('{user}', user);
+            }
+            return T.lastfmConnect;
+        },
+
+        lastfmClass() {
+            if (!this.lastfm?.configured) return 'not-configured';
+            if (this.lastfm?.connected && this.lastfm?.reauth_required) return 'needs-auth';
+            if (this.lastfm?.connected) return 'connected';
+            return 'available';
+        },
+
+        async handleLastfm() {
+            if (this.lastfmBusy) return;
+            if (!this.lastfm?.configured) return;
+            if (!this.lastfm?.connected || this.lastfm?.reauth_required) {
+                window.location.href = '/api/player/lastfm/connect';
+                return;
+            }
+            const user = this.lastfm.username || T.unknown;
+            if (!window.confirm(T.lastfmDisconnectConfirm.replace('{user}', user))) return;
+            this.lastfmBusy = true;
+            try {
+                const res = await fetch('/api/player/lastfm/disconnect', { method: 'POST' });
+                if (!res.ok) throw new Error(T.lastfmDisconnectFailed);
+                await this.loadLastfm();
+            } catch {
+                alert(T.lastfmDisconnectFailed);
+            } finally {
+                this.lastfmBusy = false;
             }
         },
 
@@ -294,6 +355,11 @@ document.addEventListener('alpine:init', () => {
         progress: 0,
         _saveTimer: null,
         _historyRecorded: false,
+        _nowPlayingSent: false,
+        _scrobbleSent: false,
+        _playbackStartedAt: null,
+        _listenedSeconds: 0,
+        _lastAudioTime: 0,
 
         init() {
             audio.volume = this.volume;
@@ -302,6 +368,8 @@ document.addEventListener('alpine:init', () => {
                 this.currentTime = audio.currentTime;
                 this.duration = audio.duration || 0;
                 this.progress = this.duration > 0 ? (this.currentTime / this.duration) * 100 : 0;
+                this._trackListenedDelta();
+                this._maybeScrobble();
             });
 
             audio.addEventListener('ended', () => {
@@ -309,8 +377,16 @@ document.addEventListener('alpine:init', () => {
                 this.next();
             });
 
-            audio.addEventListener('play', () => { this.isPlaying = true; });
-            audio.addEventListener('pause', () => { this.isPlaying = false; });
+            audio.addEventListener('play', () => {
+                this.isPlaying = true;
+                if (!this._playbackStartedAt) this._playbackStartedAt = Math.floor(Date.now() / 1000);
+                this._lastAudioTime = audio.currentTime || 0;
+                this._sendNowPlaying();
+            });
+            audio.addEventListener('pause', () => {
+                this.isPlaying = false;
+                this._lastAudioTime = audio.currentTime || 0;
+            });
 
             audio.addEventListener('loadedmetadata', () => {
                 this.duration = audio.duration || 0;
@@ -333,6 +409,7 @@ document.addEventListener('alpine:init', () => {
         play(track) {
             this.currentTrack = track;
             this._historyRecorded = false;
+            this._resetPlaybackTracking();
             audio.src = track.stream_url;
             audio.play().catch(() => {});
             this._updateMediaSession();
@@ -349,11 +426,13 @@ document.addEventListener('alpine:init', () => {
 
         seek(time) {
             audio.currentTime = time;
+            this._lastAudioTime = audio.currentTime || 0;
         },
 
         seekRelative(delta) {
             if (!this.currentTrack) return;
             audio.currentTime = Math.max(0, Math.min(audio.duration || 0, audio.currentTime + delta));
+            this._lastAudioTime = audio.currentTime || 0;
         },
 
         seekFromClick(event) {
@@ -541,6 +620,7 @@ document.addEventListener('alpine:init', () => {
                                 if (currentTrack) {
                                     this.currentTrack = currentTrack;
                                     this._historyRecorded = false;
+                                    this._resetPlaybackTracking();
                                     audio.src = currentTrack.stream_url;
                                     // Seek to saved position once metadata is loaded
                                     const seekMs = state.position_ms || 0;
@@ -572,6 +652,68 @@ document.addEventListener('alpine:init', () => {
                     completed: completed,
                 }),
             }).catch(() => {});
+        },
+
+        _resetPlaybackTracking() {
+            this._nowPlayingSent = false;
+            this._scrobbleSent = false;
+            this._playbackStartedAt = null;
+            this._listenedSeconds = 0;
+            this._lastAudioTime = 0;
+        },
+
+        _trackListenedDelta() {
+            if (!this.currentTrack) return;
+            const current = audio.currentTime || 0;
+            if (!this.isPlaying) {
+                this._lastAudioTime = current;
+                return;
+            }
+            const previous = Number.isFinite(this._lastAudioTime) ? this._lastAudioTime : current;
+            const delta = current - previous;
+            if (delta > 0 && delta < 5) {
+                this._listenedSeconds += delta;
+            }
+            this._lastAudioTime = current;
+        },
+
+        _sendNowPlaying() {
+            if (this._nowPlayingSent || !this.currentTrack) return;
+            const lastfm = Alpine.store('user')?.lastfm;
+            if (!lastfm?.configured || !lastfm?.connected || lastfm?.reauth_required) return;
+            this._nowPlayingSent = true;
+            fetch('/api/player/lastfm/now-playing', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ track_id: this.currentTrack.id }),
+            }).catch(() => {});
+        },
+
+        _maybeScrobble() {
+            if (this._scrobbleSent || !this.currentTrack) return;
+            const lastfm = Alpine.store('user')?.lastfm;
+            if (!lastfm?.configured || !lastfm?.connected || lastfm?.reauth_required) return;
+            const duration = Number(this.duration || audio.duration || this.currentTrack.duration_seconds || 0);
+            if (!duration || duration <= 30) return;
+            const threshold = Math.min(duration / 2, 240);
+            if (this._listenedSeconds < threshold) return;
+            this._sendScrobble();
+        },
+
+        _sendScrobble() {
+            if (this._scrobbleSent || !this.currentTrack) return;
+            this._scrobbleSent = true;
+            fetch('/api/player/lastfm/scrobble', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    track_id: this.currentTrack.id,
+                    started_at: this._playbackStartedAt || Math.floor(Date.now() / 1000),
+                    listened_seconds: Math.floor(this._listenedSeconds),
+                }),
+            }).catch(() => {
+                this._scrobbleSent = false;
+            });
         },
     });
 

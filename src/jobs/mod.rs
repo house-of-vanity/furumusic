@@ -5,6 +5,7 @@ pub mod cover_variant_backfill;
 pub mod inbox_discover;
 pub mod inbox_process;
 pub mod lastfm_popularity;
+pub mod lastfm_scrobble;
 pub mod metadata_backfill;
 
 use std::path::{Component, Path, PathBuf};

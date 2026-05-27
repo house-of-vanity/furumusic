@@ -95,6 +95,10 @@ translations! {
     settings_api:             "API"                           , "API";
     settings_swagger:         "Swagger UI"                    , "Swagger UI";
     settings_swagger_help:    "Serves interactive API docs at /swagger/ (requires restart)" , "Интерактивная документация API на /swagger/ (требуется перезапуск)";
+    settings_lastfm_api_key:  "Last.fm API key"               , "API ключ Last.fm";
+    settings_lastfm_api_key_help: "Used for Last.fm popularity and account connection" , "Используется для популярности Last.fm и подключения аккаунта";
+    settings_lastfm_shared_secret: "Last.fm shared secret"    , "Shared secret Last.fm";
+    settings_lastfm_shared_secret_help: "Required for signed Last.fm scrobbling requests" , "Нужен для подписанных запросов скробблинга Last.fm";
 
     // OIDC login errors
     login_oidc_error:         "SSO login failed. Please try again." , "Ошибка входа через SSO. Попробуйте ещё раз.";
@@ -327,6 +331,14 @@ translations! {
     player_lastfm_playcount: "Last.fm plays"                   , "Прослушивания Last.fm";
     player_lastfm_updated:   "Last.fm updated"                 , "Last.fm обновлён";
     player_lastfm_not_loaded: "not loaded yet"                 , "ещё не загружено";
+    player_lastfm_profile:   "Last.fm"                         , "Last.fm";
+    player_lastfm_connect:   "Connect Last.fm"                 , "Подключить Last.fm";
+    player_lastfm_connected: "Connected as {user}"             , "Подключён: {user}";
+    player_lastfm_reconnect: "Reconnect Last.fm"               , "Переподключить Last.fm";
+    player_lastfm_not_configured: "Last.fm is not configured"  , "Last.fm не настроен";
+    player_lastfm_disconnect_confirm: "Disconnect Last.fm account {user}?" , "Отвязать аккаунт Last.fm {user}?";
+    player_lastfm_connect_failed: "Could not open Last.fm connection" , "Не удалось открыть подключение Last.fm";
+    player_lastfm_disconnect_failed: "Could not disconnect Last.fm" , "Не удалось отвязать Last.fm";
     player_play:             "Play"                            , "Играть";
     player_like:             "Like"                            , "Лайк";
     player_add_to_queue:     "Add to queue"                    , "Добавить в очередь";

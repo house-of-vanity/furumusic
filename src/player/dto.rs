@@ -173,6 +173,35 @@ pub(super) struct UserProfile {
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
+pub(super) struct LastfmStatus {
+    pub(super) configured: bool,
+    pub(super) connected: bool,
+    pub(super) username: Option<String>,
+    pub(super) reauth_required: bool,
+    pub(super) last_error: Option<String>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub(super) struct LastfmActionResponse {
+    pub(super) ok: bool,
+    pub(super) queued: bool,
+    pub(super) sent: bool,
+    pub(super) message: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(super) struct LastfmNowPlayingRequest {
+    pub(super) track_id: i64,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(super) struct LastfmScrobbleRequest {
+    pub(super) track_id: i64,
+    pub(super) started_at: Option<i64>,
+    pub(super) listened_seconds: i32,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
 pub(super) struct AgentQueueStatus {
     pub(super) queued_count: i64,
     pub(super) processing_count: i64,

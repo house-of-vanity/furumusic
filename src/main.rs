@@ -5,6 +5,7 @@ mod auth;
 mod config;
 mod i18n;
 mod jobs;
+mod lastfm;
 mod music;
 mod oidc;
 mod player;
@@ -55,6 +56,7 @@ fn build_registry() -> Arc<JobRegistry> {
     registry.register(jobs::cover_variant_backfill::CoverVariantBackfillJob);
     registry.register(jobs::metadata_backfill::MetadataBackfillJob);
     registry.register(jobs::lastfm_popularity::LastfmPopularityJob);
+    registry.register(jobs::lastfm_scrobble::LastfmScrobbleJob);
     Arc::new(registry)
 }
 

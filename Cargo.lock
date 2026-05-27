@@ -1430,6 +1430,7 @@ dependencies = [
  "id3",
  "image",
  "librqbit",
+ "md-5",
  "openidconnect",
  "reqwest",
  "schemars 0.9.0",

@@ -85,6 +85,16 @@
     <td><input type="checkbox" name="swagger_enabled" id="swagger_enabled" value="on"{% if swagger_enabled %} checked{% endif %}></td>
     <td><span class="badge badge-{{ swagger_enabled_source }}">{{ swagger_enabled_source }}</span></td>
   </tr>
+  <tr>
+    <td><label for="lastfm_api_key">{{ t.settings_lastfm_api_key }}</label><br><span style="font-size:.75rem;color:#999;">{{ t.settings_lastfm_api_key_help }}</span></td>
+    <td><input type="password" name="lastfm_api_key" id="lastfm_api_key" value="{{ lastfm_api_key }}"></td>
+    <td><span class="badge badge-{{ lastfm_api_key_source }}">{{ lastfm_api_key_source }}</span></td>
+  </tr>
+  <tr>
+    <td><label for="lastfm_shared_secret">{{ t.settings_lastfm_shared_secret }}</label><br><span style="font-size:.75rem;color:#999;">{{ t.settings_lastfm_shared_secret_help }}</span></td>
+    <td><input type="password" name="lastfm_shared_secret" id="lastfm_shared_secret" value="{{ lastfm_shared_secret }}"></td>
+    <td><span class="badge badge-{{ lastfm_shared_secret_source }}">{{ lastfm_shared_secret_source }}</span></td>
+  </tr>
 </table>
 
 <h2>{{ t.settings_agent }}</h2>
