@@ -798,16 +798,29 @@ pub async fn finalize_approved(
         )
         .await?
         {
-            mover::MoveOutcome::Moved(p) => p.to_string_lossy().to_string(),
-            mover::MoveOutcome::Merged(p) => p.to_string_lossy().to_string(),
+            mover::MoveOutcome::Moved(p) | mover::MoveOutcome::Merged(p) => {
+                crate::media_paths::media_file_path_for_storage(storage_dir_str, &p).ok_or_else(
+                    || {
+                        anyhow::anyhow!(
+                            "storage destination is outside agent_storage_dir: {}",
+                            p.display()
+                        )
+                    },
+                )?
+            }
         }
     } else {
-        storage_dir
+        let expected_path = storage_dir
             .join(sanitize_filename(artist_name))
             .join(sanitize_filename(release_title))
-            .join(&dest_filename)
-            .to_string_lossy()
-            .to_string()
+            .join(&dest_filename);
+        crate::media_paths::media_file_path_for_storage(storage_dir_str, &expected_path)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "storage destination is outside agent_storage_dir: {}",
+                    expected_path.display()
+                )
+            })?
     };
 
     let media_file = MediaFile::create(

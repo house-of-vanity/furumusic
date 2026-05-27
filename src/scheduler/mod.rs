@@ -1471,6 +1471,17 @@ pub async fn start_scheduler(
         Err(e) => tracing::error!("Failed to recover stale reviews: {e}"),
     }
 
+    let (live_config, _) = AppConfig::load_with_db(&db).await;
+    if !live_config.agent_storage_dir.trim().is_empty() {
+        match crate::media_paths::normalize_media_file_paths(&pool, &live_config.agent_storage_dir)
+            .await
+        {
+            Ok(0) => {}
+            Ok(n) => tracing::info!("Normalized {n} media file path(s) to relative storage paths"),
+            Err(e) => tracing::warn!("Failed to normalize media file paths: {e:#}"),
+        }
+    }
+
     // Upsert ScheduledJob rows
     for job in registry.all_jobs() {
         ScheduledJob::upsert(&db, job.name(), job.description(), job.default_cron())

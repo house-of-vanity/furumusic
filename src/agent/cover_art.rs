@@ -338,12 +338,7 @@ pub async fn save_cover_to_storage(
         .fetch_optional(pool)
         .await?
         {
-            let path = PathBuf::from(&file_path);
-            let path = if path.is_absolute() {
-                path
-            } else {
-                Path::new(storage_dir).join(path)
-            };
+            let path = crate::media_paths::resolve_media_file_path(storage_dir, &file_path);
             if let Err(err) = crate::agent::cover_variants::ensure_cover_variants(&path).await {
                 tracing::warn!(media_file_id = id, error = %err, "Failed to generate cover variants");
             }
@@ -365,7 +360,13 @@ pub async fn save_cover_to_storage(
     // Write image data
     tokio::fs::write(&dest_path, &cover.data).await?;
 
-    let relative_path = dest_path.to_string_lossy().to_string();
+    let relative_path = crate::media_paths::media_file_path_for_storage(storage_dir, &dest_path)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "cover destination is outside agent_storage_dir: {}",
+                dest_path.display()
+            )
+        })?;
     let file_size = cover.data.len() as i64;
 
     let media_file = crate::music::MediaFile::create(

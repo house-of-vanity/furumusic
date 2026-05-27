@@ -1242,7 +1242,7 @@ fn validate_selection(files: &[TorrentFileDto], selected_files: &[usize]) -> any
 
 fn validate_inbox_dir(inbox_dir: &str) -> anyhow::Result<PathBuf> {
     let trimmed = inbox_dir.trim();
-    let path = PathBuf::from(trimmed);
+    let path = crate::media_paths::resolve_config_path_buf(trimmed);
     if !path.is_absolute() {
         bail!(
             "agent_inbox_dir must be an absolute path for this host, got `{}`",

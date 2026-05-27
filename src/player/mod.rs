@@ -217,10 +217,10 @@ async fn lastfm_connect_handler(
     };
     let (config, _) = AppConfig::load_with_db(&db).await;
     let Some(credentials) = LastfmCredentials::from_config(&config) else {
-        return Ok(redirect_response("/?lastfm=not_configured"));
+        return Ok(redirect_response("/"));
     };
     let Some(origin) = request_origin(&request) else {
-        return Ok(redirect_response("/?lastfm=bad_origin"));
+        return Ok(redirect_response("/"));
     };
 
     let state = uuid::Uuid::new_v4().simple().to_string();
@@ -270,7 +270,7 @@ async fn lastfm_callback_handler(
         .map(str::trim)
         .filter(|v| !v.is_empty())
     else {
-        return Ok(redirect_response("/?lastfm=missing_token"));
+        return Ok(redirect_response("/"));
     };
     let Some(state) = query
         .0
@@ -279,7 +279,7 @@ async fn lastfm_callback_handler(
         .map(str::trim)
         .filter(|v| !v.is_empty())
     else {
-        return Ok(redirect_response("/?lastfm=missing_state"));
+        return Ok(redirect_response("/"));
     };
 
     let state_user_id = sqlx::query_scalar::<_, i64>(
@@ -290,7 +290,7 @@ async fn lastfm_callback_handler(
     .await
     .map_err(|e| cot::Error::internal(e.to_string()))?;
     if state_user_id != Some(user.id) {
-        return Ok(redirect_response("/?lastfm=bad_state"));
+        return Ok(redirect_response("/"));
     }
     sqlx::query("DELETE FROM furumusic__lastfm_auth_state WHERE state = $1")
         .bind(state)
@@ -300,7 +300,7 @@ async fn lastfm_callback_handler(
 
     let (config, _) = AppConfig::load_with_db(&db).await;
     let Some(credentials) = LastfmCredentials::from_config(&config) else {
-        return Ok(redirect_response("/?lastfm=not_configured"));
+        return Ok(redirect_response("/"));
     };
     let client = LastfmClient::new(credentials).map_err(|e| cot::Error::internal(e.to_string()))?;
     match client.get_session(token).await {
@@ -324,11 +324,11 @@ async fn lastfm_callback_handler(
             .execute(pool)
             .await
             .map_err(|e| cot::Error::internal(e.to_string()))?;
-            Ok(redirect_response("/?lastfm=connected"))
+            Ok(redirect_response("/"))
         }
         Err(err) => {
             tracing::warn!("Last.fm auth failed for user {}: {err}", user.id);
-            Ok(redirect_response("/?lastfm=auth_failed"))
+            Ok(redirect_response("/"))
         }
     }
 }
@@ -1452,7 +1452,8 @@ async fn stream_handler(
         return Ok(json_error(StatusCode::NOT_FOUND, "track not found"));
     };
 
-    let full_path = std::path::Path::new(&config.agent_storage_dir).join(&media.file_path);
+    let full_path =
+        crate::media_paths::resolve_media_file_path(&config.agent_storage_dir, &media.file_path);
 
     if !full_path.exists() {
         return Ok(json_error(
@@ -1521,7 +1522,7 @@ async fn local_upload_handler(
             "agent_inbox_dir is not configured",
         ));
     }
-    let inbox_root = std::path::PathBuf::from(inbox_dir);
+    let inbox_root = crate::media_paths::resolve_config_path_buf(inbox_dir);
     if !inbox_root.is_absolute() {
         return Ok(json_error(
             StatusCode::BAD_REQUEST,
@@ -1744,7 +1745,8 @@ async fn cover_response(
         return Ok(json_error(StatusCode::NOT_FOUND, "media file not found"));
     };
 
-    let full_path = std::path::Path::new(&config.agent_storage_dir).join(&media.file_path);
+    let full_path =
+        crate::media_paths::resolve_media_file_path(&config.agent_storage_dir, &media.file_path);
 
     if !full_path.exists() {
         return Ok(json_error(StatusCode::NOT_FOUND, "file not found on disk"));

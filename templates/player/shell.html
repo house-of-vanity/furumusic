@@ -275,6 +275,20 @@
                         <path d="M4 4.5A2.5 2.5 0 016.5 2H20v20H6.5A2.5 2.5 0 014 19.5z"/>
                     </svg>
                 </button>
+                <div class="connection-alert"
+                     x-show="$store.connection.disconnected"
+                     x-cloak
+                     :title="$store.connection.message()"
+                     role="status"
+                     aria-live="polite">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M2 8.82a15 15 0 0120 0"/>
+                        <path d="M5 12.86a10 10 0 0114 0"/>
+                        <path d="M8.5 16.43a5 5 0 017 0"/>
+                        <line x1="2" y1="2" x2="22" y2="22"/>
+                    </svg>
+                    <span class="connection-alert-text">{{ t.player_connection_lost }}</span>
+                </div>
                 <div class="search-bar">
                     <span class="search-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
                     <input id="search-input" type="text" placeholder="{{ t.player_search_placeholder }}"

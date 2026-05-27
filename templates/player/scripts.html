@@ -38,6 +38,8 @@ const T = {
     lastfmDisconnectConfirm: "{{ t.player_lastfm_disconnect_confirm }}",
     lastfmConnectFailed: "{{ t.player_lastfm_connect_failed }}",
     lastfmDisconnectFailed: "{{ t.player_lastfm_disconnect_failed }}",
+    connectionLost: "{{ t.player_connection_lost }}",
+    connectionLostDetail: "{{ t.player_connection_lost_detail }}",
     trackWord: "{{ t.player_tracks_count }}",
     clientIdle: "{{ t.player_client_idle }}",
     active: "{{ t.player_active }}",
@@ -116,6 +118,42 @@ function coverVariantUrl(url, variant) {
 
 document.addEventListener('alpine:init', () => {
     // -----------------------------------------------------------------------
+    // Connection monitor
+    // -----------------------------------------------------------------------
+    Alpine.store('connection', {
+        failureCount: 0,
+        disconnected: false,
+        threshold: 2,
+
+        init() {
+            if (navigator.onLine === false) {
+                this.failureCount = this.threshold;
+                this.disconnected = true;
+            }
+            window.addEventListener('online', () => this.recordSuccess());
+            window.addEventListener('offline', () => this.recordFailure());
+        },
+
+        message() {
+            return T.connectionLostDetail;
+        },
+
+        recordSuccess() {
+            this.failureCount = 0;
+            this.disconnected = false;
+        },
+
+        recordFailure() {
+            this.failureCount += 1;
+            if (this.failureCount >= this.threshold) {
+                this.disconnected = true;
+            }
+        },
+    });
+
+    installConnectionFetchMonitor();
+
+    // -----------------------------------------------------------------------
     // Audio element
     // -----------------------------------------------------------------------
     const audio = new Audio();
@@ -174,8 +212,17 @@ document.addEventListener('alpine:init', () => {
         lastfmBusy: false,
 
         init() {
+            this.cleanLastfmQuery();
             this.load();
             this.loadLastfm();
+        },
+
+        cleanLastfmQuery() {
+            const url = new URL(window.location.href);
+            if (!url.searchParams.has('lastfm')) return;
+            url.searchParams.delete('lastfm');
+            const clean = `${url.pathname}${url.search}${url.hash}`;
+            window.history.replaceState({}, document.title, clean || '/');
         },
 
         async load() {
@@ -447,9 +494,13 @@ document.addEventListener('alpine:init', () => {
             const queue = Alpine.store('queue');
             if (queue.tracks.length === 0) return;
 
+            this._recordHistoryIfListenThresholdReached();
+
             let nextIdx;
             if (this.repeatMode === 'one') {
                 this.seek(0);
+                this._historyRecorded = false;
+                this._resetPlaybackTracking();
                 this.resume();
                 return;
             } else if (this.shuffle) {
@@ -653,6 +704,18 @@ document.addEventListener('alpine:init', () => {
                     completed: completed,
                 }),
             }).catch(() => {});
+        },
+
+        _recordHistoryIfListenThresholdReached() {
+            if (this._historyRecorded || !this.currentTrack) return false;
+            this._trackListenedDelta();
+            const duration = this._trackDuration();
+            if (duration <= 0) return false;
+            const listened = Math.floor(Number(this._listenedSeconds || 0));
+            const threshold = Math.ceil(duration / 2);
+            if (threshold <= 0 || listened < threshold) return false;
+            this._recordHistory(true);
+            return true;
         },
 
         _resetPlaybackTracking() {
@@ -2294,4 +2357,39 @@ document.addEventListener('alpine:init', () => {
         },
     });
 });
+
+function installConnectionFetchMonitor() {
+    if (window.__furumusicConnectionMonitorInstalled || !window.fetch) return;
+    window.__furumusicConnectionMonitorInstalled = true;
+    const nativeFetch = window.fetch.bind(window);
+
+    window.fetch = async (...args) => {
+        const tracked = isTrackedPlayerRequest(args[0]);
+        try {
+            const response = await nativeFetch(...args);
+            if (tracked) {
+                if (response.status >= 500) {
+                    Alpine.store('connection')?.recordFailure();
+                } else {
+                    Alpine.store('connection')?.recordSuccess();
+                }
+            }
+            return response;
+        } catch (error) {
+            if (tracked) Alpine.store('connection')?.recordFailure();
+            throw error;
+        }
+    };
+}
+
+function isTrackedPlayerRequest(input) {
+    const rawUrl = typeof input === 'string' ? input : input?.url;
+    if (!rawUrl) return false;
+    try {
+        const url = new URL(rawUrl, window.location.href);
+        return url.origin === window.location.origin && url.pathname.startsWith('/api/player/');
+    } catch {
+        return false;
+    }
+}
 </script>

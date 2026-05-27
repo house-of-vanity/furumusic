@@ -6,6 +6,7 @@ mod config;
 mod i18n;
 mod jobs;
 mod lastfm;
+mod media_paths;
 mod music;
 mod oidc;
 mod player;

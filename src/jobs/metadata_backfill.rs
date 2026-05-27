@@ -1,5 +1,3 @@
-use std::path::{Path, PathBuf};
-
 use crate::scheduler::{Job, JobContext, JobLog};
 
 #[derive(Debug, Clone, Copy)]
@@ -104,11 +102,15 @@ pub async fn run_with_options(
 
     for row in rows {
         scanned += 1;
-        let Some(path) = resolve_media_path(&row.file_path, &ctx.config.agent_storage_dir) else {
+        let path = crate::media_paths::resolve_media_file_path(
+            &ctx.config.agent_storage_dir,
+            &row.file_path,
+        );
+        if !path.exists() {
             missing += 1;
             log.warn(&format!("missing file: {}", row.file_path));
             continue;
-        };
+        }
 
         let extract_path = path.clone();
         let raw_meta = match tokio::task::spawn_blocking(move || {
@@ -217,18 +219,4 @@ fn should_update<T>(current: Option<T>, overwrite: bool) -> bool {
 
 fn should_update_duration(current: Option<f64>, overwrite: bool) -> bool {
     overwrite || current.unwrap_or(0.0) <= 0.0
-}
-
-fn resolve_media_path(file_path: &str, storage_dir: &str) -> Option<PathBuf> {
-    let path = Path::new(file_path);
-    if path.exists() {
-        return Some(path.to_path_buf());
-    }
-    if path.is_relative() && !storage_dir.is_empty() {
-        let joined = Path::new(storage_dir).join(path);
-        if joined.exists() {
-            return Some(joined);
-        }
-    }
-    None
 }

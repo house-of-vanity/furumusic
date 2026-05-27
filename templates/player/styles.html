@@ -1377,6 +1377,37 @@ button.user-stat:hover {
     margin-bottom: 20px;
 }
 
+.connection-alert {
+    flex: 0 0 auto;
+    min-width: 42px;
+    height: 42px;
+    padding: 0 12px;
+    border: 1px solid rgba(248, 113, 113, 0.34);
+    border-radius: 8px;
+    background: rgba(127, 29, 29, 0.2);
+    color: #f87171;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.connection-alert svg {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+}
+
+.connection-alert-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #fecaca;
+    font-size: 12px;
+    font-weight: 700;
+}
+
 /* Search bar */
 .search-bar {
     position: relative;
@@ -2674,6 +2705,15 @@ button.user-stat:hover {
 
     .content-topbar .search-bar {
         flex: 1 1 auto;
+    }
+
+    .connection-alert {
+        width: 42px;
+        padding: 0;
+    }
+
+    .connection-alert-text {
+        display: none;
     }
 
     .mobile-library-btn {

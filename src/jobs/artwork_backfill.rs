@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use reqwest::Client;
 use serde::Deserialize;
@@ -41,34 +41,6 @@ struct LastfmArtistResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct LastfmTopAlbumsResponse {
-    topalbums: Option<LastfmTopAlbums>,
-    error: Option<i32>,
-    message: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct LastfmTopAlbums {
-    album: Option<OneOrMany<LastfmImageContainer>>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum OneOrMany<T> {
-    One(T),
-    Many(Vec<T>),
-}
-
-impl<T> OneOrMany<T> {
-    fn into_vec(self) -> Vec<T> {
-        match self {
-            Self::One(value) => vec![value],
-            Self::Many(values) => values,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
 struct LastfmImageContainer {
     image: Option<Vec<LastfmImage>>,
 }
@@ -88,6 +60,7 @@ struct ArtworkStats {
     release_skipped_no_audio: u64,
     artist_lastfm_assigned: u64,
     artist_lastfm_not_found: u64,
+    artist_album_fallback_assigned: u64,
     variants_created: usize,
     variants_unchanged: usize,
     variants_missing_original: usize,
@@ -125,6 +98,16 @@ impl Job for ArtworkBackfillJob {
             .build()?;
         let mut stats = ArtworkStats::default();
 
+        let normalized_paths =
+            crate::media_paths::normalize_media_file_paths(&ctx.pool, storage_dir).await?;
+        if normalized_paths > 0 {
+            log.info(&format!(
+                "Media path normalization pass: rewrote {normalized_paths} media file path(s) to relative storage paths"
+            ));
+        } else {
+            log.info("Media path normalization pass: all media file paths are already relative");
+        }
+
         backfill_release_local(ctx, log, storage_dir, &mut stats).await?;
 
         let api_key = ctx.config.lastfm_api_key.trim();
@@ -138,13 +121,14 @@ impl Job for ArtworkBackfillJob {
         repair_cover_variants(ctx, log, storage_dir, &mut stats).await?;
 
         log.info(&format!(
-            "Artwork backfill complete: release_local_assigned={}, release_lastfm_assigned={}, release_lastfm_not_found={}, release_skipped_no_audio={}, artist_lastfm_assigned={}, artist_lastfm_not_found={}, variants_created={}, variants_unchanged={}, variants_missing_original={}, failed={}",
+            "Artwork backfill complete: release_local_assigned={}, release_lastfm_assigned={}, release_lastfm_not_found={}, release_skipped_no_audio={}, artist_lastfm_assigned={}, artist_lastfm_not_found={}, artist_album_fallback_assigned={}, variants_created={}, variants_unchanged={}, variants_missing_original={}, failed={}",
             stats.release_local_assigned,
             stats.release_lastfm_assigned,
             stats.release_lastfm_not_found,
             stats.release_skipped_no_audio,
             stats.artist_lastfm_assigned,
             stats.artist_lastfm_not_found,
+            stats.artist_album_fallback_assigned,
             stats.variants_created,
             stats.variants_unchanged,
             stats.variants_missing_original,
@@ -221,7 +205,7 @@ async fn backfill_release_local(
 
         let audio_files: Vec<PathBuf> = audio_paths
             .iter()
-            .map(|path| resolve_media_path(storage_dir, path))
+            .map(|path| crate::media_paths::resolve_media_file_path(storage_dir, path))
             .collect();
         let Some(folder) = audio_files.first().and_then(|path| path.parent()) else {
             stats.failed += 1;
@@ -605,13 +589,35 @@ async fn backfill_artist_lastfm(
                 }
             },
             Ok(None) => {
-                stats.artist_lastfm_not_found += 1;
                 record_lookup_state(&ctx.pool, "artist", artist.id, "not_found", None, None)
                     .await?;
                 log.info(&format!(
                     "Artist {} \"{}\": Last.fm did not return artwork",
                     artist.id, artist.name
                 ));
+                stats.artist_lastfm_not_found += 1;
+                match assign_artist_album_fallback(ctx, artist.id).await {
+                    Ok(Some(media_file_id)) => {
+                        stats.artist_album_fallback_assigned += 1;
+                        log.info(&format!(
+                            "Artist {} \"{}\": assigned random local album cover (media_file_id={media_file_id})",
+                            artist.id, artist.name
+                        ));
+                    }
+                    Ok(None) => {
+                        log.info(&format!(
+                            "Artist {} \"{}\": no local album cover available for fallback",
+                            artist.id, artist.name
+                        ));
+                    }
+                    Err(err) => {
+                        stats.failed += 1;
+                        log.warn(&format!(
+                            "Artist {} \"{}\": failed to assign album fallback artwork: {err}",
+                            artist.id, artist.name
+                        ));
+                    }
+                }
             }
             Err(err) if err.to_string().contains("rate limit") => {
                 stats.failed += 1;
@@ -675,7 +681,7 @@ async fn repair_cover_variants(
     ));
 
     for (media_file_id, file_path) in rows {
-        let path = resolve_media_path(storage_dir, &file_path);
+        let path = crate::media_paths::resolve_media_file_path(storage_dir, &file_path);
         if !path.exists() {
             stats.variants_missing_original += 1;
             log.warn(&format!(
@@ -703,6 +709,59 @@ async fn repair_cover_variants(
     }
 
     Ok(())
+}
+
+async fn assign_artist_album_fallback(
+    ctx: &JobContext,
+    artist_id: i64,
+) -> anyhow::Result<Option<i64>> {
+    let media_file_id: Option<i64> = sqlx::query_scalar(
+        r#"SELECT media_file_id
+             FROM (
+                    SELECT DISTINCT r.cover_file_id AS media_file_id
+                      FROM furumusic__release r
+                      JOIN furumusic__release_artist ra ON ra.release_id = r.id
+                     WHERE ra.artist_id = $1
+                       AND r.cover_file_id IS NOT NULL
+                       AND r.is_hidden = false
+                    UNION
+                    SELECT DISTINCT r.cover_file_id AS media_file_id
+                      FROM furumusic__release r
+                      JOIN furumusic__track t ON t.release_id = r.id
+                      JOIN furumusic__track_artist ta ON ta.track_id = t.id
+                     WHERE ta.artist_id = $1
+                       AND r.cover_file_id IS NOT NULL
+                       AND r.is_hidden = false
+                  ) covers
+            ORDER BY random()
+            LIMIT 1"#,
+    )
+    .bind(artist_id)
+    .fetch_optional(&ctx.pool)
+    .await?;
+
+    let Some(media_file_id) = media_file_id else {
+        return Ok(None);
+    };
+
+    let result = sqlx::query(
+        r#"UPDATE furumusic__artist
+              SET image_file_id = $1,
+                  updated_at = $3
+            WHERE id = $2
+              AND image_file_id IS NULL"#,
+    )
+    .bind(media_file_id)
+    .bind(artist_id)
+    .bind(now_iso())
+    .execute(&ctx.pool)
+    .await?;
+
+    if result.rows_affected() == 0 {
+        Ok(None)
+    } else {
+        Ok(Some(media_file_id))
+    }
 }
 
 async fn fetch_lastfm_album_image(
@@ -772,57 +831,9 @@ async fn fetch_lastfm_artist_image(
             parsed.message.unwrap_or_default()
         );
     }
-    if let Some(url) = parsed
+    Ok(parsed
         .artist
-        .and_then(|artist| choose_best_image(artist.image))
-    {
-        return Ok(Some(url));
-    }
-
-    fetch_lastfm_artist_top_album_image(client, api_key, artist).await
-}
-
-async fn fetch_lastfm_artist_top_album_image(
-    client: &Client,
-    api_key: &str,
-    artist: &str,
-) -> anyhow::Result<Option<String>> {
-    let response = client
-        .get("https://ws.audioscrobbler.com/2.0/")
-        .query(&[
-            ("method", "artist.getTopAlbums"),
-            ("api_key", api_key),
-            ("artist", artist),
-            ("autocorrect", "1"),
-            ("limit", "10"),
-            ("format", "json"),
-        ])
-        .send()
-        .await?;
-    let body = response.text().await?;
-    let parsed: LastfmTopAlbumsResponse = serde_json::from_str(&body)?;
-    if let Some(code) = parsed.error {
-        if code == 6 || code == 7 {
-            return Ok(None);
-        }
-        if code == 29 {
-            anyhow::bail!("Last.fm rate limit exceeded");
-        }
-        anyhow::bail!(
-            "Last.fm API error {code}: {}",
-            parsed.message.unwrap_or_default()
-        );
-    }
-
-    let albums = parsed
-        .topalbums
-        .and_then(|topalbums| topalbums.album)
-        .map(OneOrMany::into_vec)
-        .unwrap_or_default();
-    Ok(albums
-        .into_iter()
-        .filter_map(|album| choose_best_image(album.image))
-        .next())
+        .and_then(|artist| choose_best_image(artist.image)))
 }
 
 fn choose_best_image(images: Option<Vec<LastfmImage>>) -> Option<String> {
@@ -940,15 +951,6 @@ fn cover_source_description(source: &CoverSource) -> String {
         CoverSource::FolderFile(path) => format!("folder: {}", path.display()),
         CoverSource::Embedded(path) => format!("embedded: {}", path.display()),
         CoverSource::Remote(url) => format!("remote: {url}"),
-    }
-}
-
-fn resolve_media_path(storage_dir: &str, file_path: &str) -> PathBuf {
-    let path = PathBuf::from(file_path);
-    if path.is_absolute() {
-        path
-    } else {
-        Path::new(storage_dir).join(path)
     }
 }
 

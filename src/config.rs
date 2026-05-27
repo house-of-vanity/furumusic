@@ -329,8 +329,8 @@ impl_env_overrides!(
 
 impl AppConfig {
     fn normalize_host_paths(&mut self) {
-        self.agent_inbox_dir = normalize_host_path(&self.agent_inbox_dir);
-        self.agent_storage_dir = normalize_host_path(&self.agent_storage_dir);
+        self.agent_inbox_dir = crate::media_paths::resolve_config_path(&self.agent_inbox_dir);
+        self.agent_storage_dir = crate::media_paths::resolve_config_path(&self.agent_storage_dir);
     }
 
     /// Build config: start from defaults, then overlay env vars.
@@ -413,44 +413,6 @@ impl AppConfig {
     }
 }
 
-fn normalize_host_path(value: &str) -> String {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return String::new();
-    }
-
-    normalize_windows_user_path(trimmed).unwrap_or_else(|| trimmed.to_owned())
-}
-
-#[cfg(not(windows))]
-fn normalize_windows_user_path(value: &str) -> Option<String> {
-    let normalized = value.replace('\\', "/");
-    let mut parts = normalized.split('/').filter(|part| !part.is_empty());
-    let drive = parts.next()?;
-    if drive.len() != 2 || !drive.ends_with(':') {
-        return None;
-    }
-    if !parts.next()?.eq_ignore_ascii_case("Users") {
-        return None;
-    }
-    let user = parts.next()?;
-    if user.is_empty() {
-        return None;
-    }
-
-    let mut out = format!("/Users/{user}");
-    for part in parts {
-        out.push('/');
-        out.push_str(part);
-    }
-    Some(out)
-}
-
-#[cfg(windows)]
-fn normalize_windows_user_path(_value: &str) -> Option<String> {
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -462,21 +424,31 @@ mod tests {
         assert_eq!(cfg.log_level, "info");
     }
 
-    #[cfg(not(windows))]
     #[test]
-    fn normalizes_windows_user_path_on_unix() {
+    fn resolves_relative_media_paths_from_working_dir() {
+        let expected = std::env::current_dir()
+            .unwrap()
+            .join("media")
+            .join("uploads")
+            .to_string_lossy()
+            .to_string();
         assert_eq!(
-            normalize_host_path(r"C:\Users\ab\repos\furumusic\media\uploads"),
-            "/Users/ab/repos/furumusic/media/uploads"
+            crate::media_paths::resolve_config_path("media/uploads"),
+            expected
         );
     }
 
-    #[cfg(not(windows))]
     #[test]
-    fn leaves_unix_path_unchanged() {
+    fn maps_foreign_windows_media_paths_to_working_dir() {
+        let expected = std::env::current_dir()
+            .unwrap()
+            .join("media")
+            .join("uploads")
+            .to_string_lossy()
+            .to_string();
         assert_eq!(
-            normalize_host_path("/Users/ab/repos/furumusic/media/uploads"),
-            "/Users/ab/repos/furumusic/media/uploads"
+            crate::media_paths::resolve_config_path(r"C:\Users\ab\repos\furumusic\media\uploads"),
+            expected
         );
     }
 
