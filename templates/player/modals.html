@@ -11,7 +11,32 @@
                         </svg>
                     </button>
                 </div>
-                <pre class="info-modal-body" x-text="$store.info.modal.body"></pre>
+                <div class="info-modal-body">
+                    <template x-if="$store.info.modal.rows && $store.info.modal.rows.length">
+                        <table class="info-table">
+                            <tbody>
+                                <template x-for="(row, idx) in $store.info.modal.rows" :key="row.label + '-' + idx">
+                                    <tr>
+                                        <th x-text="row.label"></th>
+                                        <td>
+                                            <template x-if="row.links && row.links.length">
+                                                <div class="info-link-list">
+                                                    <template x-for="link in row.links" :key="link.type + '-' + link.id + '-' + link.label">
+                                                        <button class="info-link" type="button" @click="$store.info.navigate(link)" x-text="link.label"></button>
+                                                    </template>
+                                                </div>
+                                            </template>
+                                            <template x-if="!row.links || !row.links.length">
+                                                <span x-text="row.value"></span>
+                                            </template>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </template>
+                    <pre class="info-modal-plain" x-show="!$store.info.modal.rows || !$store.info.modal.rows.length" x-text="$store.info.modal.body"></pre>
+                </div>
             </div>
         </div>
     </template>

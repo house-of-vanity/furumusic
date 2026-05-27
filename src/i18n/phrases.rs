@@ -268,6 +268,7 @@ translations! {
     // Player UI
     player_library:          "Library"                         , "Библиотека";
     player_artists:          "Artists"                         , "Артисты";
+    player_release:          "Release"                         , "Релиз";
     player_releases:         "Releases"                        , "Релизы";
     player_tracks:           "Tracks"                          , "Треки";
     player_title:            "Title"                           , "Название";

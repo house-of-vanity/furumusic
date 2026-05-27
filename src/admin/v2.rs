@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use cot::db::{Database, Model};
 use cot::html::Html;
@@ -67,6 +67,31 @@ pub(super) struct UpdateLibraryItemRequest {
     id: i64,
     title: String,
     hidden: bool,
+    release_type: Option<String>,
+    year: Option<String>,
+    artist_ids: Option<Vec<i64>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct LibraryItemDetailQuery {
+    kind: String,
+    id: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct SetLibraryImageRequest {
+    kind: String,
+    id: i64,
+    media_file_id: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct UploadLibraryImageRequest {
+    kind: String,
+    id: i64,
+    data: String,
+    filename: String,
+    mime_type: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -346,6 +371,32 @@ struct LibraryItemDto {
     is_hidden: Option<bool>,
     tags: Vec<TagDto>,
     updated_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct LibraryItemDetailDto {
+    item: LibraryItemDto,
+    title: String,
+    hidden: bool,
+    release_type: Option<String>,
+    year: Option<i32>,
+    current_image_url: Option<String>,
+    selected_artist_ids: Vec<i64>,
+    artists: Vec<ArtistOptionDto>,
+    available_covers: Vec<AvailableCoverDto>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct ArtistOptionDto {
+    id: i64,
+    name: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct AvailableCoverDto {
+    media_file_id: i64,
+    release_title: String,
+    cover_url: String,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -903,6 +954,28 @@ pub async fn library(
     Json(page).into_response()
 }
 
+pub async fn library_item_detail(
+    session: Session,
+    db: Database,
+    pool: &PgPool,
+    query: LibraryItemDetailQuery,
+) -> cot::Result<cot::response::Response> {
+    if let Err(response) = require_admin_json(&session, &db).await {
+        return Ok(response);
+    }
+    let kind = normalize_library_kind(Some(query.kind.as_str()));
+    let Some(item) = fetch_library_item(pool, &kind, query.id)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?
+    else {
+        return Ok(json_error(StatusCode::NOT_FOUND, "library item not found"));
+    };
+    let detail = load_library_item_detail(pool, &kind, item)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    Json(detail).into_response()
+}
+
 pub async fn update_library_item(
     session: Session,
     db: Database,
@@ -936,13 +1009,27 @@ pub async fn update_library_item(
             .await
         }
         "releases" => {
+            let release_type = body
+                .release_type
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("album");
+            let year = body
+                .year
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .and_then(|value| value.parse::<i32>().ok());
             sqlx::query(
                 "UPDATE furumusic__release \
-                 SET title = $1, title_sort = $2, is_hidden = $3, updated_at = $4 \
-                 WHERE id = $5",
+                 SET title = $1, title_sort = $2, release_type = $3, year = $4, is_hidden = $5, updated_at = $6 \
+                 WHERE id = $7",
             )
             .bind(title)
             .bind(normalize_name(title))
+            .bind(release_type)
+            .bind(year)
             .bind(body.hidden)
             .bind(&now)
             .bind(body.id)
@@ -970,6 +1057,28 @@ pub async fn update_library_item(
     if affected == 0 {
         return Ok(json_error(StatusCode::NOT_FOUND, "library item not found"));
     }
+    if kind == "releases" {
+        if let Some(mut artist_ids) = body.artist_ids {
+            let mut seen_artist_ids = HashSet::new();
+            artist_ids.retain(|id| *id > 0 && seen_artist_ids.insert(*id));
+            sqlx::query("DELETE FROM furumusic__release_artist WHERE release_id = $1")
+                .bind(body.id)
+                .execute(pool)
+                .await
+                .map_err(|e| cot::Error::internal(e.to_string()))?;
+            for (position, artist_id) in artist_ids.iter().enumerate() {
+                sqlx::query(
+                    "INSERT INTO furumusic__release_artist (release_id, artist_id, position) VALUES ($1, $2, $3)",
+                )
+                .bind(body.id)
+                .bind(*artist_id)
+                .bind(position as i32)
+                .execute(pool)
+                .await
+                .map_err(|e| cot::Error::internal(e.to_string()))?;
+            }
+        }
+    }
 
     let Some(item) = fetch_library_item(pool, &kind, body.id)
         .await
@@ -979,6 +1088,128 @@ pub async fn update_library_item(
     };
 
     Json(item).into_response()
+}
+
+pub async fn set_library_item_image(
+    session: Session,
+    db: Database,
+    pool: &PgPool,
+    Json(body): Json<SetLibraryImageRequest>,
+) -> cot::Result<cot::response::Response> {
+    if let Err(response) = require_admin_json(&session, &db).await {
+        return Ok(response);
+    }
+    let kind = normalize_library_kind(Some(body.kind.as_str()));
+    if kind != "artists" && kind != "releases" {
+        return Ok(json_error(StatusCode::BAD_REQUEST, "unsupported kind"));
+    }
+    if let Some(fid) = body.media_file_id {
+        let exists: Option<i64> = sqlx::query_scalar(
+            "SELECT id FROM furumusic__media_file WHERE id = $1 AND file_type = 'cover_art'",
+        )
+        .bind(fid)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+        if exists.is_none() {
+            return Ok(json_error(StatusCode::NOT_FOUND, "image not found"));
+        }
+    }
+    let now = now_string();
+    let result = if kind == "releases" {
+        sqlx::query(
+            "UPDATE furumusic__release SET cover_file_id = $1, updated_at = $2 WHERE id = $3",
+        )
+        .bind(body.media_file_id)
+        .bind(&now)
+        .bind(body.id)
+        .execute(pool)
+        .await
+    } else {
+        sqlx::query(
+            "UPDATE furumusic__artist SET image_file_id = $1, updated_at = $2 WHERE id = $3",
+        )
+        .bind(body.media_file_id)
+        .bind(&now)
+        .bind(body.id)
+        .execute(pool)
+        .await
+    }
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    if result.rows_affected() == 0 {
+        return Ok(json_error(StatusCode::NOT_FOUND, "library item not found"));
+    }
+    Json(serde_json::json!({ "ok": true })).into_response()
+}
+
+pub async fn upload_library_item_image(
+    session: Session,
+    db: Database,
+    pool: &PgPool,
+    Json(body): Json<UploadLibraryImageRequest>,
+) -> cot::Result<cot::response::Response> {
+    if let Err(response) = require_admin_json(&session, &db).await {
+        return Ok(response);
+    }
+    let kind = normalize_library_kind(Some(body.kind.as_str()));
+    if kind != "artists" && kind != "releases" {
+        return Ok(json_error(StatusCode::BAD_REQUEST, "unsupported kind"));
+    }
+    let storage_dir = AppConfig::load_with_db(&db).await.0.agent_storage_dir;
+    if storage_dir.trim().is_empty() {
+        return Err(cot::Error::internal("agent_storage_dir is not configured"));
+    }
+    use base64::Engine;
+    let image_data = base64::engine::general_purpose::STANDARD
+        .decode(body.data.trim())
+        .map_err(|e| cot::Error::internal(format!("invalid base64: {e}")))?;
+    if image_data.is_empty() {
+        return Ok(json_error(StatusCode::BAD_REQUEST, "image is empty"));
+    }
+    let title: Option<String> = if kind == "releases" {
+        sqlx::query_scalar("SELECT title::text FROM furumusic__release WHERE id = $1")
+    } else {
+        sqlx::query_scalar("SELECT name::text FROM furumusic__artist WHERE id = $1")
+    }
+    .bind(body.id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let Some(title) = title else {
+        return Ok(json_error(StatusCode::NOT_FOUND, "library item not found"));
+    };
+    let cover = crate::agent::cover_art::CoverImage {
+        data: image_data,
+        mime_type: body.mime_type,
+        source: crate::agent::cover_art::CoverSource::FolderFile(std::path::PathBuf::from(
+            body.filename,
+        )),
+    };
+    let media_file_id = crate::agent::cover_art::save_cover_to_storage(
+        &db,
+        pool,
+        &storage_dir,
+        &title,
+        if kind == "artists" {
+            "__artist_image__"
+        } else {
+            "__release_cover__"
+        },
+        &cover,
+    )
+    .await
+    .map_err(|e| cot::Error::internal(format!("failed to save image: {e}")))?;
+    set_library_item_image(
+        session,
+        db,
+        pool,
+        Json(SetLibraryImageRequest {
+            kind,
+            id: body.id,
+            media_file_id: Some(media_file_id),
+        }),
+    )
+    .await
 }
 
 pub async fn bulk_library(
@@ -1617,6 +1848,103 @@ async fn fetch_library_item(
     };
 
     Ok(row.map(|row| library_item_dto(kind, row)))
+}
+
+async fn load_library_item_detail(
+    pool: &PgPool,
+    kind: &str,
+    item: LibraryItemDto,
+) -> anyhow::Result<LibraryItemDetailDto> {
+    let mut detail = LibraryItemDetailDto {
+        title: item.title.clone(),
+        hidden: item.is_hidden.unwrap_or(false),
+        release_type: None,
+        year: None,
+        current_image_url: None,
+        selected_artist_ids: Vec::new(),
+        artists: Vec::new(),
+        available_covers: Vec::new(),
+        item,
+    };
+
+    match kind {
+        "artists" => {
+            let image_file_id: Option<i64> =
+                sqlx::query_scalar("SELECT image_file_id FROM furumusic__artist WHERE id = $1")
+                    .bind(detail.item.id)
+                    .fetch_optional(pool)
+                    .await?
+                    .flatten();
+            detail.current_image_url =
+                image_file_id.map(|id| format!("/api/player/cover/{id}/large"));
+            detail.available_covers = artist_available_covers(pool, detail.item.id).await?;
+        }
+        "releases" => {
+            let row: Option<(Option<String>, Option<i32>, Option<i64>)> = sqlx::query_as(
+                "SELECT release_type::text, year, cover_file_id FROM furumusic__release WHERE id = $1",
+            )
+            .bind(detail.item.id)
+            .fetch_optional(pool)
+            .await?;
+            if let Some((release_type, year, cover_file_id)) = row {
+                detail.release_type = release_type;
+                detail.year = year;
+                detail.current_image_url =
+                    cover_file_id.map(|id| format!("/api/player/cover/{id}/large"));
+            }
+            detail.selected_artist_ids = sqlx::query_as::<_, IdRow>(
+                "SELECT artist_id AS id FROM furumusic__release_artist WHERE release_id = $1 ORDER BY position, artist_id",
+            )
+            .bind(detail.item.id)
+            .fetch_all(pool)
+            .await?
+            .into_iter()
+            .map(|row| row.id)
+            .collect();
+            detail.artists = load_artist_options(pool).await?;
+        }
+        _ => {}
+    }
+
+    Ok(detail)
+}
+
+async fn load_artist_options(pool: &PgPool) -> anyhow::Result<Vec<ArtistOptionDto>> {
+    let rows = sqlx::query_as::<_, (i64, String)>(
+        "SELECT id, name::text FROM furumusic__artist ORDER BY name ASC",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(id, name)| ArtistOptionDto { id, name })
+        .collect())
+}
+
+async fn artist_available_covers(
+    pool: &PgPool,
+    artist_id: i64,
+) -> anyhow::Result<Vec<AvailableCoverDto>> {
+    let rows = sqlx::query_as::<_, (i64, String)>(
+        "SELECT DISTINCT r.cover_file_id AS media_file_id, r.title::text AS release_title \
+         FROM furumusic__release r \
+         LEFT JOIN furumusic__release_artist ra ON ra.release_id = r.id \
+         LEFT JOIN furumusic__track t ON t.release_id = r.id \
+         LEFT JOIN furumusic__track_artist ta ON ta.track_id = t.id \
+         WHERE r.cover_file_id IS NOT NULL AND (ra.artist_id = $1 OR ta.artist_id = $1) \
+         ORDER BY r.title::text ASC",
+    )
+    .bind(artist_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(media_file_id, release_title)| AvailableCoverDto {
+            media_file_id,
+            release_title,
+            cover_url: format!("/api/player/cover/{media_file_id}/medium"),
+        })
+        .collect())
 }
 
 async fn library_ids_by_filter(

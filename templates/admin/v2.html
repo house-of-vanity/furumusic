@@ -870,6 +870,165 @@ tbody tr:hover {
     font-size: 11px;
 }
 
+.image-editor {
+    display: grid;
+    grid-template-columns: 150px minmax(0, 1fr);
+    gap: 14px;
+    margin-bottom: 12px;
+}
+
+.image-preview {
+    width: 150px;
+    aspect-ratio: 1;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-primary);
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    color: var(--text-subdued);
+    font-size: 12px;
+}
+
+.image-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.cover-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(86px, 1fr));
+    gap: 8px;
+}
+
+.cover-option {
+    min-width: 0;
+    padding: 6px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.cover-option:hover {
+    border-color: rgba(29, 185, 84, 0.55);
+    color: var(--text-primary);
+}
+
+.cover-option img {
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: cover;
+    border-radius: 5px;
+    display: block;
+}
+
+.cover-option span {
+    display: block;
+    margin-top: 5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 10px;
+}
+
+.artist-tags {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+}
+
+.artist-picker {
+    position: relative;
+}
+
+.artist-picker input {
+    width: 100%;
+}
+
+.artist-results {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(100% + 5px);
+    z-index: 5;
+    max-height: 242px;
+    overflow: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.38);
+}
+
+.artist-result {
+    width: 100%;
+    min-height: 34px;
+    padding: 8px 10px;
+    border: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    background: transparent;
+    color: var(--text-secondary);
+    text-align: left;
+    cursor: pointer;
+}
+
+.artist-result:hover,
+.artist-result:focus {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.artist-result:last-child {
+    border-bottom: 0;
+}
+
+.tag button {
+    width: 16px;
+    height: 16px;
+    margin-left: 5px;
+    border: 0;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.14);
+    color: inherit;
+    cursor: pointer;
+    line-height: 1;
+}
+
+.tag button:hover {
+    background: rgba(255, 255, 255, 0.24);
+}
+
+.editor-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.image-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+}
+
+.file-name {
+    max-width: 280px;
+    color: var(--text-subdued);
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cover-option.active {
+    border-color: rgba(29, 185, 84, 0.8);
+    box-shadow: 0 0 0 1px rgba(29, 185, 84, 0.32);
+}
+
 .muted {
     color: var(--text-subdued);
 }
@@ -1753,30 +1912,120 @@ tbody tr:hover {
                 </button>
             </div>
             <div class="modal-body" x-show="activeLibraryItem">
-                <div class="field">
-                    <label>Title</label>
-                    <input x-model="editorDraft.title" />
-                </div>
-                <div class="field">
-                    <label>Primary Relation Search</label>
-                    <input placeholder="Start typing to attach artist, release, or playlist" />
-                </div>
-                <div class="field">
-                    <label>Visibility</label>
-                    <select class="search" style="width:100%" x-model="editorDraft.hidden">
-                        <option value="false">Visible in player</option>
-                        <option value="true">Hidden from player</option>
-                    </select>
-                </div>
-                <div class="toolbar">
-                    <button class="btn primary" @click="saveLibraryItem()">
-                        <i data-lucide="save"></i>
-                        Save
-                    </button>
-                    <button class="btn danger" @click="deleteLibraryItem(activeLibraryItem)">
-                        <i data-lucide="trash-2"></i>
-                        Delete
-                    </button>
+                <div class="empty" x-show="editorLoading">Loading editor...</div>
+                <div x-show="!editorLoading">
+                    <div class="field">
+                        <label x-text="isArtistEditor() ? 'Artist name' : 'Title'"></label>
+                        <input x-model="editorDraft.title" />
+                    </div>
+
+                    <div class="editor-grid" x-show="isReleaseEditor()">
+                        <div class="field">
+                            <label>Release type</label>
+                            <select x-model="editorDraft.release_type">
+                                <option value="album">Album</option>
+                                <option value="single">Single</option>
+                                <option value="ep">EP</option>
+                                <option value="compilation">Compilation</option>
+                                <option value="soundtrack">Soundtrack</option>
+                                <option value="live">Live</option>
+                                <option value="remix">Remix</option>
+                                <option value="unknown">Unknown</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label>Year</label>
+                            <input type="number" min="0" max="3000" x-model="editorDraft.year" />
+                        </div>
+                    </div>
+
+                    <div class="field" x-show="isReleaseEditor()">
+                        <label>Release artists</label>
+                        <div class="artist-tags">
+                            <template x-for="artist in selectedEditorArtists()" :key="artist.id">
+                                <span class="tag relation">
+                                    <span x-text="artist.name"></span>
+                                    <button type="button" @click="removeEditorArtist(artist.id)">x</button>
+                                </span>
+                            </template>
+                            <span class="muted" x-show="selectedEditorArtists().length === 0">No artists attached</span>
+                        </div>
+                        <div class="artist-picker">
+                            <input class="search" placeholder="Search artist" x-model="editorArtistToAdd" @keydown.enter.prevent="addEditorArtist()" @keydown.escape="editorArtistToAdd = ''" />
+                            <div class="artist-results" x-show="editorArtistSearchOpen()" x-transition>
+                                <template x-for="artist in filteredEditorArtists()" :key="artist.id">
+                                    <button class="artist-result" type="button" @click="addEditorArtist(artist)" x-text="artist.name"></button>
+                                </template>
+                                <div class="artist-result muted" x-show="filteredEditorArtists().length === 0">No matching artists</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="field">
+                        <label>Visibility</label>
+                        <select class="search" style="width:100%" x-model="editorDraft.hidden">
+                            <option value="false">Visible in player</option>
+                            <option value="true">Hidden from player</option>
+                        </select>
+                    </div>
+
+                    <div x-show="canEditLibraryImage()">
+                        <label class="muted" style="display:block; margin: 2px 0 8px; font-size: 11px; font-weight: 800; text-transform: uppercase;">Image</label>
+                        <div class="image-editor">
+                            <div class="image-preview">
+                                <template x-if="editorDetail && editorDetail.current_image_url">
+                                    <img :src="editorDetail.current_image_url" alt="" />
+                                </template>
+                                <span x-show="!editorDetail || !editorDetail.current_image_url">No image</span>
+                            </div>
+                            <div>
+                                <div class="image-actions">
+                                    <input type="file" accept="image/*" x-ref="libraryImageInput" style="display:none" @change="setEditorImageFile($event)" />
+                                    <button class="btn" type="button" @click="$refs.libraryImageInput.click()">
+                                        <i data-lucide="image-plus"></i>
+                                        Choose image
+                                    </button>
+                                    <button class="btn primary" type="button" @click="uploadLibraryImage()" :disabled="!editorImageFile || editorImageUploading">
+                                        <i :data-lucide="editorImageUploading ? 'loader-circle' : 'upload'"></i>
+                                        <span x-text="editorImageUploading ? 'Uploading...' : 'Upload'"></span>
+                                    </button>
+                                    <button class="btn danger" type="button" @click="removeLibraryImage()" :disabled="!editorDetail || !editorDetail.current_image_url || editorImageUploading">
+                                        <i data-lucide="trash-2"></i>
+                                        Remove
+                                    </button>
+                                    <span class="file-name" x-show="editorImageFile" x-text="editorImageFile ? editorImageFile.name : ''"></span>
+                                </div>
+                                <p class="muted" x-show="isReleaseEditor()">Release covers are uploaded manually here.</p>
+                                <p class="muted" x-show="isArtistEditor()">Pick an image from releases where this artist appears, or upload one manually.</p>
+                            </div>
+                        </div>
+
+                        <div x-show="isArtistEditor()">
+                            <div class="field" style="margin-bottom:8px">
+                                <label>Available release images</label>
+                            </div>
+                            <div class="cover-grid" x-show="editorDetail && editorDetail.available_covers && editorDetail.available_covers.length">
+                                <template x-for="cover in editorDetail.available_covers" :key="cover.media_file_id">
+                                    <button class="cover-option" type="button" :class="{active: editorDetail.current_image_url && editorDetail.current_image_url.includes('/cover/' + cover.media_file_id + '/')}" @click="setLibraryImage(cover.media_file_id)">
+                                        <img :src="cover.cover_url" alt="" />
+                                        <span x-text="cover.release_title"></span>
+                                    </button>
+                                </template>
+                            </div>
+                            <div class="empty" x-show="editorDetail && (!editorDetail.available_covers || editorDetail.available_covers.length === 0)">No release images found for this artist</div>
+                        </div>
+                    </div>
+
+                    <div class="toolbar">
+                        <button class="btn primary" @click="saveLibraryItem()" :disabled="!editorCanSave()">
+                            <i :data-lucide="editorSaving ? 'loader-circle' : 'save'"></i>
+                            <span x-text="editorSaving ? 'Saving...' : 'Save'"></span>
+                        </button>
+                        <button class="btn danger" @click="deleteLibraryItem(activeLibraryItem)" :disabled="editorSaving || editorImageUploading">
+                            <i data-lucide="trash-2"></i>
+                            Delete
+                        </button>
+                    </div>
                 </div>
             </div>
         </section>
@@ -1837,7 +2086,13 @@ function adminV2() {
         librarySelectionScope: 'ids',
         activeLibraryItem: null,
         editorOpen: false,
-        editorDraft: { title: '', hidden: 'false' },
+        editorLoading: false,
+        editorSaving: false,
+        editorImageUploading: false,
+        editorImageFile: null,
+        editorArtistToAdd: '',
+        editorDetail: null,
+        editorDraft: { title: '', hidden: 'false', release_type: 'album', year: '', artist_ids: [] },
         settings: { values: {}, sources: {}, lastfm_api_key_configured: false },
         settingsDraft: {
             auth_password_enabled: false,
@@ -1924,14 +2179,18 @@ function adminV2() {
             const parts = raw.split('/').filter(Boolean);
             const view = parts[0] || 'reviews';
             if (view === 'reviews') {
+                const nextStatus = parts[1] || null;
+                if (this.reviewFilter.status !== nextStatus) this.clearReviewSelection();
                 this.activeView = 'reviews';
-                this.reviewFilter.status = parts[1] || null;
+                this.reviewFilter.status = nextStatus;
             } else if (view === 'jobs') {
                 this.activeView = 'jobs';
                 if (parts[1]) this.activeJobName = decodeURIComponent(parts[1]);
             } else if (view === 'library') {
+                const nextKind = ['artists', 'releases', 'playlists'].includes(parts[1]) ? parts[1] : 'artists';
+                if (this.libraryKind !== nextKind) this.clearLibrarySelection();
                 this.activeView = 'library';
-                this.libraryKind = ['artists', 'releases', 'playlists'].includes(parts[1]) ? parts[1] : 'artists';
+                this.libraryKind = nextKind;
             } else if (view === 'settings') {
                 this.activeView = 'settings';
             } else if (view === 'tools') {
@@ -1971,6 +2230,7 @@ function adminV2() {
         },
 
         openReviews(status = null) {
+            if (this.reviewFilter.status !== status) this.clearReviewSelection();
             this.activeView = 'reviews';
             this.reviewFilter.status = status;
             this.setRoute(status ? `#reviews/${status}` : '#reviews');
@@ -1987,7 +2247,9 @@ function adminV2() {
 
         openLibrary(kind = this.libraryKind) {
             this.activeView = 'library';
-            this.libraryKind = ['artists', 'releases', 'playlists'].includes(kind) ? kind : 'artists';
+            const nextKind = ['artists', 'releases', 'playlists'].includes(kind) ? kind : 'artists';
+            if (this.libraryKind !== nextKind) this.clearLibrarySelection();
+            this.libraryKind = nextKind;
             this.setRoute(`#library/${this.libraryKind}`);
             this.loadLibrary();
         },
@@ -2006,7 +2268,7 @@ function adminV2() {
             params.set('offset', this.reviews.offset || 0);
             try {
                 this.reviews = await this.request(`${this.apiBase}/reviews?${params.toString()}`);
-                this.clearReviewSelection();
+                if (resetOffset) this.clearReviewSelection();
             } catch (error) {
                 this.showToast(error.message);
             } finally {
@@ -2037,7 +2299,7 @@ function adminV2() {
             if (this.librarySearch) params.set('search', this.librarySearch);
             try {
                 this.library = await this.request(`${this.apiBase}/library?${params.toString()}`);
-                this.clearLibrarySelection();
+                if (resetOffset) this.clearLibrarySelection();
             } catch (error) {
                 this.showToast(error.message);
             } finally {
@@ -2228,6 +2490,7 @@ function adminV2() {
                     body: JSON.stringify(payload)
                 });
                 this.showToast(`${result.affected} review row(s) updated`);
+                this.clearReviewSelection();
                 await this.loadReviews(false);
             } catch (error) {
                 this.showToast(error.message);
@@ -2343,9 +2606,184 @@ function adminV2() {
             this.activeLibraryItem = item;
             this.editorDraft = {
                 title: item.title || '',
-                hidden: item.is_hidden ? 'true' : 'false'
+                hidden: item.is_hidden ? 'true' : 'false',
+                release_type: 'album',
+                year: '',
+                artist_ids: []
             };
+            this.editorDetail = null;
+            this.editorImageFile = null;
+            this.editorArtistToAdd = '';
             this.editorOpen = true;
+            this.loadEditorDetail(item);
+        },
+
+        async loadEditorDetail(item) {
+            const key = `${item.kind}:${item.id}`;
+            this.editorLoading = true;
+            try {
+                const params = new URLSearchParams({ kind: item.kind, id: item.id });
+                const detail = await this.request(`${this.apiBase}/library/item/detail?${params.toString()}`);
+                if (!this.activeLibraryItem || `${this.activeLibraryItem.kind}:${this.activeLibraryItem.id}` !== key) return;
+                this.editorDetail = detail;
+                this.editorDraft = {
+                    title: detail.title || '',
+                    hidden: detail.hidden ? 'true' : 'false',
+                    release_type: detail.release_type || 'album',
+                    year: detail.year || '',
+                    artist_ids: Array.isArray(detail.selected_artist_ids) ? detail.selected_artist_ids.slice() : []
+                };
+                this.editorImageFile = null;
+                this.editorArtistToAdd = '';
+            } catch (error) {
+                this.showToast(error.message);
+            } finally {
+                if (this.activeLibraryItem && `${this.activeLibraryItem.kind}:${this.activeLibraryItem.id}` === key) {
+                    this.editorLoading = false;
+                }
+                this.icons();
+            }
+        },
+
+        isArtistEditor() {
+            return this.activeLibraryItem && this.activeLibraryItem.kind === 'artists';
+        },
+
+        isReleaseEditor() {
+            return this.activeLibraryItem && this.activeLibraryItem.kind === 'releases';
+        },
+
+        canEditLibraryImage() {
+            return this.isArtistEditor() || this.isReleaseEditor();
+        },
+
+        editorCanSave() {
+            return Boolean(this.activeLibraryItem && this.editorDetail && !this.editorLoading && !this.editorSaving);
+        },
+
+        selectedEditorArtists() {
+            const selected = this.editorDraft.artist_ids || [];
+            const artists = (this.editorDetail && this.editorDetail.artists) || [];
+            return selected.map(id => {
+                const artist = artists.find(row => Number(row.id) === Number(id));
+                return artist || { id, name: `Artist #${id}` };
+            });
+        },
+
+        editorAvailableArtists() {
+            const selected = new Set((this.editorDraft.artist_ids || []).map(id => Number(id)));
+            const artists = (this.editorDetail && this.editorDetail.artists) || [];
+            return artists.filter(artist => !selected.has(Number(artist.id)));
+        },
+
+        normalizedArtistSearch(value) {
+            return String(value || '').trim().toLowerCase();
+        },
+
+        filteredEditorArtists() {
+            const raw = String(this.editorArtistToAdd || '').trim();
+            const query = this.normalizedArtistSearch(raw);
+            const candidates = this.editorAvailableArtists();
+            if (!query) return candidates.slice(0, 12);
+            return candidates
+                .map(artist => {
+                    const name = this.normalizedArtistSearch(artist.name);
+                    let score = 3;
+                    if (name === query) score = 0;
+                    else if (name.startsWith(query)) score = 1;
+                    else if (name.includes(query)) score = 2;
+                    return { artist, score };
+                })
+                .filter(row => row.score < 3)
+                .sort((a, b) => a.score - b.score || a.artist.name.localeCompare(b.artist.name))
+                .slice(0, 12)
+                .map(row => row.artist);
+        },
+
+        editorArtistSearchOpen() {
+            return this.isReleaseEditor() && String(this.editorArtistToAdd || '').trim().length > 0;
+        },
+
+        addEditorArtist(artist = null) {
+            const raw = String(this.editorArtistToAdd || '').trim();
+            const candidates = this.filteredEditorArtists();
+            artist = artist
+                || candidates.find(row => this.normalizedArtistSearch(row.name) === this.normalizedArtistSearch(raw))
+                || candidates[0];
+            if (artist && !(this.editorDraft.artist_ids || []).map(Number).includes(Number(artist.id))) {
+                this.editorDraft.artist_ids = (this.editorDraft.artist_ids || []).concat([Number(artist.id)]);
+            }
+            this.editorArtistToAdd = '';
+        },
+
+        removeEditorArtist(id) {
+            this.editorDraft.artist_ids = (this.editorDraft.artist_ids || []).filter(value => Number(value) !== Number(id));
+        },
+
+        setEditorImageFile(event) {
+            this.editorImageFile = event.target.files && event.target.files.length ? event.target.files[0] : null;
+        },
+
+        readFileAsDataUrl(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = () => reject(reader.error || new Error('failed to read file'));
+                reader.readAsDataURL(file);
+            });
+        },
+
+        async uploadLibraryImage() {
+            if (!this.activeLibraryItem || !this.editorImageFile || this.editorImageUploading) return;
+            this.editorImageUploading = true;
+            try {
+                const dataUrl = await this.readFileAsDataUrl(this.editorImageFile);
+                const data = String(dataUrl).split(',')[1] || '';
+                await this.request(`${this.apiBase}/library/item/upload-image`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        kind: this.activeLibraryItem.kind,
+                        id: this.activeLibraryItem.id,
+                        filename: this.editorImageFile.name,
+                        mime_type: this.editorImageFile.type || 'application/octet-stream',
+                        data
+                    })
+                });
+                await this.loadEditorDetail(this.activeLibraryItem);
+                this.showToast('Image uploaded');
+            } catch (error) {
+                this.showToast(error.message);
+            } finally {
+                this.editorImageUploading = false;
+                if (this.$refs.libraryImageInput) this.$refs.libraryImageInput.value = '';
+                this.icons();
+            }
+        },
+
+        async setLibraryImage(mediaFileId) {
+            if (!this.activeLibraryItem || this.editorImageUploading) return;
+            this.editorImageUploading = true;
+            try {
+                await this.request(`${this.apiBase}/library/item/image`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        kind: this.activeLibraryItem.kind,
+                        id: this.activeLibraryItem.id,
+                        media_file_id: mediaFileId
+                    })
+                });
+                await this.loadEditorDetail(this.activeLibraryItem);
+                this.showToast(mediaFileId ? 'Image selected' : 'Image removed');
+            } catch (error) {
+                this.showToast(error.message);
+            } finally {
+                this.editorImageUploading = false;
+                this.icons();
+            }
+        },
+
+        removeLibraryImage() {
+            this.setLibraryImage(null);
         },
 
         toggleLibrary(item) {
@@ -2362,14 +2800,18 @@ function adminV2() {
 
         selectedLibraryCount() {
             if (this.librarySelectionScope === 'filter') return this.library.total || 0;
-            return Object.keys(this.selectedLibraryIds).length;
+            return this.currentLibrarySelectionKeys().length;
+        },
+
+        currentLibrarySelectionKeys() {
+            return Object.keys(this.selectedLibraryIds).filter(key => key.startsWith(`${this.libraryKind}:`));
         },
 
         async bulkLibrary(action) {
             const count = this.selectedLibraryCount();
             if (!count) return;
             if (action === 'delete' && !confirm(`Delete ${count} ${this.libraryKind}?`)) return;
-            const ids = Object.keys(this.selectedLibraryIds)
+            const ids = this.currentLibrarySelectionKeys()
                 .map(key => Number(key.split(':')[1]))
                 .filter(Boolean);
             try {
@@ -2384,6 +2826,7 @@ function adminV2() {
                     })
                 });
                 this.showToast(`${result.affected} ${this.libraryKind} updated`);
+                this.clearLibrarySelection();
                 await this.loadLibrary(false);
                 await this.refreshCountsOnly();
             } catch (error) {
@@ -2392,7 +2835,8 @@ function adminV2() {
         },
 
         async saveLibraryItem() {
-            if (!this.activeLibraryItem) return;
+            if (!this.editorCanSave()) return;
+            this.editorSaving = true;
             try {
                 const updated = await this.request(`${this.apiBase}/library/item`, {
                     method: 'POST',
@@ -2400,16 +2844,22 @@ function adminV2() {
                         kind: this.activeLibraryItem.kind,
                         id: this.activeLibraryItem.id,
                         title: this.editorDraft.title,
-                        hidden: this.editorDraft.hidden === 'true'
+                        hidden: this.editorDraft.hidden === 'true',
+                        release_type: this.editorDraft.release_type || null,
+                        year: this.editorDraft.year || '',
+                        artist_ids: this.editorDraft.artist_ids || []
                     })
                 });
                 this.replaceLibraryItem(updated);
                 this.activeLibraryItem = updated;
-                this.editorOpen = false;
+                if (this.editorDetail) this.editorDetail.item = updated;
                 this.showToast('Saved');
                 await this.refreshCountsOnly();
             } catch (error) {
                 this.showToast(error.message);
+            } finally {
+                this.editorSaving = false;
+                this.icons();
             }
         },
 

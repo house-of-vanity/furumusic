@@ -55,6 +55,8 @@ pub(super) struct TrackItem {
     pub(super) duration_seconds: f64,
     pub(super) artists: Vec<ArtistRef>,
     pub(super) featured_artists: Vec<ArtistRef>,
+    pub(super) release_id: i64,
+    pub(super) release_title: String,
     pub(super) release_year: Option<i32>,
     pub(super) cover_url: Option<String>,
     pub(super) stream_url: String,

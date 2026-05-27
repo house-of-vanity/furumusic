@@ -465,6 +465,8 @@ async fn release_detail_handler(
         r#"SELECT t.id, t.title::text as title, t.track_number, t.disc_number,
                   t.duration_seconds, t.cover_file_id,
                   r.cover_file_id as release_cover_file_id,
+                  r.id as release_id,
+                  r.title::text as release_title,
                   r.year as release_year,
                   COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
                   mf.audio_format,
@@ -542,6 +544,8 @@ async fn release_detail_handler(
                 duration_seconds: t.duration_seconds,
                 artists: track_main_artists.remove(&tid).unwrap_or_default(),
                 featured_artists: track_feat_artists.remove(&tid).unwrap_or_default(),
+                release_id: t.release_id,
+                release_title: t.release_title,
                 release_year: t.release_year,
                 cover_url: track_cover_variant_url(
                     t.cover_file_id,
@@ -707,6 +711,8 @@ async fn playlist_detail_handler(
         r#"SELECT t.id, t.title::text as title, t.track_number, t.disc_number,
                   t.duration_seconds, t.cover_file_id,
                   r.cover_file_id as release_cover_file_id,
+                  r.id as release_id,
+                  r.title::text as release_title,
                   r.year as release_year,
                   COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
                   mf.audio_format,
@@ -804,6 +810,8 @@ async fn build_track_items(
                 duration_seconds: t.duration_seconds,
                 artists: track_main_artists.remove(&tid).unwrap_or_default(),
                 featured_artists: track_feat_artists.remove(&tid).unwrap_or_default(),
+                release_id: t.release_id,
+                release_title: t.release_title,
                 release_year: t.release_year,
                 cover_url: track_cover_variant_url(
                     t.cover_file_id,
@@ -835,13 +843,19 @@ async fn likes_playlist_handler(
         r#"SELECT t.id, t.title::text as title, t.track_number, t.disc_number,
                   t.duration_seconds, t.cover_file_id,
                   r.cover_file_id as release_cover_file_id,
+                  r.id as release_id,
+                  r.title::text as release_title,
                   r.year as release_year,
                   COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
                   mf.audio_format,
                   mf.audio_bitrate,
                   mf.audio_sample_rate,
                   mf.audio_bit_depth,
-                  mf.file_size_bytes
+                  mf.file_size_bytes,
+                  t.lastfm_listeners,
+                  t.lastfm_playcount,
+                  t.lastfm_rating,
+                  t.lastfm_updated_at
            FROM furumusic__user_liked_track ult
            JOIN furumusic__track t ON t.id = ult.track_id
            JOIN furumusic__release r ON r.id = t.release_id
@@ -1476,6 +1490,8 @@ async fn search_handler(
             r#"SELECT t.id, t.title::text AS title, t.track_number, t.disc_number,
                       t.duration_seconds, t.cover_file_id,
                       rel.cover_file_id AS release_cover_file_id,
+                      rel.id AS release_id,
+                      rel.title::text AS release_title,
                       rel.year AS release_year,
                       COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
                       mf.audio_format,
@@ -1550,11 +1566,13 @@ async fn search_handler(
 
         let t = sqlx::query_as::<_, SearchTrackRow>(
             r#"SELECT id, title, track_number, disc_number, duration_seconds, cover_file_id,
-                      release_cover_file_id, release_year, uploader_name, audio_format, audio_bitrate,
+                      release_cover_file_id, release_id, release_title, release_year, uploader_name, audio_format, audio_bitrate,
                       audio_sample_rate, audio_bit_depth, file_size_bytes, lastfm_listeners, lastfm_playcount, lastfm_rating, lastfm_updated_at FROM (
                 SELECT t.id, t.title::text AS title, t.track_number, t.disc_number,
                        t.duration_seconds, t.cover_file_id,
                        rel.cover_file_id AS release_cover_file_id,
+                       rel.id AS release_id,
+                       rel.title::text AS release_title,
                        rel.year AS release_year,
                        COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
                        mf.audio_format,
@@ -1580,7 +1598,7 @@ async fn search_handler(
                 ) t
                 JOIN furumusic__release rel ON rel.id = t.release_id
                 LEFT JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
-                GROUP BY t.id, t.title, t.track_number, t.disc_number, t.duration_seconds, t.cover_file_id, rel.cover_file_id, rel.year,
+                GROUP BY t.id, t.title, t.track_number, t.disc_number, t.duration_seconds, t.cover_file_id, rel.cover_file_id, rel.id, rel.title, rel.year,
                          mf.uploader_name, mf.audio_format, mf.audio_bitrate, mf.audio_sample_rate, mf.audio_bit_depth, mf.file_size_bytes,
                          t.lastfm_listeners, t.lastfm_playcount, t.lastfm_rating, t.lastfm_updated_at
                 ORDER BY similarity DESC
@@ -1677,6 +1695,8 @@ async fn search_handler(
                 duration_seconds: t.duration_seconds,
                 artists: track_main_artists.remove(&tid).unwrap_or_default(),
                 featured_artists: track_feat_artists.remove(&tid).unwrap_or_default(),
+                release_id: t.release_id,
+                release_title: t.release_title,
                 release_year: t.release_year,
                 cover_url: track_cover_variant_url(
                     t.cover_file_id,
@@ -2252,6 +2272,8 @@ async fn tracks_by_ids_handler(
         r#"SELECT t.id, t.title::text as title, t.track_number, t.disc_number,
                   t.duration_seconds, t.cover_file_id,
                   r.cover_file_id as release_cover_file_id,
+                  r.id as release_id,
+                  r.title::text as release_title,
                   r.year as release_year,
                   COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
                   mf.audio_format,
@@ -2328,6 +2350,8 @@ async fn tracks_by_ids_handler(
                 duration_seconds: t.duration_seconds,
                 artists: track_main_artists.remove(&tid).unwrap_or_default(),
                 featured_artists: track_feat_artists.remove(&tid).unwrap_or_default(),
+                release_id: t.release_id,
+                release_title: t.release_title,
                 release_year: t.release_year,
                 cover_url: track_cover_variant_url(
                     t.cover_file_id,

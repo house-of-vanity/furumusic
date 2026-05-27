@@ -4,11 +4,14 @@ const T = {
     info: "{{ t.player_info }}",
     noDetails: "{{ t.player_no_details }}",
     trackInfoTitle: "{{ t.player_track_info }}",
+    releaseInfoTitle: "{{ t.player_release_info }}",
     loadingHistory: "{{ t.player_loading_history }}",
     failedLoadHistory: "{{ t.player_failed_load_history }}",
     totalPlays: "{{ t.player_total_plays }}",
     unknown: "{{ t.player_unknown }}",
     unknownSize: "{{ t.player_unknown_size }}",
+    title: "{{ t.player_title }}",
+    release: "{{ t.player_release }}",
     unknownRelease: "{{ t.player_unknown_release }}",
     unknownTrack: "{{ t.player_unknown_track }}",
     unknownAudio: "{{ t.player_unknown_audio }}",
@@ -124,13 +127,32 @@ document.addEventListener('alpine:init', () => {
     Alpine.store('info', {
         modal: null,
         open(title, body) {
+            if (Array.isArray(body)) {
+                this.openRows(title, body);
+                return;
+            }
             this.modal = {
                 title: title || T.info,
                 body: body || T.noDetails,
+                rows: null,
+            };
+        },
+        openRows(title, rows) {
+            this.modal = {
+                title: title || T.info,
+                body: '',
+                rows: (rows || []).filter(row => row && ((row.value !== undefined && row.value !== null && row.value !== '') || (row.links && row.links.length))),
             };
         },
         close() {
             this.modal = null;
+        },
+        navigate(link) {
+            if (!link || !link.id) return;
+            this.close();
+            const library = Alpine.store('library');
+            if (link.type === 'release') library.openRelease(link.id);
+            if (link.type === 'artist') library.openArtist(link.id);
         },
     });
 
@@ -892,7 +914,7 @@ document.addEventListener('alpine:init', () => {
         },
 
         openTrackInfo(track) {
-            Alpine.store('info').open(T.trackInfoTitle, this.trackInfo(track));
+            Alpine.store('info').openRows(T.trackInfoTitle, this.trackInfoRows(track));
         },
 
         uploadersInfo(uploaders) {
@@ -913,6 +935,31 @@ document.addEventListener('alpine:init', () => {
                 `${T.uploaders}: ${this.uploadersInfo(release.uploaders || [])}`,
             ];
             return lines.join('\n');
+        },
+
+        openReleaseInfo(release) {
+            Alpine.store('info').openRows(T.releaseInfoTitle, this.releaseInfoRows(release));
+        },
+
+        infoLinks(items, type) {
+            const seen = new Set();
+            return (items || [])
+                .filter(item => item && item.id && !seen.has(Number(item.id)) && seen.add(Number(item.id)))
+                .map(item => ({ type, id: item.id, label: item.label || item.name || item.title || String(item.id) }));
+        },
+
+        releaseInfoRows(release) {
+            if (!release) return [];
+            const rows = [
+                { label: T.release, value: release.title || T.unknownRelease },
+                { label: T.type, value: release.release_type || T.unknown },
+                { label: T.year, value: release.year || T.unknown },
+                { label: T.tracks, value: release.track_count || release.tracks?.length || 0 },
+                { label: T.uploaders, value: this.uploadersInfo(release.uploaders || []) },
+            ];
+            const artistLinks = this.infoLinks(release.artists || [], 'artist');
+            if (artistLinks.length) rows.splice(1, 0, { label: T.artists, links: artistLinks });
+            return rows;
         },
 
         trackInfo(track) {
@@ -943,6 +990,40 @@ document.addEventListener('alpine:init', () => {
                 lines.push(`${T.lastfmRating}: ${T.lastfmNotLoaded}`);
             }
             return lines.join('\n');
+        },
+
+        trackInfoRows(track) {
+            if (!track) return [];
+            const artistLinks = this.infoLinks(this.trackArtistLinks(track), 'artist');
+            const releaseLinks = track.release_id
+                ? [{ type: 'release', id: track.release_id, label: track.release_title || T.unknownRelease }]
+                : [];
+            const audio = [
+                track.audio_format || null,
+                track.audio_bitrate ? `${track.audio_bitrate} kbps` : null,
+                track.audio_sample_rate ? `${track.audio_sample_rate} Hz` : null,
+                track.audio_bit_depth ? `${track.audio_bit_depth}-bit` : null,
+            ].filter(Boolean).join(' · ') || T.unknownAudio;
+            const rows = [
+                { label: T.title, value: track.title || T.unknownTrack },
+                { label: T.release, links: releaseLinks },
+                { label: T.artists, links: artistLinks },
+                { label: T.releaseYear, value: track.release_year || T.unknown },
+                { label: T.duration, value: formatTime(track.duration_seconds) },
+                { label: T.audio, value: audio },
+                { label: T.size, value: this.bytes(track.file_size_bytes) },
+                { label: T.uploader, value: track.uploader_name || 'UFO' },
+            ];
+            if (track.lastfm_rating != null || track.lastfm_listeners != null || track.lastfm_playcount != null) {
+                const rating = Number(track.lastfm_rating || 0);
+                rows.push({ label: T.lastfmRating, value: Number.isFinite(rating) ? Math.round(rating) : T.unknown });
+                rows.push({ label: T.lastfmListeners, value: new Intl.NumberFormat().format(track.lastfm_listeners || 0) });
+                rows.push({ label: T.lastfmPlaycount, value: new Intl.NumberFormat().format(track.lastfm_playcount || 0) });
+                if (track.lastfm_updated_at) rows.push({ label: T.lastfmUpdated, value: track.lastfm_updated_at });
+            } else {
+                rows.push({ label: T.lastfmRating, value: T.lastfmNotLoaded });
+            }
+            return rows;
         },
 
         async openRelease(id, options = {}) {

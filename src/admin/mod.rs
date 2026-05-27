@@ -429,6 +429,88 @@ impl App for AdminApp {
                 "admin_v2_library_item",
             ),
             Route::with_handler_and_name(
+                "/v2/api/library/item/detail",
+                {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    get(move |session: Session,
+                              db: Database,
+                              query: UrlQuery<v2::LibraryItemDetailQuery>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("admin pool")
+                                })
+                                .await;
+                            v2::library_item_detail(session, db, pg_pool, query.0).await
+                        }
+                    })
+                },
+                "admin_v2_library_item_detail",
+            ),
+            Route::with_handler_and_name(
+                "/v2/api/library/item/image",
+                {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    cot::router::method::post(
+                        move |session: Session,
+                              db: Database,
+                              json: Json<v2::SetLibraryImageRequest>| {
+                            let pool = Arc::clone(&pool);
+                            let pool_config = Arc::clone(&pool_config);
+                            async move {
+                                let pg_pool = pool
+                                    .get_or_init(|| async {
+                                        sqlx::postgres::PgPoolOptions::new()
+                                            .max_connections(5)
+                                            .connect(&pool_config.database_url)
+                                            .await
+                                            .expect("admin pool")
+                                    })
+                                    .await;
+                                v2::set_library_item_image(session, db, pg_pool, json).await
+                            }
+                        },
+                    )
+                },
+                "admin_v2_library_item_image",
+            ),
+            Route::with_handler_and_name(
+                "/v2/api/library/item/upload-image",
+                {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    cot::router::method::post(
+                        move |session: Session,
+                              db: Database,
+                              json: Json<v2::UploadLibraryImageRequest>| {
+                            let pool = Arc::clone(&pool);
+                            let pool_config = Arc::clone(&pool_config);
+                            async move {
+                                let pg_pool = pool
+                                    .get_or_init(|| async {
+                                        sqlx::postgres::PgPoolOptions::new()
+                                            .max_connections(5)
+                                            .connect(&pool_config.database_url)
+                                            .await
+                                            .expect("admin pool")
+                                    })
+                                    .await;
+                                v2::upload_library_item_image(session, db, pg_pool, json).await
+                            }
+                        },
+                    )
+                },
+                "admin_v2_library_item_upload_image",
+            ),
+            Route::with_handler_and_name(
                 "/v2/api/library/bulk",
                 {
                     let pool = Arc::clone(&pool);

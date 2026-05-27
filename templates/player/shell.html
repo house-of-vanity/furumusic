@@ -391,7 +391,7 @@
                                                     <template x-if="!release.cover_url">
                                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="12" r="4"/></svg>
                                                     </template>
-                                                    <button class="card-info-btn" @click.stop="$store.info.open('{{ t.player_release_info }}', $store.library.releaseInfo(release))" :title="$store.library.releaseInfo(release)" aria-label="{{ t.player_release_info }}">
+                                                    <button class="card-info-btn" @click.stop="$store.library.openReleaseInfo(release)" :title="$store.library.releaseInfo(release)" aria-label="{{ t.player_release_info }}">
                                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
                                                     </button>
                                                 </div>
@@ -562,7 +562,7 @@
                                             <template x-if="!release.cover_url">
                                                 <span class="placeholder-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="12" r="4"/></svg></span>
                                             </template>
-                                            <button class="card-info-btn" @click.stop="$store.info.open('{{ t.player_release_info }}', $store.library.releaseInfo(release))" :title="$store.library.releaseInfo(release)" aria-label="{{ t.player_release_info }}">
+                                            <button class="card-info-btn" @click.stop="$store.library.openReleaseInfo(release)" :title="$store.library.releaseInfo(release)" aria-label="{{ t.player_release_info }}">
                                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
                                             </button>
                                             <button class="card-enqueue-btn" @click.stop="$store.library.enqueueRelease(release.id)" title="{{ t.player_add_to_queue }}">
@@ -690,7 +690,7 @@
                             <div class="release-year" x-text="$store.library.currentRelease.year || ''"></div>
                             <div class="release-actions">
                                 <button class="release-action-btn secondary"
-                                        @click.stop="$store.info.open('{{ t.player_release_info }}', $store.library.releaseInfo($store.library.currentRelease))"
+                                        @click.stop="$store.library.openReleaseInfo($store.library.currentRelease)"
                                         :title="$store.library.releaseInfo($store.library.currentRelease)"
                                         aria-label="{{ t.player_release_info }}">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
@@ -928,7 +928,16 @@
                         </template>
                     </div>
                     <div class="player-track-info">
-                        <div class="player-track-title" x-text="$store.player.currentTrack.title"></div>
+                        <div class="player-track-title-row">
+                            <div class="player-track-title" x-text="$store.player.currentTrack.title"></div>
+                            <button class="like-btn player-current-like"
+                                    :class="{ liked: $store.likes.has($store.player.currentTrack.id) }"
+                                    @click.stop="$store.likes.toggle($store.player.currentTrack.id)"
+                                    title="{{ t.player_like }}"
+                                    aria-label="{{ t.player_like }}">
+                                <svg viewBox="0 0 24 24" :fill="$store.likes.has($store.player.currentTrack.id) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z"/></svg>
+                            </button>
+                        </div>
                         <div class="player-track-artist">
                             <template x-for="(artist, artistIdx) in $store.library.trackArtistLinks($store.player.currentTrack)" :key="artist.label + '-' + artist.id + '-' + artistIdx">
                                 <span>
