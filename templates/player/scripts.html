@@ -165,12 +165,115 @@ document.addEventListener('alpine:init', () => {
 
     Alpine.store('mobile', {
         libraryOpen: false,
+        playerExpanded: false,
+        playerDragging: false,
+        playerDragOffset: 0,
+        playerCloseOffset: 0,
+        _playerDragStartY: 0,
+        _playerDragPointerId: null,
+        _playerDragElement: null,
+        _playerDragMove: null,
+        _playerDragEnd: null,
         toggleLibrary() {
             this.libraryOpen = !this.libraryOpen;
             if (this.libraryOpen) Alpine.store('user').menuOpen = false;
         },
         closeLibrary() {
             this.libraryOpen = false;
+        },
+        isMobilePlayer() {
+            return window.matchMedia && window.matchMedia('(max-width: 720px)').matches;
+        },
+        openPlayerFullscreen() {
+            if (!this.isMobilePlayer() || !Alpine.store('player').currentTrack) return;
+            this.playerExpanded = true;
+            this.playerDragging = false;
+            this.playerDragOffset = 0;
+            this.playerCloseOffset = 0;
+            Alpine.store('queue').visible = false;
+            Alpine.store('devices').open = false;
+        },
+        closePlayerFullscreen() {
+            this.playerExpanded = false;
+            this.playerDragging = false;
+            this.playerDragOffset = 0;
+            this.playerCloseOffset = 0;
+        },
+        playerDragStyle() {
+            return `--mobile-player-drag:${this.playerDragOffset}px; --mobile-player-close-drag:${this.playerCloseOffset}px;`;
+        },
+        startPlayerDrag(event, force = false) {
+            if (!this.isMobilePlayer() || !Alpine.store('player').currentTrack) return;
+            if (event.button && event.button !== 0) return;
+            const target = event.target;
+            const isInteractive = target.closest('button, input, select, textarea, a, .volume-slider, .progress-bar, .device-popover, .mobile-expanded-queue');
+            if (!force) {
+                if (this.playerExpanded) {
+                    const isCloseHandle = target.closest('.player-now-playing');
+                    const scroller = event.currentTarget?.classList?.contains('player-bar') ? event.currentTarget : null;
+                    if (!isCloseHandle || isInteractive || (scroller && scroller.scrollTop > 4)) return;
+                } else if (isInteractive) {
+                    return;
+                }
+            }
+            event.preventDefault();
+            if (this.playerDragging) this.endPlayerDrag({ type: 'pointercancel' });
+            this.playerDragging = true;
+            this._playerDragStartY = event.clientY;
+            this._playerDragPointerId = event.pointerId;
+            this._playerDragElement = event.currentTarget;
+            this.playerDragOffset = 0;
+            this.playerCloseOffset = 0;
+            try {
+                this._playerDragElement?.setPointerCapture?.(event.pointerId);
+            } catch (_) {}
+            this._playerDragMove = e => this.movePlayerDrag(e);
+            this._playerDragEnd = e => this.endPlayerDrag(e);
+            window.addEventListener('pointermove', this._playerDragMove, { passive: false });
+            window.addEventListener('pointerup', this._playerDragEnd, { passive: false });
+            window.addEventListener('pointercancel', this._playerDragEnd, { passive: false });
+        },
+        movePlayerDrag(event) {
+            if (!this.playerDragging) return;
+            const delta = this._playerDragStartY - event.clientY;
+            if (Math.abs(delta) > 6) event.preventDefault();
+            if (this.playerExpanded) {
+                this.playerCloseOffset = Math.max(0, Math.min(180, -delta));
+            } else {
+                const max = Math.max(0, window.innerHeight - 132);
+                this.playerDragOffset = Math.max(0, Math.min(max, delta));
+            }
+        },
+        endPlayerDrag(event) {
+            const openThreshold = Math.min(180, Math.max(90, window.innerHeight * 0.18));
+            const closeThreshold = 110;
+            const wasCancelled = event?.type === 'pointercancel';
+            if (this.playerExpanded) {
+                if (!wasCancelled && this.playerCloseOffset > closeThreshold) this.closePlayerFullscreen();
+                else {
+                    this.playerCloseOffset = 0;
+                    this.playerDragging = false;
+                }
+            } else if (!wasCancelled && this.playerDragOffset > openThreshold) {
+                this.openPlayerFullscreen();
+            } else {
+                this.playerDragOffset = 0;
+                this.playerDragging = false;
+            }
+            try {
+                if (this._playerDragPointerId !== null && this._playerDragElement?.hasPointerCapture?.(this._playerDragPointerId)) {
+                    this._playerDragElement.releasePointerCapture(this._playerDragPointerId);
+                }
+            } catch (_) {}
+            if (this._playerDragMove) window.removeEventListener('pointermove', this._playerDragMove);
+            if (this._playerDragEnd) {
+                window.removeEventListener('pointerup', this._playerDragEnd);
+                window.removeEventListener('pointercancel', this._playerDragEnd);
+            }
+            this._playerDragPointerId = null;
+            this._playerDragElement = null;
+            this._playerDragMove = null;
+            this._playerDragEnd = null;
         },
     });
 
@@ -1378,6 +1481,11 @@ document.addEventListener('alpine:init', () => {
 
         add(track) {
             this.addToEnd([track]);
+        },
+
+        upcoming(limit = 12) {
+            const start = Math.max(0, this.currentIndex + 1);
+            return this.tracks.slice(start, start + limit);
         },
 
         addToEnd(tracks) {

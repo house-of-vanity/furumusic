@@ -943,11 +943,21 @@
     </div>
 
     <!-- Player Bar -->
-    <div class="player-bar">
+    <div class="player-bar"
+         :class="{ 'mobile-expanded': $store.mobile.playerExpanded, 'mobile-dragging': $store.mobile.playerDragging }"
+         :style="$store.mobile.playerDragStyle()"
+         @pointerdown="$store.mobile.startPlayerDrag($event)">
+        <button class="mobile-player-collapse-btn" type="button" @click.stop="$store.mobile.closePlayerFullscreen()" title="{{ t.player_close }}" aria-label="{{ t.player_close }}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+                <path d="M6 9l6 6 6-6"/>
+            </svg>
+        </button>
         <div class="player-now-playing">
             <template x-if="$store.player.currentTrack">
                 <div style="display:flex;align-items:center;gap:12px;overflow:hidden">
-                    <div class="player-cover">
+                    <div class="player-cover"
+                         @click.stop="$store.mobile.openPlayerFullscreen()"
+                         @pointerdown.stop="$store.mobile.startPlayerDrag($event, true)">
                         <template x-if="$store.player.currentTrack.cover_url">
                             <img :src="$store.player.currentTrack.cover_url" :alt="$store.player.currentTrack.title">
                         </template>
@@ -976,6 +986,9 @@
                             <template x-if="$store.player.currentTrack.release_year">
                                 <span class="player-release-year" x-text="' · ' + $store.player.currentTrack.release_year"></span>
                             </template>
+                        </div>
+                        <div class="player-track-release" x-show="$store.player.currentTrack.release_title">
+                            <a class="artist-link" @click.stop="$store.player.currentTrack.release_id && $store.library.openRelease($store.player.currentTrack.release_id)" x-text="$store.player.currentTrack.release_title"></a>
                         </div>
                     </div>
                 </div>
@@ -1154,5 +1167,35 @@
                     </div>
                 </div>
             </div>
+        </div>
+        <div class="mobile-expanded-queue">
+            <div class="mobile-expanded-queue-title">{{ t.player_queue }}</div>
+            <template x-if="$store.queue.upcoming().length === 0">
+                <div class="mobile-expanded-queue-empty">{{ t.player_queue_empty }}</div>
+            </template>
+            <template x-for="(track, idx) in $store.queue.upcoming()" :key="'mobile-expanded-queue-' + track.id + '-' + idx">
+                <button class="mobile-expanded-queue-row" type="button" @click="$store.queue.playFromIndex($store.queue.currentIndex + idx + 1)">
+                    <div class="mobile-expanded-queue-cover">
+                        <template x-if="track.cover_url">
+                            <img :src="track.cover_url" :alt="track.title" loading="lazy">
+                        </template>
+                        <template x-if="!track.cover_url">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                        </template>
+                    </div>
+                    <div class="mobile-expanded-queue-info">
+                        <div class="mobile-expanded-queue-name" x-text="track.title"></div>
+                        <div class="mobile-expanded-queue-artist">
+                            <template x-for="(artist, artistIdx) in $store.library.trackArtistLinks(track)" :key="artist.label + '-' + artist.id + '-' + artistIdx">
+                                <span>
+                                    <template x-if="artistIdx > 0"><span>, </span></template>
+                                    <span x-text="artist.label"></span>
+                                </span>
+                            </template>
+                        </div>
+                    </div>
+                    <span class="mobile-expanded-queue-time" x-text="formatTime(track.duration_seconds)"></span>
+                </button>
+            </template>
         </div>
     </div>
