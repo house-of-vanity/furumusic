@@ -41,9 +41,15 @@
                 <button class="lastfm-profile-action"
                         :class="$store.user.lastfmClass()"
                         :disabled="$store.user.lastfmBusy || !$store.user.lastfm?.configured"
-                        @click="$store.user.handleLastfm()">
+                        @click="$store.user.handleLastfm()"
+                        :title="$store.user.lastfmLabel()"
+                        :aria-label="$store.user.lastfmLabel()">
                     <span class="lastfm-dot"></span>
-                    <span class="lastfm-profile-text" x-text="$store.user.lastfmLabel()"></span>
+                    <span class="lastfm-profile-text">
+                        <span class="lastfm-profile-brand">{{ t.player_lastfm_profile }}</span>
+                        <span class="lastfm-profile-separator">·</span>
+                        <span class="lastfm-profile-status" x-text="$store.user.lastfmStatusLabel()"></span>
+                    </span>
                 </button>
             </div>
             <div class="sidebar-header">
@@ -348,9 +354,15 @@
                     <button class="lastfm-profile-action"
                             :class="$store.user.lastfmClass()"
                             :disabled="$store.user.lastfmBusy || !$store.user.lastfm?.configured"
-                            @click="$store.user.handleLastfm()">
+                            @click="$store.user.handleLastfm()"
+                            :title="$store.user.lastfmLabel()"
+                            :aria-label="$store.user.lastfmLabel()">
                         <span class="lastfm-dot"></span>
-                        <span class="lastfm-profile-text" x-text="$store.user.lastfmLabel()"></span>
+                        <span class="lastfm-profile-text">
+                            <span class="lastfm-profile-brand">{{ t.player_lastfm_profile }}</span>
+                            <span class="lastfm-profile-separator">·</span>
+                            <span class="lastfm-profile-status" x-text="$store.user.lastfmStatusLabel()"></span>
+                        </span>
                     </button>
                     <button class="modal-btn modal-btn-primary mobile-account-logout"
                             @click="$store.user.logout()">
@@ -1048,7 +1060,7 @@
             </button>
             <div class="device-picker" @click.outside="$store.devices.open = false">
                 <button class="queue-toggle-btn device-toggle-btn"
-                        :class="{ active: !$store.devices.isActive() || $store.devices.open }"
+                        :class="{ active: $store.devices.isActive() }"
                         @click="$store.devices.toggle()"
                         :title="$store.devices.activeLabel()"
                         aria-label="Devices">
@@ -1080,7 +1092,7 @@
                             </span>
                             <span class="device-row-main">
                                 <span class="device-row-name" x-text="device.name"></span>
-                                <span class="device-row-current" x-show="device.is_current"></span>
+                                <span class="device-row-current" x-show="device.is_current">This device</span>
                             </span>
                             <span class="device-row-check" x-show="device.is_active">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">

@@ -338,6 +338,10 @@ translations! {
     player_lastfm_connected: "Connected as {user}"             , "Подключён: {user}";
     player_lastfm_reconnect: "Reconnect Last.fm"               , "Переподключить Last.fm";
     player_lastfm_not_configured: "Last.fm is not configured"  , "Last.fm не настроен";
+    player_lastfm_status_connect: "connect account"            , "подключить аккаунт";
+    player_lastfm_status_connected: "connected"                , "подключён";
+    player_lastfm_status_reconnect: "reconnect account"        , "переподключить аккаунт";
+    player_lastfm_status_not_configured: "not configured"      , "не настроен";
     player_lastfm_disconnect_confirm: "Disconnect Last.fm account {user}?" , "Отвязать аккаунт Last.fm {user}?";
     player_lastfm_connect_failed: "Could not open Last.fm connection" , "Не удалось открыть подключение Last.fm";
     player_lastfm_disconnect_failed: "Could not disconnect Last.fm" , "Не удалось отвязать Last.fm";

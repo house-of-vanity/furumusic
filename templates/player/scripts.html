@@ -35,6 +35,10 @@ const T = {
     lastfmConnected: "{{ t.player_lastfm_connected }}",
     lastfmReconnect: "{{ t.player_lastfm_reconnect }}",
     lastfmNotConfigured: "{{ t.player_lastfm_not_configured }}",
+    lastfmStatusConnect: "{{ t.player_lastfm_status_connect }}",
+    lastfmStatusConnected: "{{ t.player_lastfm_status_connected }}",
+    lastfmStatusReconnect: "{{ t.player_lastfm_status_reconnect }}",
+    lastfmStatusNotConfigured: "{{ t.player_lastfm_status_not_configured }}",
     lastfmDisconnectConfirm: "{{ t.player_lastfm_disconnect_confirm }}",
     lastfmConnectFailed: "{{ t.player_lastfm_connect_failed }}",
     lastfmDisconnectFailed: "{{ t.player_lastfm_disconnect_failed }}",
@@ -255,6 +259,16 @@ document.addEventListener('alpine:init', () => {
                 return T.lastfmConnected.replace('{user}', user);
             }
             return T.lastfmConnect;
+        },
+
+        lastfmStatusLabel() {
+            if (!this.lastfm?.configured) return T.lastfmStatusNotConfigured;
+            if (this.lastfm?.connected && this.lastfm?.reauth_required) return T.lastfmStatusReconnect;
+            if (this.lastfm?.connected) {
+                const user = this.lastfm.username || T.unknown;
+                return `${T.lastfmStatusConnected}: ${user}`;
+            }
+            return T.lastfmStatusConnect;
         },
 
         lastfmClass() {
@@ -749,13 +763,11 @@ document.addEventListener('alpine:init', () => {
             const queue = Alpine.store('queue');
             const track = this.currentTrack || queue?.tracks?.[queue.currentIndex] || null;
             if (!track && (!queue || queue.tracks.length === 0)) return null;
-            const payload = this._remotePlaybackPayload(track, {
+            return this._remotePlaybackPayload(track, {
                 position_seconds: audio.currentTime || this.currentTime || 0,
                 duration_seconds: this._trackDuration(),
                 paused: !this.isPlaying,
             });
-            payload.tracks = [];
-            return payload;
         },
 
         _mirrorRemoteTrack(track, playing, positionSeconds = null) {
@@ -816,7 +828,7 @@ document.addEventListener('alpine:init', () => {
                 if (payload.repeat_mode) this.repeatMode = payload.repeat_mode;
                 if (typeof payload.volume === 'number') this._setVolumeLocal(payload.volume);
 
-                if (command.command === 'play_track' || command.command === 'play_from_index') {
+                if (command.command === 'play_track' || command.command === 'play_from_index' || command.command === 'transfer_state') {
                     if (Array.isArray(payload.tracks) && payload.tracks.length > 0) {
                         queue.tracks = payload.tracks;
                         queue.currentIndex = Math.max(0, Math.min(Number(payload.index || 0), queue.tracks.length - 1));
@@ -1051,7 +1063,7 @@ document.addEventListener('alpine:init', () => {
         init() {
             this.id = this._ensureId();
             this.heartbeat();
-            this._pollTimer = setInterval(() => this.poll(), 750);
+            this._pollTimer = setInterval(() => this.poll(), 500);
             document.addEventListener('visibilitychange', () => {
                 if (!document.hidden) this.poll();
             });
@@ -1142,12 +1154,6 @@ document.addEventListener('alpine:init', () => {
         async select(deviceId) {
             if (!deviceId) return;
             const player = Alpine.store('player');
-            const transferPayload = player?.currentTrack
-                ? player._remotePlaybackPayload(player.currentTrack, {
-                    position_seconds: player.currentTime,
-                    paused: !player.isPlaying,
-                })
-                : null;
 
             try {
                 const res = await fetch('/api/player/devices/active', {
@@ -1159,12 +1165,17 @@ document.addEventListener('alpine:init', () => {
                     }),
                 });
                 if (!res.ok) return;
-                this._apply(await res.json());
+                const data = await res.json();
+                this._apply(data);
                 this.open = false;
 
-                if (deviceId !== this.id && transferPayload) {
-                    const sent = await this.sendCommand('play_from_index', transferPayload, deviceId);
-                    if (sent && player?.isPlaying) player._pauseLocal();
+                if (deviceId === this.id && data.playback_state && player) {
+                    player._executeRemoteCommand({
+                        command: 'transfer_state',
+                        payload: data.playback_state,
+                    });
+                } else if (deviceId !== this.id && player && this.id !== this.activeDeviceId) {
+                    player._applyRemotePlaybackState(data.playback_state);
                 }
             } catch {}
         },

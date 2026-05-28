@@ -146,9 +146,32 @@ impl PlayerDeviceHub {
         if !devices.contains_key(target_device_id) {
             return None;
         }
+        let previous_active_id = state.active_device_by_user.get(&user_id).cloned();
+        let transfer_state = state
+            .playback_state_by_user
+            .get(&user_id)
+            .cloned()
+            .map(|playback_state| playback_state_at(playback_state, now));
         state
             .active_device_by_user
             .insert(user_id, target_device_id.to_string());
+        if previous_active_id.as_deref() != Some(target_device_id) {
+            if let Some(transfer_state) = transfer_state {
+                state
+                    .playback_state_by_user
+                    .insert(user_id, transfer_state.clone());
+                if let Ok(payload) = serde_json::to_value(transfer_state) {
+                    self.enqueue_command_locked(
+                        &mut state,
+                        user_id,
+                        target_device_id,
+                        "transfer_state",
+                        payload,
+                        now,
+                    );
+                }
+            }
+        }
         Some(self.snapshot_locked(&state, user_id, current_device_id, now))
     }
 
@@ -180,9 +203,22 @@ impl PlayerDeviceHub {
             return Err("target device is offline");
         }
 
+        self.enqueue_command_locked(&mut state, user_id, &target_id, command, payload, now);
+        Ok(())
+    }
+
+    fn enqueue_command_locked(
+        &self,
+        state: &mut PlayerDeviceHubState,
+        user_id: i64,
+        target_device_id: &str,
+        command: &str,
+        payload: serde_json::Value,
+        now: i64,
+    ) {
         let queue = state
             .commands_by_device
-            .entry((user_id, target_id))
+            .entry((user_id, target_device_id.to_string()))
             .or_default();
         while queue.len() >= PLAYER_DEVICE_MAX_COMMANDS {
             queue.pop_front();
@@ -193,7 +229,6 @@ impl PlayerDeviceHub {
             payload,
             created_at_ms: now,
         });
-        Ok(())
     }
 
     fn touch_locked(
@@ -330,6 +365,23 @@ impl PlayerDeviceHub {
 
 fn current_millis() -> i64 {
     chrono::Utc::now().timestamp_millis()
+}
+
+fn playback_state_at(
+    mut playback_state: PlayerDevicePlaybackStateDto,
+    now: i64,
+) -> PlayerDevicePlaybackStateDto {
+    if !playback_state.paused && playback_state.updated_at_ms > 0 {
+        let elapsed_seconds = now.saturating_sub(playback_state.updated_at_ms) as f64 / 1000.0;
+        playback_state.position_seconds += elapsed_seconds;
+        if playback_state.duration_seconds > 0.0 {
+            playback_state.position_seconds = playback_state
+                .position_seconds
+                .min(playback_state.duration_seconds);
+        }
+    }
+    playback_state.updated_at_ms = now;
+    playback_state
 }
 
 fn normalize_device_id(raw: &str) -> Option<String> {
