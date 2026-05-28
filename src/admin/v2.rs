@@ -9,7 +9,7 @@ use cot::response::IntoResponse;
 use cot::session::Session;
 use cot::{Body, Template};
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use sqlx::{PgPool, Postgres, QueryBuilder};
 
 use super::BUILD_INFO;
@@ -68,9 +68,12 @@ pub(super) struct UpdateLibraryItemRequest {
     title: String,
     hidden: bool,
     release_type: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_stringish")]
     year: Option<String>,
     release_id: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_optional_stringish")]
     track_number: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_stringish")]
     disc_number: Option<String>,
     artist_ids: Option<Vec<i64>>,
 }
@@ -1876,7 +1879,7 @@ async fn fetch_library_item(
         "releases" => {
             sqlx::query_as::<_, LibraryItemRow>(
                 "SELECT r.id, r.title::text AS title, \
-                        CONCAT(r.release_type::text, COALESCE(' · ' || r.year::text, '')) AS subtitle, \
+                        (COALESCE(NULLIF(STRING_AGG(DISTINCT a.name::text, ', '), ''), 'Unknown artist') || COALESCE(' / ' || r.year::text, '')) AS subtitle, \
                         r.is_hidden, COUNT(DISTINCT t.id)::bigint AS primary_count, \
                         COUNT(DISTINCT ra.artist_id)::bigint AS secondary_count, \
                         COUNT(DISTINCT ph.id)::bigint AS tertiary_count, \
@@ -1884,6 +1887,7 @@ async fn fetch_library_item(
                  FROM furumusic__release r \
                  LEFT JOIN furumusic__track t ON t.release_id = r.id \
                  LEFT JOIN furumusic__release_artist ra ON ra.release_id = r.id \
+                 LEFT JOIN furumusic__artist a ON a.id = ra.artist_id \
                  LEFT JOIN furumusic__play_history ph ON ph.track_id = t.id \
                  WHERE r.id = $1 \
                  GROUP BY r.id",
@@ -2055,8 +2059,11 @@ async fn load_artist_options(pool: &PgPool) -> anyhow::Result<Vec<ArtistOptionDt
 async fn load_release_options(pool: &PgPool) -> anyhow::Result<Vec<ReleaseOptionDto>> {
     let rows = sqlx::query_as::<_, (i64, String, Option<String>)>(
         "SELECT r.id, r.title::text AS title, \
-                CONCAT(r.release_type::text, COALESCE(' / ' || r.year::text, '')) AS subtitle \
+                (COALESCE(NULLIF(STRING_AGG(DISTINCT a.name::text, ', '), ''), 'Unknown artist') || COALESCE(' / ' || r.year::text, '')) AS subtitle \
          FROM furumusic__release r \
+         LEFT JOIN furumusic__release_artist ra ON ra.release_id = r.id \
+         LEFT JOIN furumusic__artist a ON a.id = ra.artist_id \
+         GROUP BY r.id \
          ORDER BY r.title_sort ASC, r.year NULLS LAST, r.id ASC",
     )
     .fetch_all(pool)
@@ -2452,7 +2459,7 @@ async fn load_release_items(
 ) -> anyhow::Result<Vec<LibraryItemRow>> {
     let mut qb = QueryBuilder::<Postgres>::new(
         "SELECT r.id, r.title::text AS title, \
-                CONCAT(r.release_type::text, COALESCE(' · ' || r.year::text, '')) AS subtitle, \
+                (COALESCE(NULLIF(STRING_AGG(DISTINCT a.name::text, ', '), ''), 'Unknown artist') || COALESCE(' / ' || r.year::text, '')) AS subtitle, \
                 r.is_hidden, COUNT(DISTINCT t.id)::bigint AS primary_count, \
                 COUNT(DISTINCT ra.artist_id)::bigint AS secondary_count, \
                 COUNT(DISTINCT ph.id)::bigint AS tertiary_count, \
@@ -2657,10 +2664,12 @@ fn optional_job_time(value: &str) -> Option<String> {
 }
 
 fn normalize_library_kind(kind: Option<&str>) -> String {
-    match kind {
-        Some("releases") => "releases",
-        Some("tracks") => "tracks",
-        Some("playlists") => "playlists",
+    let kind = kind.unwrap_or_default().trim().to_ascii_lowercase();
+    match kind.as_str() {
+        "release" | "releases" => "releases",
+        "track" | "tracks" => "tracks",
+        "playlist" | "playlists" => "playlists",
+        "artist" | "artists" => "artists",
         _ => "artists",
     }
     .to_owned()
@@ -2694,6 +2703,23 @@ fn parse_optional_admin_i32(value: Option<&str>, min: i32, max: i32) -> Option<i
         .parse::<i32>()
         .ok()
         .map(|parsed| parsed.clamp(min, max))
+}
+
+fn deserialize_optional_stringish<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let Some(value) = Option::<serde_json::Value>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+    match value {
+        serde_json::Value::Null => Ok(None),
+        serde_json::Value::String(value) => Ok(Some(value)),
+        serde_json::Value::Number(value) => Ok(Some(value.to_string())),
+        other => Err(serde::de::Error::custom(format!(
+            "expected string, number, or null, got {other}"
+        ))),
+    }
 }
 
 fn now_string() -> String {

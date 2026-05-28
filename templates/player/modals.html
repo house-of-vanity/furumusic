@@ -422,13 +422,13 @@
                                                         <button class="torrent-tree-check" :class="{ checked: $store.torrents.selectedUploadTracks.has(item.track.id) }" @click="$store.torrents.toggleUploadTrackSelection(item.track.id)">
                                                             <template x-if="$store.torrents.selectedUploadTracks.has(item.track.id)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></template>
                                                         </button>
-                                                        <button class="track-action-btn play-btn" @click="$store.player.play(item.track)" title="{{ t.player_play }}"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button>
                                                         <div class="upload-track-main">
                                                             <div class="upload-track-title"><span x-text="item.track.track_number ? item.track.track_number + '. ' + item.track.title : item.track.title"></span><span class="upload-hidden-pill" x-show="item.is_hidden">hidden</span></div>
                                                             <div class="upload-track-meta"><span x-text="$store.torrents.uploadArtistsText(item)"></span><span x-show="$store.torrents.uploadFeaturedArtistsText(item)">feat.</span><span x-show="$store.torrents.uploadFeaturedArtistsText(item)" x-text="$store.torrents.uploadFeaturedArtistsText(item)"></span></div>
                                                         </div>
                                                         <div class="upload-track-actions">
-                                                            <button class="track-action-btn" @click="$store.queue.addNextInQueue([item.track])" title="{{ t.player_play_next }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h8M5 18h14"/><path d="M17 10l4 3-4 3" fill="currentColor" stroke="none"/></svg></button>
+                                                            <button class="track-action-btn queue-insert-btn queue-next-btn" @click="$store.queue.addNextInQueue([item.track])" title="{{ t.player_play_next }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h10M5 12h7M5 18h10"/><path d="M17 9l4 3-4 3" fill="currentColor" stroke="none"/></svg></button>
+                                                            <button class="track-action-btn queue-insert-btn queue-end-btn" @click="$store.queue.addToEnd([item.track])" title="{{ t.player_add_to_queue }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h14M5 18h7"/><path d="M17 15l4 3-4 3" fill="currentColor" stroke="none"/></svg></button>
                                                             <button class="modal-btn modal-btn-ghost" @click="$store.torrents.editUpload(item)">Edit</button>
                                                         </div>
                                                     </div>
@@ -516,11 +516,6 @@
                                 <div class="upload-track-card" :class="{ hidden: item.is_hidden }">
                                     <template x-if="$store.torrents.uploadEditId !== item.track.id">
                                         <div class="upload-track-display">
-                                            <button class="track-action-btn play-btn"
-                                                    @click="$store.player.play(item.track)"
-                                                    title="{{ t.player_play }}">
-                                                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-                                            </button>
                                             <div class="upload-track-main">
                                                 <div class="upload-track-title">
                                                     <span x-text="item.track.title"></span>
@@ -535,8 +530,11 @@
                                                 </div>
                                             </div>
                                             <div class="upload-track-actions">
-                                                <button class="track-action-btn" @click="$store.queue.addNextInQueue([item.track])" title="{{ t.player_play_next }}">
-                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h8M5 18h14"/><path d="M17 10l4 3-4 3" fill="currentColor" stroke="none"/></svg>
+                                                <button class="track-action-btn queue-insert-btn queue-next-btn" @click="$store.queue.addNextInQueue([item.track])" title="{{ t.player_play_next }}">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h10M5 12h7M5 18h10"/><path d="M17 9l4 3-4 3" fill="currentColor" stroke="none"/></svg>
+                                                </button>
+                                                <button class="track-action-btn queue-insert-btn queue-end-btn" @click="$store.queue.addToEnd([item.track])" title="{{ t.player_add_to_queue }}">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h14M5 18h7"/><path d="M17 15l4 3-4 3" fill="currentColor" stroke="none"/></svg>
                                                 </button>
                                                 <button class="modal-btn modal-btn-ghost" @click="$store.torrents.editUpload(item)">Edit</button>
                                             </div>

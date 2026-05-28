@@ -687,7 +687,7 @@ button.user-stat:hover {
 
 .track-list-header {
     display: grid;
-    grid-template-columns: 40px 1fr 1fr 120px 60px;
+    grid-template-columns: 40px minmax(0, 1fr) minmax(0, 1fr) 154px 60px;
     padding: 8px 16px;
     border-bottom: 1px solid var(--border-color);
     color: var(--text-subdued);
@@ -699,7 +699,7 @@ button.user-stat:hover {
 
 .track-row {
     display: grid;
-    grid-template-columns: 40px 1fr 1fr 120px 60px;
+    grid-template-columns: 40px minmax(0, 1fr) minmax(0, 1fr) 154px 60px;
     padding: 8px 16px;
     border-radius: 4px;
     cursor: default;
@@ -736,14 +736,18 @@ button.user-stat:hover {
 }
 
 .track-album { font-size: 13px; color: var(--text-subdued); }
-.track-duration { font-size: 13px; color: var(--text-subdued); text-align: right; }
+.track-duration { font-size: 13px; color: var(--text-subdued); text-align: right; pointer-events: none; }
 
 /* Track action buttons */
 .track-actions {
     display: flex;
     align-items: center;
+    justify-content: flex-start;
     gap: 2px;
     opacity: 1;
+    min-width: 0;
+    position: relative;
+    z-index: 2;
 }
 
 .track-action-btn {
@@ -759,9 +763,22 @@ button.user-stat:hover {
     transition: color 0.15s, background 0.15s;
 }
 
+.track-actions .track-action-btn,
+.track-actions .like-btn {
+    width: 28px;
+    height: 28px;
+    flex: 0 0 28px;
+}
+
+.track-actions .popularity-info-btn {
+    width: auto;
+    flex: 0 0 auto;
+}
+
 .track-action-btn:hover { color: var(--text-primary); background: var(--bg-active); }
 .track-action-btn.play-btn:hover { color: var(--accent); }
 .track-action-btn svg { width: 16px; height: 16px; }
+.track-action-btn.queue-insert-btn svg { width: 17px; height: 17px; }
 
 .info-btn {
     color: var(--text-subdued);
@@ -3052,7 +3069,7 @@ button.user-stat:hover {
 
 .upload-tree-track {
     display: grid;
-    grid-template-columns: 24px 30px minmax(0, 1fr) auto;
+    grid-template-columns: 24px minmax(0, 1fr) auto;
     align-items: center;
     gap: 8px;
     min-height: 44px;
@@ -3151,7 +3168,7 @@ button.user-stat:hover {
 
 .upload-track-display {
     display: grid;
-    grid-template-columns: 34px minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     gap: 10px;
 }
@@ -3960,7 +3977,7 @@ button.user-stat:hover {
     }
 
     .upload-tree-track {
-        grid-template-columns: 24px 30px minmax(0, 1fr);
+        grid-template-columns: 24px minmax(0, 1fr);
         padding-left: 12px;
     }
 
@@ -3976,7 +3993,7 @@ button.user-stat:hover {
     }
 
     .upload-track-display {
-        grid-template-columns: 32px minmax(0, 1fr);
+        grid-template-columns: minmax(0, 1fr);
     }
 
     .upload-track-actions {

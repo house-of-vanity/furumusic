@@ -483,19 +483,16 @@
                                                     <span x-show="$store.library.hasPopularity(track)" x-text="$store.library.popularityLabel(track)"></span>
                                                     <span x-show="!$store.library.hasPopularity(track)" class="info-letter">i</span>
                                                 </button>
-                                                <button class="track-action-btn play-btn" @click.stop="$store.library.playSearchTrack(idx)" title="{{ t.player_play }}">
-                                                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-                                                </button>
                                                 <button class="like-btn" :class="{ liked: $store.likes.has(track.id) }" @click.stop="$store.likes.toggle(track.id)" title="{{ t.player_like }}">
                                                     <svg viewBox="0 0 24 24" :fill="$store.likes.has(track.id) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z"/></svg>
                                                 </button>
-                                                <button class="track-action-btn" @click.stop="$store.queue.addNextInQueue([track])" title="{{ t.player_play_next }}">
-                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h8M5 18h14"/><path d="M17 10l4 3-4 3" fill="currentColor" stroke="none"/></svg>
+                                                <button class="track-action-btn queue-insert-btn queue-next-btn" @click.stop="$store.queue.addNextInQueue([track])" title="{{ t.player_play_next }}">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h10M5 12h7M5 18h10"/><path d="M17 9l4 3-4 3" fill="currentColor" stroke="none"/></svg>
                                                 </button>
-                                                <button class="track-action-btn" @click.stop="$store.queue.addToEnd([track])" title="{{ t.player_add_to_queue }}">
-                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                                <button class="track-action-btn queue-insert-btn queue-end-btn" @click.stop="$store.queue.addToEnd([track])" title="{{ t.player_add_to_queue }}">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h14M5 18h7"/><path d="M17 15l4 3-4 3" fill="currentColor" stroke="none"/></svg>
                                                 </button>
-                                                <button class="track-action-btn" @click.stop="$store.playlists.showPicker([track.id])" title="{{ t.player_add_to_playlist }}">
+                                                <button class="track-action-btn playlist-add-btn" @click.stop="$store.playlists.showPicker([track.id])" title="{{ t.player_add_to_playlist }}">
                                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
                                                 </button>
                                             </div>
@@ -663,19 +660,16 @@
                                             <span x-show="$store.library.hasPopularity(track)" x-text="$store.library.popularityLabel(track)"></span>
                                             <span x-show="!$store.library.hasPopularity(track)" class="info-letter">i</span>
                                         </button>
-                                        <button class="track-action-btn play-btn" @click.stop="$store.queue.playRelease($store.library.currentArtist.featured_tracks, idx)" title="{{ t.player_play }}">
-                                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-                                        </button>
                                         <button class="like-btn" :class="{ liked: $store.likes.has(track.id) }" @click.stop="$store.likes.toggle(track.id)" title="{{ t.player_like }}">
                                             <svg viewBox="0 0 24 24" :fill="$store.likes.has(track.id) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z"/></svg>
                                         </button>
-                                        <button class="track-action-btn" @click.stop="$store.queue.addNextInQueue([track])" title="{{ t.player_play_next }}">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h8M5 18h14"/><path d="M17 10l4 3-4 3" fill="currentColor" stroke="none"/></svg>
+                                        <button class="track-action-btn queue-insert-btn queue-next-btn" @click.stop="$store.queue.addNextInQueue([track])" title="{{ t.player_play_next }}">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h10M5 12h7M5 18h10"/><path d="M17 9l4 3-4 3" fill="currentColor" stroke="none"/></svg>
                                         </button>
-                                        <button class="track-action-btn" @click.stop="$store.queue.addToEnd([track])" title="{{ t.player_add_to_queue }}">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                        <button class="track-action-btn queue-insert-btn queue-end-btn" @click.stop="$store.queue.addToEnd([track])" title="{{ t.player_add_to_queue }}">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h14M5 18h7"/><path d="M17 15l4 3-4 3" fill="currentColor" stroke="none"/></svg>
                                         </button>
-                                        <button class="track-action-btn" @click.stop="$store.playlists.showPicker([track.id])" title="{{ t.player_add_to_playlist }}">
+                                        <button class="track-action-btn playlist-add-btn" @click.stop="$store.playlists.showPicker([track.id])" title="{{ t.player_add_to_playlist }}">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
                                         </button>
                                     </div>
@@ -786,19 +780,16 @@
                                     <span x-show="$store.library.hasPopularity(track)" x-text="$store.library.popularityLabel(track)"></span>
                                     <span x-show="!$store.library.hasPopularity(track)" class="info-letter">i</span>
                                 </button>
-                                <button class="track-action-btn play-btn" @click.stop="$store.queue.playRelease([track], 0)" title="{{ t.player_play }}">
-                                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-                                </button>
                                 <button class="like-btn" :class="{ liked: $store.likes.has(track.id) }" @click.stop="$store.likes.toggle(track.id)" title="{{ t.player_like }}">
                                     <svg viewBox="0 0 24 24" :fill="$store.likes.has(track.id) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z"/></svg>
                                 </button>
-                                <button class="track-action-btn" @click.stop="$store.queue.addNextInQueue([track])" title="{{ t.player_play_next }}">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h8M5 18h14"/><path d="M17 10l4 3-4 3" fill="currentColor" stroke="none"/></svg>
+                                <button class="track-action-btn queue-insert-btn queue-next-btn" @click.stop="$store.queue.addNextInQueue([track])" title="{{ t.player_play_next }}">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h10M5 12h7M5 18h10"/><path d="M17 9l4 3-4 3" fill="currentColor" stroke="none"/></svg>
                                 </button>
-                                <button class="track-action-btn" @click.stop="$store.queue.addToEnd([track])" title="{{ t.player_add_to_queue }}">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                <button class="track-action-btn queue-insert-btn queue-end-btn" @click.stop="$store.queue.addToEnd([track])" title="{{ t.player_add_to_queue }}">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h14M5 18h7"/><path d="M17 15l4 3-4 3" fill="currentColor" stroke="none"/></svg>
                                 </button>
-                                <button class="track-action-btn" @click.stop="$store.playlists.showPicker([track.id])" title="{{ t.player_add_to_playlist }}">
+                                <button class="track-action-btn playlist-add-btn" @click.stop="$store.playlists.showPicker([track.id])" title="{{ t.player_add_to_playlist }}">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
                                 </button>
                             </div>
@@ -862,19 +853,16 @@
                                     <span x-show="$store.library.hasPopularity(track)" x-text="$store.library.popularityLabel(track)"></span>
                                     <span x-show="!$store.library.hasPopularity(track)" class="info-letter">i</span>
                                 </button>
-                                <button class="track-action-btn play-btn" @click.stop="$store.queue.playRelease($store.library.currentPlaylist.tracks, idx)" title="{{ t.player_play }}">
-                                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-                                </button>
                                 <button class="like-btn" :class="{ liked: $store.likes.has(track.id) }" @click.stop="$store.likes.toggle(track.id)" title="{{ t.player_like }}">
                                     <svg viewBox="0 0 24 24" :fill="$store.likes.has(track.id) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z"/></svg>
                                 </button>
-                                <button class="track-action-btn" @click.stop="$store.queue.addNextInQueue([track])" title="{{ t.player_play_next }}">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h8M5 18h14"/><path d="M17 10l4 3-4 3" fill="currentColor" stroke="none"/></svg>
+                                <button class="track-action-btn queue-insert-btn queue-next-btn" @click.stop="$store.queue.addNextInQueue([track])" title="{{ t.player_play_next }}">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h10M5 12h7M5 18h10"/><path d="M17 9l4 3-4 3" fill="currentColor" stroke="none"/></svg>
                                 </button>
-                                <button class="track-action-btn" @click.stop="$store.queue.addToEnd([track])" title="{{ t.player_add_to_queue }}">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                <button class="track-action-btn queue-insert-btn queue-end-btn" @click.stop="$store.queue.addToEnd([track])" title="{{ t.player_add_to_queue }}">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h14M5 18h7"/><path d="M17 15l4 3-4 3" fill="currentColor" stroke="none"/></svg>
                                 </button>
-                                <button class="track-action-btn" @click.stop="$store.playlists.showPicker([track.id])" title="{{ t.player_add_to_playlist }}">
+                                <button class="track-action-btn playlist-add-btn" @click.stop="$store.playlists.showPicker([track.id])" title="{{ t.player_add_to_playlist }}">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
                                 </button>
                             </div>

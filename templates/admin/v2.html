@@ -1934,7 +1934,7 @@ tbody tr:hover {
                 <div class="empty" x-show="editorLoading">Loading editor...</div>
                 <div x-show="!editorLoading">
                     <div class="field">
-                        <label x-text="isArtistEditor() ? 'Artist name' : 'Title'"></label>
+                        <label x-text="isArtistEditor() ? 'Artist name' : (isReleaseEditor() ? 'Release title' : (isTrackEditor() ? 'Track title' : 'Title'))"></label>
                         <input x-model="editorDraft.title" />
                     </div>
 
@@ -2829,8 +2829,10 @@ function adminV2() {
         selectEditorRelease(release = null) {
             const candidates = this.filteredEditorReleases();
             release = release || candidates[0];
-            if (release) this.editorDraft.release_id = Number(release.id);
+            if (!release) return false;
+            this.editorDraft.release_id = Number(release.id);
             this.editorReleaseToAdd = '';
+            return true;
         },
 
         setEditorImageFile(event) {
@@ -2948,6 +2950,12 @@ function adminV2() {
         },
 
         async saveLibraryItem() {
+            if (this.isTrackEditor() && String(this.editorReleaseToAdd || '').trim()) {
+                if (!this.selectEditorRelease()) {
+                    this.showToast('Choose a release from search results');
+                    return;
+                }
+            }
             if (!this.editorCanSave()) return;
             this.editorSaving = true;
             try {
