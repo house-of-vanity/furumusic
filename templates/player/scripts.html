@@ -170,10 +170,14 @@ document.addEventListener('alpine:init', () => {
         playerDragOffset: 0,
         playerCloseOffset: 0,
         _playerDragStartY: 0,
+        _playerDragStartX: 0,
+        _playerDragTracking: false,
+        _playerDragMode: null,
         _playerDragPointerId: null,
         _playerDragElement: null,
         _playerDragMove: null,
         _playerDragEnd: null,
+        _playerSuppressClickUntil: 0,
         toggleLibrary() {
             this.libraryOpen = !this.libraryOpen;
             if (this.libraryOpen) Alpine.store('user').menuOpen = false;
@@ -202,31 +206,37 @@ document.addEventListener('alpine:init', () => {
         playerDragStyle() {
             return `--mobile-player-drag:${this.playerDragOffset}px; --mobile-player-close-drag:${this.playerCloseOffset}px;`;
         },
+        handlePlayerClick(event) {
+            if (Date.now() <= this._playerSuppressClickUntil) {
+                event.preventDefault();
+                event.stopPropagation();
+                this._playerSuppressClickUntil = 0;
+            }
+        },
         startPlayerDrag(event, force = false) {
             if (!this.isMobilePlayer() || !Alpine.store('player').currentTrack) return;
             if (event.button && event.button !== 0) return;
             const target = event.target;
-            const isInteractive = target.closest('button, input, select, textarea, a, .volume-slider, .progress-bar, .device-popover, .mobile-expanded-queue');
+            const isDragBlocked = target.closest('input, select, textarea, .volume-slider, .device-popover, .mobile-expanded-queue');
             if (!force) {
                 if (this.playerExpanded) {
                     const isCloseHandle = target.closest('.player-now-playing');
                     const scroller = event.currentTarget?.classList?.contains('player-bar') ? event.currentTarget : null;
-                    if (!isCloseHandle || isInteractive || (scroller && scroller.scrollTop > 4)) return;
-                } else if (isInteractive) {
+                    if (!isCloseHandle || isDragBlocked || (scroller && scroller.scrollTop > 4)) return;
+                } else if (isDragBlocked) {
                     return;
                 }
             }
-            event.preventDefault();
-            if (this.playerDragging) this.endPlayerDrag({ type: 'pointercancel' });
-            this.playerDragging = true;
+            if (this._playerDragTracking) this.endPlayerDrag({ type: 'pointercancel' });
+            this.playerDragging = false;
+            this._playerDragTracking = true;
+            this._playerDragMode = this.playerExpanded ? 'close' : 'open';
             this._playerDragStartY = event.clientY;
+            this._playerDragStartX = event.clientX;
             this._playerDragPointerId = event.pointerId;
             this._playerDragElement = event.currentTarget;
             this.playerDragOffset = 0;
             this.playerCloseOffset = 0;
-            try {
-                this._playerDragElement?.setPointerCapture?.(event.pointerId);
-            } catch (_) {}
             this._playerDragMove = e => this.movePlayerDrag(e);
             this._playerDragEnd = e => this.endPlayerDrag(e);
             window.addEventListener('pointermove', this._playerDragMove, { passive: false });
@@ -234,11 +244,22 @@ document.addEventListener('alpine:init', () => {
             window.addEventListener('pointercancel', this._playerDragEnd, { passive: false });
         },
         movePlayerDrag(event) {
-            if (!this.playerDragging) return;
+            if (!this._playerDragTracking) return;
             const delta = this._playerDragStartY - event.clientY;
-            if (Math.abs(delta) > 6) event.preventDefault();
-            if (this.playerExpanded) {
-                this.playerCloseOffset = Math.max(0, Math.min(180, -delta));
+            const absDelta = Math.abs(delta);
+            if (!this.playerDragging) {
+                const horizontalDelta = Math.abs(event.clientX - this._playerDragStartX);
+                const wantsOpen = this._playerDragMode === 'open' && delta > 0;
+                const wantsClose = this._playerDragMode === 'close' && delta < 0;
+                if (absDelta < 8 || absDelta < horizontalDelta * 1.15 || (!wantsOpen && !wantsClose)) return;
+                this.playerDragging = true;
+                try {
+                    this._playerDragElement?.setPointerCapture?.(this._playerDragPointerId);
+                } catch (_) {}
+            }
+            event.preventDefault();
+            if (this._playerDragMode === 'close') {
+                this.playerCloseOffset = Math.max(0, Math.min(window.innerHeight, -delta));
             } else {
                 const max = Math.max(0, window.innerHeight - 132);
                 this.playerDragOffset = Math.max(0, Math.min(max, delta));
@@ -246,15 +267,17 @@ document.addEventListener('alpine:init', () => {
         },
         endPlayerDrag(event) {
             const openThreshold = Math.min(180, Math.max(90, window.innerHeight * 0.18));
-            const closeThreshold = 110;
+            const closeThreshold = Math.min(110, Math.max(64, window.innerHeight * 0.1));
             const wasCancelled = event?.type === 'pointercancel';
-            if (this.playerExpanded) {
+            const wasDragging = this.playerDragging;
+            if (wasDragging) this._playerSuppressClickUntil = Date.now() + 450;
+            if (this._playerDragMode === 'close') {
                 if (!wasCancelled && this.playerCloseOffset > closeThreshold) this.closePlayerFullscreen();
                 else {
                     this.playerCloseOffset = 0;
                     this.playerDragging = false;
                 }
-            } else if (!wasCancelled && this.playerDragOffset > openThreshold) {
+            } else if (this._playerDragMode === 'open' && !wasCancelled && this.playerDragOffset > openThreshold) {
                 this.openPlayerFullscreen();
             } else {
                 this.playerDragOffset = 0;
@@ -270,6 +293,8 @@ document.addEventListener('alpine:init', () => {
                 window.removeEventListener('pointerup', this._playerDragEnd);
                 window.removeEventListener('pointercancel', this._playerDragEnd);
             }
+            this._playerDragTracking = false;
+            this._playerDragMode = null;
             this._playerDragPointerId = null;
             this._playerDragElement = null;
             this._playerDragMove = null;

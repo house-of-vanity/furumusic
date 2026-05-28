@@ -1261,6 +1261,10 @@ button.user-stat:hover {
 
 .player-time { font-size: 11px; color: var(--text-subdued); min-width: 40px; text-align: center; }
 
+.player-progress-strip-times {
+    display: none;
+}
+
 .progress-bar {
     flex: 1;
     height: 4px;
@@ -3642,14 +3646,13 @@ button.user-stat:hover {
     .player-bar {
         position: relative;
         grid-template-columns: auto minmax(0, 1fr);
-        grid-template-rows: 62px 58px 24px;
+        grid-template-rows: 62px 58px;
         grid-template-areas:
             "now now"
-            "buttons actions"
-            "timeline timeline";
+            "buttons actions";
         gap: 4px 10px;
         align-items: center;
-        padding: 7px 12px calc(9px + var(--safe-bottom));
+        padding: 34px 12px calc(9px + var(--safe-bottom));
         touch-action: none;
         user-select: none;
     }
@@ -3742,11 +3745,59 @@ button.user-stat:hover {
     }
 
     .player-timeline {
-        grid-area: timeline;
         max-width: none;
         gap: 5px;
         align-self: center;
         padding-right: 58px;
+    }
+
+    .player-bar:not(.mobile-expanded) .player-timeline {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 21px;
+        gap: 0;
+        padding-right: 0;
+        z-index: 1;
+    }
+
+    .player-bar:not(.mobile-expanded) .player-time {
+        display: none;
+    }
+
+    .player-bar:not(.mobile-expanded) .progress-bar,
+    .player-bar:not(.mobile-expanded) .progress-bar:hover {
+        width: 100%;
+        height: 21px;
+        border-radius: 0;
+        background: rgba(29, 185, 84, 0.18);
+    }
+
+    .player-bar:not(.mobile-expanded) .progress-bar-fill {
+        border-radius: 0;
+        background: var(--accent);
+    }
+
+    .player-bar:not(.mobile-expanded) .progress-bar-thumb {
+        display: none;
+    }
+
+    .player-bar:not(.mobile-expanded) .player-progress-strip-times {
+        position: absolute;
+        top: 22px;
+        right: 10px;
+        height: 10px;
+        display: flex;
+        align-items: center;
+        padding: 0;
+        color: var(--text-subdued);
+        font-size: 9px;
+        font-weight: 700;
+        line-height: 1;
+        pointer-events: none;
+        text-shadow: none;
+        white-space: nowrap;
     }
 
     .player-version-chip {
@@ -4603,7 +4654,7 @@ button.user-stat:hover {
         gap: 8px;
         padding-left: 10px;
         padding-right: 10px;
-        grid-template-rows: 60px 58px 24px;
+        grid-template-rows: 60px 58px;
     }
 
     .player-track-title { font-size: 12px; }
