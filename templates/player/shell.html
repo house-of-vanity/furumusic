@@ -1050,7 +1050,7 @@
                 <div class="volume-slider"
                      @pointerdown.prevent="$store.player.startVolumeDrag($event)"
                      aria-label="{{ t.player_volume }}">
-                    <div class="volume-slider-fill" :style="'width:' + ($store.player.volume * 100) + '%'">
+                    <div class="volume-slider-fill" :style="'width:' + $store.player.volumeSliderPercent() + '%'">
                         <div class="volume-slider-thumb"></div>
                     </div>
                 </div>

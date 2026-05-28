@@ -472,7 +472,7 @@
                                             </label>
                                             <label class="upload-field upload-field-wide"><span>Notes</span><textarea rows="4" x-model="$store.torrents.uploadReviewDraft.notes"></textarea></label>
                                             <div class="upload-editor-actions">
-                                                <button class="modal-btn modal-btn-ghost" @click="$store.torrents.saveUploadReview()" :disabled="$store.torrents.uploadReviewSavingId === $store.torrents.uploadReviewEditId">Save draft</button>
+                                                <button class="modal-btn modal-btn-danger" @click="$store.torrents.deleteUploadReview()" :disabled="$store.torrents.uploadReviewSavingId === $store.torrents.uploadReviewEditId">Delete review</button>
                                                 <button class="modal-btn modal-btn-primary" @click="$store.torrents.approveUploadReview()" :disabled="$store.torrents.uploadReviewSavingId === $store.torrents.uploadReviewEditId">Approve</button>
                                             </div>
                                         </div>

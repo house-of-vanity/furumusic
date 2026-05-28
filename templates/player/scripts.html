@@ -411,6 +411,7 @@ document.addEventListener('alpine:init', () => {
         duration: 0,
         volume: 0.7,
         _prevVolume: 0.7,
+        _volumeCurve: 2.4,
         shuffle: false,
         repeatMode: 'off', // off, all, one
         progress: 0,
@@ -662,10 +663,21 @@ document.addEventListener('alpine:init', () => {
             audio.volume = this.volume;
         },
 
+        volumeSliderPercent() {
+            if (this.volume <= 0) return 0;
+            return Math.pow(this.volume, 1 / this._volumeCurve) * 100;
+        },
+
+        _volumeFromSliderPosition(position) {
+            const pct = Math.max(0, Math.min(1, Number(position || 0)));
+            if (pct <= 0.002) return 0;
+            return Math.pow(pct, this._volumeCurve);
+        },
+
         _setVolumeFromClientX(clientX, bar) {
             const rect = bar.getBoundingClientRect();
             const pct = rect.width > 0 ? (clientX - rect.left) / rect.width : 0;
-            this.setVolume(pct);
+            this.setVolume(this._volumeFromSliderPosition(pct));
         },
 
         setVolumeFromClick(event) {
@@ -2706,20 +2718,19 @@ document.addEventListener('alpine:init', () => {
             this.uploadReviewDraft = null;
         },
 
-        async saveUploadReview() {
-            if (!this.uploadReviewEditId || !this.uploadReviewDraft) return;
+        async deleteUploadReview() {
+            if (!this.uploadReviewEditId) return;
             const id = this.uploadReviewEditId;
             this.uploadReviewSavingId = id;
             try {
                 const res = await fetch(`/api/player/uploads/reviews/${id}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(this.uploadReviewPayload()),
+                    method: 'DELETE',
                 });
                 const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Failed to save review');
-                this.uploadPending = this.uploadPending.map(item => item.id === id ? data : item);
-                this._setMessage('Pending metadata saved');
+                if (!res.ok) throw new Error(data.error || 'Failed to delete review');
+                this.applyUploadPage(data);
+                this.cancelUploadReviewEdit();
+                this._setMessage('Review deleted');
             } catch (err) {
                 this._setMessage(err.message || String(err), true);
             } finally {

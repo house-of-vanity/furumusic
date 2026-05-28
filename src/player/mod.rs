@@ -9,7 +9,7 @@ use cot::http::header::{
 use cot::json::Json;
 use cot::request::extractors::{Path, UrlQuery};
 use cot::response::IntoResponse;
-use cot::router::method::{get, post};
+use cot::router::method::{delete, get, post};
 use cot::router::{Route, Router};
 use cot::session::Session;
 use cot::{App, Body, Template};
@@ -1875,6 +1875,36 @@ async fn user_upload_review_save_handler(
         return Ok(json_error(StatusCode::NOT_FOUND, "upload review not found"));
     };
     Json(review).into_response()
+}
+
+async fn user_upload_review_delete_handler(
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+    path: Path<PathId>,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    let review_id = path.0.id;
+    let uploaded_by_pattern = format!(r#""uploaded_by_user_id"\s*:\s*{}([^0-9]|$)"#, user.id);
+    let result = sqlx::query(
+        r#"DELETE FROM furumusic__pending_review
+           WHERE id = $1
+             AND context_json IS NOT NULL
+             AND context_json ~ $2
+             AND status IN ('pending', 'failed')"#,
+    )
+    .bind(review_id)
+    .bind(uploaded_by_pattern)
+    .execute(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    if result.rows_affected() == 0 {
+        return Ok(json_error(StatusCode::NOT_FOUND, "upload review not found"));
+    }
+    let page = load_user_uploads_page(pool, user.id, 500).await?;
+    Json(page).into_response()
 }
 
 async fn user_upload_review_approve_handler(
@@ -5777,6 +5807,30 @@ impl App for PlayerApp {
                     }
                 }),
                 "player_upload_review_save",
+            ),
+            Route::with_handler_and_name(
+                "/uploads/reviews/{id}",
+                delete({
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    move |session: Session, db: Database, path: Path<PathId>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            user_upload_review_delete_handler(session, db, pg_pool, path).await
+                        }
+                    }
+                }),
+                "player_upload_review_delete",
             ),
             Route::with_handler_and_name(
                 "/uploads/reviews/{id}/approve",
