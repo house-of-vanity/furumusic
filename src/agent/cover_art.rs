@@ -370,7 +370,8 @@ pub async fn save_cover_to_storage(
     }
 
     let ext = extension_for_mime(&cover.mime_type);
-    let filename = format!("cover.{ext}");
+    let hash_prefix: String = hash.chars().take(12).collect();
+    let filename = format!("cover-{hash_prefix}.{ext}");
 
     let artist_dir = sanitize_dir_name(artist_name);
     let album_dir = sanitize_dir_name(release_title);
