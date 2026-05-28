@@ -975,6 +975,16 @@ tbody tr:hover {
     cursor: pointer;
 }
 
+.artist-result small {
+    display: block;
+    margin-top: 2px;
+    color: var(--text-subdued);
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .artist-result:hover,
 .artist-result:focus {
     background: var(--bg-hover);
@@ -1452,6 +1462,7 @@ tbody tr:hover {
                             <div class="segmented">
                                 <button class="seg-btn" :class="{active: libraryKind === 'artists'}" @click="openLibrary('artists')">Artists</button>
                                 <button class="seg-btn" :class="{active: libraryKind === 'releases'}" @click="openLibrary('releases')">Releases</button>
+                                <button class="seg-btn" :class="{active: libraryKind === 'tracks'}" @click="openLibrary('tracks')">Tracks</button>
                                 <button class="seg-btn" :class="{active: libraryKind === 'playlists'}" @click="openLibrary('playlists')">Playlists</button>
                             </div>
                             <input class="search" placeholder="Search library" x-model="librarySearch" @input.debounce.350ms="loadLibrary()" />
@@ -1947,8 +1958,43 @@ tbody tr:hover {
                         </div>
                     </div>
 
-                    <div class="field" x-show="isReleaseEditor()">
-                        <label>Release artists</label>
+                    <div class="editor-grid" x-show="isTrackEditor()">
+                        <div class="field">
+                            <label>Track #</label>
+                            <input type="number" min="1" max="9999" x-model="editorDraft.track_number" />
+                        </div>
+                        <div class="field">
+                            <label>Disc #</label>
+                            <input type="number" min="1" max="999" x-model="editorDraft.disc_number" />
+                        </div>
+                        <div class="field">
+                            <label>Year</label>
+                            <input type="number" min="0" max="3000" x-model="editorDraft.year" />
+                        </div>
+                    </div>
+
+                    <div class="field" x-show="isTrackEditor()">
+                        <label>Release</label>
+                        <div class="artist-tags">
+                            <span class="tag relation" x-show="selectedEditorRelease()" x-text="selectedEditorReleaseLabel()"></span>
+                            <span class="muted" x-show="!selectedEditorRelease()">No release selected</span>
+                        </div>
+                        <div class="artist-picker">
+                            <input class="search" placeholder="Search release to move track" x-model="editorReleaseToAdd" @keydown.enter.prevent="selectEditorRelease()" @keydown.escape="editorReleaseToAdd = ''" />
+                            <div class="artist-results" x-show="editorReleaseSearchOpen()" x-transition>
+                                <template x-for="release in filteredEditorReleases()" :key="release.id">
+                                    <button class="artist-result" type="button" @click="selectEditorRelease(release)">
+                                        <span x-text="release.title"></span>
+                                        <small x-text="release.subtitle"></small>
+                                    </button>
+                                </template>
+                                <div class="artist-result muted" x-show="filteredEditorReleases().length === 0">No matching releases</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="field" x-show="isReleaseEditor() || isTrackEditor()">
+                        <label x-text="isTrackEditor() ? 'Track artists' : 'Release artists'"></label>
                         <div class="artist-tags">
                             <template x-for="artist in selectedEditorArtists()" :key="artist.id">
                                 <span class="tag relation">
@@ -2099,8 +2145,9 @@ function adminV2() {
         editorImageUploading: false,
         editorImageFile: null,
         editorArtistToAdd: '',
+        editorReleaseToAdd: '',
         editorDetail: null,
-        editorDraft: { title: '', hidden: 'false', release_type: 'album', year: '', artist_ids: [] },
+        editorDraft: { title: '', hidden: 'false', release_type: 'album', year: '', release_id: null, track_number: '', disc_number: '', artist_ids: [] },
         settings: { values: {}, sources: {}, lastfm_api_key_configured: false, lastfm_shared_secret_configured: false, lastfm_scrobbling_configured: false },
         settingsDraft: {
             auth_password_enabled: false,
@@ -2196,7 +2243,7 @@ function adminV2() {
                 this.activeView = 'jobs';
                 if (parts[1]) this.activeJobName = decodeURIComponent(parts[1]);
             } else if (view === 'library') {
-                const nextKind = ['artists', 'releases', 'playlists'].includes(parts[1]) ? parts[1] : 'artists';
+                const nextKind = ['artists', 'releases', 'tracks', 'playlists'].includes(parts[1]) ? parts[1] : 'artists';
                 if (this.libraryKind !== nextKind) this.clearLibrarySelection();
                 this.activeView = 'library';
                 this.libraryKind = nextKind;
@@ -2256,7 +2303,7 @@ function adminV2() {
 
         openLibrary(kind = this.libraryKind) {
             this.activeView = 'library';
-            const nextKind = ['artists', 'releases', 'playlists'].includes(kind) ? kind : 'artists';
+            const nextKind = ['artists', 'releases', 'tracks', 'playlists'].includes(kind) ? kind : 'artists';
             if (this.libraryKind !== nextKind) this.clearLibrarySelection();
             this.libraryKind = nextKind;
             this.setRoute(`#library/${this.libraryKind}`);
@@ -2618,11 +2665,15 @@ function adminV2() {
                 hidden: item.is_hidden ? 'true' : 'false',
                 release_type: 'album',
                 year: '',
+                release_id: null,
+                track_number: '',
+                disc_number: '',
                 artist_ids: []
             };
             this.editorDetail = null;
             this.editorImageFile = null;
             this.editorArtistToAdd = '';
+            this.editorReleaseToAdd = '';
             this.editorOpen = true;
             this.loadEditorDetail(item);
         },
@@ -2640,10 +2691,14 @@ function adminV2() {
                     hidden: detail.hidden ? 'true' : 'false',
                     release_type: detail.release_type || 'album',
                     year: detail.year || '',
+                    release_id: detail.release_id || null,
+                    track_number: detail.track_number || '',
+                    disc_number: detail.disc_number || '',
                     artist_ids: Array.isArray(detail.selected_artist_ids) ? detail.selected_artist_ids.slice() : []
                 };
                 this.editorImageFile = null;
                 this.editorArtistToAdd = '';
+                this.editorReleaseToAdd = '';
             } catch (error) {
                 this.showToast(error.message);
             } finally {
@@ -2662,12 +2717,18 @@ function adminV2() {
             return this.activeLibraryItem && this.activeLibraryItem.kind === 'releases';
         },
 
+        isTrackEditor() {
+            return this.activeLibraryItem && this.activeLibraryItem.kind === 'tracks';
+        },
+
         canEditLibraryImage() {
             return this.isArtistEditor() || this.isReleaseEditor();
         },
 
         editorCanSave() {
-            return Boolean(this.activeLibraryItem && this.editorDetail && !this.editorLoading && !this.editorSaving);
+            if (!this.activeLibraryItem || !this.editorDetail || this.editorLoading || this.editorSaving) return false;
+            if (this.isTrackEditor() && !this.editorDraft.release_id) return false;
+            return true;
         },
 
         selectedEditorArtists() {
@@ -2710,7 +2771,7 @@ function adminV2() {
         },
 
         editorArtistSearchOpen() {
-            return this.isReleaseEditor() && String(this.editorArtistToAdd || '').trim().length > 0;
+            return (this.isReleaseEditor() || this.isTrackEditor()) && String(this.editorArtistToAdd || '').trim().length > 0;
         },
 
         addEditorArtist(artist = null) {
@@ -2727,6 +2788,49 @@ function adminV2() {
 
         removeEditorArtist(id) {
             this.editorDraft.artist_ids = (this.editorDraft.artist_ids || []).filter(value => Number(value) !== Number(id));
+        },
+
+        selectedEditorRelease() {
+            const releases = (this.editorDetail && this.editorDetail.releases) || [];
+            return releases.find(row => Number(row.id) === Number(this.editorDraft.release_id));
+        },
+
+        selectedEditorReleaseLabel() {
+            const release = this.selectedEditorRelease();
+            if (!release) return '';
+            return release.subtitle ? `${release.title} / ${release.subtitle}` : release.title;
+        },
+
+        filteredEditorReleases() {
+            const releases = (this.editorDetail && this.editorDetail.releases) || [];
+            const query = String(this.editorReleaseToAdd || '').trim().toLowerCase();
+            const currentId = Number(this.editorDraft.release_id || 0);
+            const candidates = releases.filter(release => Number(release.id) !== currentId);
+            if (!query) return candidates.slice(0, 12);
+            return candidates
+                .map(release => {
+                    const haystack = `${release.title || ''} ${release.subtitle || ''}`.toLowerCase();
+                    let score = 3;
+                    if (String(release.title || '').toLowerCase() === query) score = 0;
+                    else if (String(release.title || '').toLowerCase().startsWith(query)) score = 1;
+                    else if (haystack.includes(query)) score = 2;
+                    return { release, score };
+                })
+                .filter(row => row.score < 3)
+                .sort((a, b) => a.score - b.score || a.release.title.localeCompare(b.release.title))
+                .slice(0, 12)
+                .map(row => row.release);
+        },
+
+        editorReleaseSearchOpen() {
+            return this.isTrackEditor() && String(this.editorReleaseToAdd || '').trim().length > 0;
+        },
+
+        selectEditorRelease(release = null) {
+            const candidates = this.filteredEditorReleases();
+            release = release || candidates[0];
+            if (release) this.editorDraft.release_id = Number(release.id);
+            this.editorReleaseToAdd = '';
         },
 
         setEditorImageFile(event) {
@@ -2856,6 +2960,9 @@ function adminV2() {
                         hidden: this.editorDraft.hidden === 'true',
                         release_type: this.editorDraft.release_type || null,
                         year: this.editorDraft.year || '',
+                        release_id: this.editorDraft.release_id ? Number(this.editorDraft.release_id) : null,
+                        track_number: this.editorDraft.track_number || '',
+                        disc_number: this.editorDraft.disc_number || '',
                         artist_ids: this.editorDraft.artist_ids || []
                     })
                 });
@@ -2931,7 +3038,7 @@ function adminV2() {
         },
 
         pageSubtitle() {
-            if (this.activeView === 'library') return 'Fast entity control surface for artists, releases, and playlists';
+            if (this.activeView === 'library') return 'Fast entity control surface for artists, releases, tracks, and playlists';
             if (this.activeView === 'jobs') return 'Scheduler state, recent runs, and manual controls in one place';
             if (this.activeView === 'tools') return 'Reserved space for merge, split, enrichment, and destructive workflows';
             if (this.activeView === 'settings') return 'Application configuration and external API credentials';
