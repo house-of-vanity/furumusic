@@ -1046,5 +1046,50 @@
             <button class="queue-toggle-btn" :class="{ active: $store.queue.visible }" @click="$store.queue.visible = !$store.queue.visible" title="{{ t.player_queue }}">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
             </button>
+            <div class="device-picker" @click.outside="$store.devices.open = false">
+                <button class="queue-toggle-btn device-toggle-btn"
+                        :class="{ active: !$store.devices.isActive() || $store.devices.open }"
+                        @click="$store.devices.toggle()"
+                        :title="$store.devices.activeLabel()"
+                        aria-label="Devices">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="4" width="18" height="12" rx="2"/>
+                        <path d="M8 20h8"/>
+                        <path d="M12 16v4"/>
+                    </svg>
+                </button>
+                <div class="device-popover" x-show="$store.devices.open" x-transition x-cloak>
+                    <template x-for="device in $store.devices.devices" :key="device.id">
+                        <button class="device-row"
+                                :class="{ active: device.is_active }"
+                                @click="$store.devices.select(device.id)">
+                            <span class="device-row-icon">
+                                <template x-if="device.kind === 'phone'">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <rect x="7" y="2" width="10" height="20" rx="2"/>
+                                        <path d="M11 18h2"/>
+                                    </svg>
+                                </template>
+                                <template x-if="device.kind !== 'phone'">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <rect x="3" y="4" width="18" height="12" rx="2"/>
+                                        <path d="M8 20h8"/>
+                                        <path d="M12 16v4"/>
+                                    </svg>
+                                </template>
+                            </span>
+                            <span class="device-row-main">
+                                <span class="device-row-name" x-text="device.name"></span>
+                                <span class="device-row-current" x-show="device.is_current"></span>
+                            </span>
+                            <span class="device-row-check" x-show="device.is_active">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+                                    <polyline points="20 6 9 17 4 12"/>
+                                </svg>
+                            </span>
+                        </button>
+                    </template>
+                </div>
+            </div>
         </div>
     </div>

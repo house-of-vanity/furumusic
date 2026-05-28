@@ -1342,6 +1342,104 @@ button.user-stat:hover {
 .queue-toggle-btn.active { color: var(--accent); }
 .queue-toggle-btn svg { width: 18px; height: 18px; }
 
+.device-picker {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.device-toggle-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.device-popover {
+    position: absolute;
+    right: 0;
+    bottom: 38px;
+    width: 260px;
+    max-width: calc(100vw - 24px);
+    max-height: min(320px, calc(100dvh - var(--player-bar-space) - 24px));
+    overflow-y: auto;
+    padding: 6px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    box-shadow: 0 16px 46px rgba(0,0,0,0.48);
+    z-index: 45;
+}
+
+.device-row {
+    width: 100%;
+    min-height: 44px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-secondary);
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr) 22px;
+    align-items: center;
+    gap: 9px;
+    padding: 7px 8px;
+    cursor: pointer;
+    text-align: left;
+}
+
+.device-row:hover,
+.device-row.active {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.device-row.active {
+    color: var(--accent);
+}
+
+.device-row-icon,
+.device-row-check {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.device-row-icon svg {
+    width: 18px;
+    height: 18px;
+}
+
+.device-row-check svg {
+    width: 16px;
+    height: 16px;
+}
+
+.device-row-main {
+    min-width: 0;
+}
+
+.device-row-name {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.device-row-name {
+    color: inherit;
+    font-size: 13px;
+    font-weight: 650;
+}
+
+.device-row-current {
+    display: block;
+    width: 18px;
+    height: 3px;
+    margin-top: 5px;
+    border-radius: 999px;
+    background: currentColor;
+    opacity: 0.55;
+}
+
 /* Loading */
 .loading-spinner {
     display: flex;
@@ -3224,6 +3322,14 @@ button.user-stat:hover {
         right: 8px;
         top: 18dvh;
         bottom: calc(var(--player-bar-space) + 8px);
+    }
+
+    .device-popover {
+        position: fixed;
+        right: 8px;
+        bottom: calc(var(--player-bar-space) + 8px);
+        width: min(280px, calc(100vw - 16px));
+        max-height: 42dvh;
     }
 
     .player-bar {

@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex};
 
 use cot::db::Database;
 use cot::http::StatusCode;
@@ -48,6 +49,347 @@ struct LocalUploadResponse {
     ok: bool,
     filename: String,
     size: u64,
+}
+
+const PLAYER_DEVICE_TTL_MS: i64 = 30_000;
+const PLAYER_DEVICE_COMMAND_TTL_MS: i64 = 20_000;
+const PLAYER_DEVICE_MAX_COMMANDS: usize = 32;
+
+#[derive(Debug, Clone)]
+struct PlayerDevice {
+    id: String,
+    name: String,
+    kind: String,
+    last_seen_ms: i64,
+}
+
+#[derive(Debug, Clone)]
+struct PendingPlayerDeviceCommand {
+    id: String,
+    command: String,
+    payload: serde_json::Value,
+    created_at_ms: i64,
+}
+
+#[derive(Debug, Default)]
+struct PlayerDeviceHubState {
+    devices_by_user: HashMap<i64, HashMap<String, PlayerDevice>>,
+    active_device_by_user: HashMap<i64, String>,
+    commands_by_device: HashMap<(i64, String), VecDeque<PendingPlayerDeviceCommand>>,
+    playback_state_by_user: HashMap<i64, PlayerDevicePlaybackStateDto>,
+}
+
+#[derive(Debug, Default)]
+struct PlayerDeviceHub {
+    state: Mutex<PlayerDeviceHubState>,
+}
+
+impl PlayerDeviceHub {
+    fn heartbeat(
+        &self,
+        user_id: i64,
+        device_id: &str,
+        user_agent: Option<&str>,
+        playback_state: Option<PlayerDevicePlaybackStateDto>,
+    ) -> PlayerDevicesResponse {
+        let now = current_millis();
+        let mut state = self.state.lock().expect("player device hub lock");
+        self.prune_locked(&mut state, now);
+        self.touch_locked(&mut state, user_id, device_id, user_agent, now);
+        self.update_playback_state_locked(&mut state, user_id, device_id, playback_state, now);
+        self.snapshot_locked(&state, user_id, device_id, now)
+    }
+
+    fn poll(
+        &self,
+        user_id: i64,
+        device_id: &str,
+        user_agent: Option<&str>,
+        playback_state: Option<PlayerDevicePlaybackStateDto>,
+    ) -> PlayerDevicePollResponse {
+        let now = current_millis();
+        let mut state = self.state.lock().expect("player device hub lock");
+        self.prune_locked(&mut state, now);
+        self.touch_locked(&mut state, user_id, device_id, user_agent, now);
+        self.update_playback_state_locked(&mut state, user_id, device_id, playback_state, now);
+        let commands = state
+            .commands_by_device
+            .remove(&(user_id, device_id.to_string()))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|cmd| PlayerDeviceCommandDto {
+                id: cmd.id,
+                command: cmd.command,
+                payload: cmd.payload,
+            })
+            .collect();
+        let snapshot = self.snapshot_locked(&state, user_id, device_id, now);
+        PlayerDevicePollResponse {
+            device_id: snapshot.device_id,
+            active_device_id: snapshot.active_device_id,
+            devices: snapshot.devices,
+            commands,
+            playback_state: snapshot.playback_state,
+        }
+    }
+
+    fn select(
+        &self,
+        user_id: i64,
+        current_device_id: &str,
+        target_device_id: &str,
+    ) -> Option<PlayerDevicesResponse> {
+        let now = current_millis();
+        let mut state = self.state.lock().expect("player device hub lock");
+        self.prune_locked(&mut state, now);
+        let devices = state.devices_by_user.get(&user_id)?;
+        if !devices.contains_key(target_device_id) {
+            return None;
+        }
+        state
+            .active_device_by_user
+            .insert(user_id, target_device_id.to_string());
+        Some(self.snapshot_locked(&state, user_id, current_device_id, now))
+    }
+
+    fn enqueue_command(
+        &self,
+        user_id: i64,
+        target_device_id: Option<&str>,
+        command: &str,
+        payload: serde_json::Value,
+    ) -> Result<(), &'static str> {
+        let now = current_millis();
+        let mut state = self.state.lock().expect("player device hub lock");
+        self.prune_locked(&mut state, now);
+
+        let target_id = match target_device_id {
+            Some(id) => id.to_string(),
+            None => state
+                .active_device_by_user
+                .get(&user_id)
+                .cloned()
+                .ok_or("no active device")?,
+        };
+
+        let devices = state
+            .devices_by_user
+            .get(&user_id)
+            .ok_or("target device is offline")?;
+        if !devices.contains_key(&target_id) {
+            return Err("target device is offline");
+        }
+
+        let queue = state
+            .commands_by_device
+            .entry((user_id, target_id))
+            .or_default();
+        while queue.len() >= PLAYER_DEVICE_MAX_COMMANDS {
+            queue.pop_front();
+        }
+        queue.push_back(PendingPlayerDeviceCommand {
+            id: uuid::Uuid::new_v4().simple().to_string(),
+            command: command.to_string(),
+            payload,
+            created_at_ms: now,
+        });
+        Ok(())
+    }
+
+    fn touch_locked(
+        &self,
+        state: &mut PlayerDeviceHubState,
+        user_id: i64,
+        device_id: &str,
+        user_agent: Option<&str>,
+        now: i64,
+    ) {
+        let devices = state.devices_by_user.entry(user_id).or_default();
+        let device = PlayerDevice {
+            id: device_id.to_string(),
+            name: device_name_from_user_agent(user_agent),
+            kind: device_kind_from_user_agent(user_agent).to_string(),
+            last_seen_ms: now,
+        };
+        devices.insert(device_id.to_string(), device);
+
+        let active_online = state
+            .active_device_by_user
+            .get(&user_id)
+            .is_some_and(|active_id| devices.contains_key(active_id));
+        if !active_online {
+            state
+                .active_device_by_user
+                .insert(user_id, device_id.to_string());
+        }
+    }
+
+    fn update_playback_state_locked(
+        &self,
+        state: &mut PlayerDeviceHubState,
+        user_id: i64,
+        device_id: &str,
+        playback_state: Option<PlayerDevicePlaybackStateDto>,
+        now: i64,
+    ) {
+        let is_active = state
+            .active_device_by_user
+            .get(&user_id)
+            .is_some_and(|active_id| active_id == device_id);
+        if !is_active {
+            return;
+        }
+        let Some(mut playback_state) = playback_state else {
+            return;
+        };
+        playback_state.updated_at_ms = now;
+        state.playback_state_by_user.insert(user_id, playback_state);
+    }
+
+    fn snapshot_locked(
+        &self,
+        state: &PlayerDeviceHubState,
+        user_id: i64,
+        current_device_id: &str,
+        now: i64,
+    ) -> PlayerDevicesResponse {
+        let active_device_id = state.active_device_by_user.get(&user_id).cloned();
+        let mut devices: Vec<PlayerDeviceDto> = state
+            .devices_by_user
+            .get(&user_id)
+            .map(|devices| {
+                devices
+                    .values()
+                    .map(|device| PlayerDeviceDto {
+                        id: device.id.clone(),
+                        name: device.name.clone(),
+                        kind: device.kind.clone(),
+                        is_current: device.id == current_device_id,
+                        is_active: active_device_id.as_deref() == Some(device.id.as_str()),
+                        last_seen_ms: now.saturating_sub(device.last_seen_ms),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        devices.sort_by(|a, b| {
+            b.is_active
+                .cmp(&a.is_active)
+                .then_with(|| b.is_current.cmp(&a.is_current))
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        PlayerDevicesResponse {
+            device_id: current_device_id.to_string(),
+            active_device_id,
+            devices,
+            playback_state: state.playback_state_by_user.get(&user_id).cloned(),
+        }
+    }
+
+    fn prune_locked(&self, state: &mut PlayerDeviceHubState, now: i64) {
+        state.devices_by_user.retain(|user_id, devices| {
+            devices.retain(|_, device| {
+                now.saturating_sub(device.last_seen_ms) <= PLAYER_DEVICE_TTL_MS
+            });
+            let active_valid = state
+                .active_device_by_user
+                .get(user_id)
+                .is_some_and(|active_id| devices.contains_key(active_id));
+            if !active_valid {
+                if let Some(first_device_id) = devices.keys().next().cloned() {
+                    state
+                        .active_device_by_user
+                        .insert(*user_id, first_device_id);
+                } else {
+                    state.active_device_by_user.remove(user_id);
+                    state.playback_state_by_user.remove(user_id);
+                }
+            }
+            !devices.is_empty()
+        });
+        state
+            .playback_state_by_user
+            .retain(|user_id, _| state.devices_by_user.contains_key(user_id));
+
+        state
+            .commands_by_device
+            .retain(|(user_id, device_id), queue| {
+                let device_online = state
+                    .devices_by_user
+                    .get(user_id)
+                    .is_some_and(|devices| devices.contains_key(device_id));
+                if !device_online {
+                    return false;
+                }
+                queue.retain(|cmd| {
+                    now.saturating_sub(cmd.created_at_ms) <= PLAYER_DEVICE_COMMAND_TTL_MS
+                });
+                !queue.is_empty()
+            });
+    }
+}
+
+fn current_millis() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
+fn normalize_device_id(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.len() > 128 {
+        return None;
+    }
+    if !trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+fn device_name_from_user_agent(user_agent: Option<&str>) -> String {
+    let ua = user_agent.unwrap_or_default().to_ascii_lowercase();
+    let browser = if ua.contains("edg/") || ua.contains("edgios/") || ua.contains("edga/") {
+        "Edge"
+    } else if ua.contains("firefox/") || ua.contains("fxios/") {
+        "Firefox"
+    } else if ua.contains("opr/") || ua.contains("opera") {
+        "Opera"
+    } else if ua.contains("chrome/") || ua.contains("crios/") {
+        "Chrome"
+    } else if ua.contains("safari/") {
+        "Safari"
+    } else {
+        "Browser"
+    };
+
+    let os = if ua.contains("iphone") {
+        "iPhone"
+    } else if ua.contains("ipad") {
+        "iPad"
+    } else if ua.contains("android") {
+        "Android"
+    } else if ua.contains("windows") {
+        "Windows"
+    } else if ua.contains("mac os") || ua.contains("macintosh") {
+        "macOS"
+    } else if ua.contains("linux") {
+        "Linux"
+    } else {
+        "Device"
+    };
+
+    format!("{browser} on {os}")
+}
+
+fn device_kind_from_user_agent(user_agent: Option<&str>) -> &'static str {
+    let ua = user_agent.unwrap_or_default().to_ascii_lowercase();
+    if ua.contains("iphone") || (ua.contains("android") && ua.contains("mobile")) {
+        "phone"
+    } else if ua.contains("ipad") || ua.contains("tablet") || ua.contains("android") {
+        "tablet"
+    } else {
+        "computer"
+    }
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -1780,6 +2122,113 @@ async fn cover_response(
 }
 
 // ---------------------------------------------------------------------------
+// Player devices
+// ---------------------------------------------------------------------------
+
+async fn devices_heartbeat_handler(
+    session: Session,
+    db: Database,
+    hub: Arc<PlayerDeviceHub>,
+    Json(dto): Json<DeviceHeartbeatRequest>,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    let Some(device_id) = normalize_device_id(&dto.device_id) else {
+        return Ok(json_error(StatusCode::BAD_REQUEST, "invalid device id"));
+    };
+
+    let response = hub.heartbeat(
+        user.id,
+        &device_id,
+        dto.user_agent.as_deref(),
+        dto.playback_state,
+    );
+    Json(response).into_response()
+}
+
+async fn devices_poll_handler(
+    session: Session,
+    db: Database,
+    hub: Arc<PlayerDeviceHub>,
+    Json(dto): Json<DeviceHeartbeatRequest>,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    let Some(device_id) = normalize_device_id(&dto.device_id) else {
+        return Ok(json_error(StatusCode::BAD_REQUEST, "invalid device id"));
+    };
+
+    let response = hub.poll(
+        user.id,
+        &device_id,
+        dto.user_agent.as_deref(),
+        dto.playback_state,
+    );
+    Json(response).into_response()
+}
+
+async fn devices_select_handler(
+    session: Session,
+    db: Database,
+    hub: Arc<PlayerDeviceHub>,
+    Json(dto): Json<DeviceSelectRequest>,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    let Some(target_device_id) = normalize_device_id(&dto.device_id) else {
+        return Ok(json_error(StatusCode::BAD_REQUEST, "invalid device id"));
+    };
+    let current_device_id = dto
+        .current_device_id
+        .as_deref()
+        .and_then(normalize_device_id)
+        .unwrap_or_else(|| target_device_id.clone());
+
+    let Some(response) = hub.select(user.id, &current_device_id, &target_device_id) else {
+        return Ok(json_error(
+            StatusCode::BAD_REQUEST,
+            "target device is offline",
+        ));
+    };
+    Json(response).into_response()
+}
+
+async fn devices_command_handler(
+    session: Session,
+    db: Database,
+    hub: Arc<PlayerDeviceHub>,
+    Json(dto): Json<DeviceCommandRequest>,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    let command = dto.command.trim();
+    if command.is_empty() || command.len() > 64 {
+        return Ok(json_error(StatusCode::BAD_REQUEST, "invalid command"));
+    }
+    let target_device_id = match dto.target_device_id.as_deref() {
+        Some(raw) => {
+            let Some(device_id) = normalize_device_id(raw) else {
+                return Ok(json_error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid target device id",
+                ));
+            };
+            Some(device_id)
+        }
+        None => None,
+    };
+
+    match hub.enqueue_command(user.id, target_device_id.as_deref(), command, dto.payload) {
+        Ok(()) => Json(serde_json::json!({"ok": true})).into_response(),
+        Err(message) => Ok(json_error(StatusCode::BAD_REQUEST, message)),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // GET /api/player/state
 // ---------------------------------------------------------------------------
 
@@ -2961,6 +3410,7 @@ async fn tracks_by_ids_handler(
 pub struct PlayerApp {
     config: Arc<AppConfig>,
     scheduler_handle: Arc<tokio::sync::OnceCell<Arc<SchedulerHandle>>>,
+    device_hub: Arc<PlayerDeviceHub>,
 }
 
 impl PlayerApp {
@@ -2971,6 +3421,7 @@ impl PlayerApp {
         Self {
             config,
             scheduler_handle,
+            device_hub: Arc::new(PlayerDeviceHub::default()),
         }
     }
 }
@@ -2985,6 +3436,7 @@ impl App for PlayerApp {
         let pool: Arc<tokio::sync::OnceCell<sqlx::PgPool>> = Arc::new(tokio::sync::OnceCell::new());
         let torrent_service: Arc<tokio::sync::OnceCell<Arc<TorrentService>>> =
             Arc::new(tokio::sync::OnceCell::new());
+        let device_hub = Arc::clone(&self.device_hub);
 
         Router::with_urls([
             // -- Current user profile --
@@ -3988,6 +4440,51 @@ impl App for PlayerApp {
                     )
                 },
                 "player_cover",
+            ),
+            // -- Active browser devices --
+            Route::with_handler_and_name(
+                "/devices/heartbeat",
+                post({
+                    let device_hub = Arc::clone(&device_hub);
+                    move |session: Session, db: Database, json: Json<DeviceHeartbeatRequest>| {
+                        let device_hub = Arc::clone(&device_hub);
+                        async move { devices_heartbeat_handler(session, db, device_hub, json).await }
+                    }
+                }),
+                "player_devices_heartbeat",
+            ),
+            Route::with_handler_and_name(
+                "/devices/poll",
+                post({
+                    let device_hub = Arc::clone(&device_hub);
+                    move |session: Session, db: Database, json: Json<DeviceHeartbeatRequest>| {
+                        let device_hub = Arc::clone(&device_hub);
+                        async move { devices_poll_handler(session, db, device_hub, json).await }
+                    }
+                }),
+                "player_devices_poll",
+            ),
+            Route::with_handler_and_name(
+                "/devices/active",
+                post({
+                    let device_hub = Arc::clone(&device_hub);
+                    move |session: Session, db: Database, json: Json<DeviceSelectRequest>| {
+                        let device_hub = Arc::clone(&device_hub);
+                        async move { devices_select_handler(session, db, device_hub, json).await }
+                    }
+                }),
+                "player_devices_active",
+            ),
+            Route::with_handler_and_name(
+                "/devices/command",
+                post({
+                    let device_hub = Arc::clone(&device_hub);
+                    move |session: Session, db: Database, json: Json<DeviceCommandRequest>| {
+                        let device_hub = Arc::clone(&device_hub);
+                        async move { devices_command_handler(session, db, device_hub, json).await }
+                    }
+                }),
+                "player_devices_command",
             ),
             // -- Playback state GET --
             Route::with_handler_and_name(

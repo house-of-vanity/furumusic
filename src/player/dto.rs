@@ -137,6 +137,77 @@ pub(super) struct PlaybackStateDto {
     pub(super) volume: f64,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(super) struct DeviceHeartbeatRequest {
+    pub(super) device_id: String,
+    pub(super) user_agent: Option<String>,
+    pub(super) playback_state: Option<PlayerDevicePlaybackStateDto>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(super) struct DeviceSelectRequest {
+    pub(super) device_id: String,
+    pub(super) current_device_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(super) struct DeviceCommandRequest {
+    pub(super) target_device_id: Option<String>,
+    pub(super) command: String,
+    #[serde(default)]
+    pub(super) payload: serde_json::Value,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub(super) struct PlayerDeviceDto {
+    pub(super) id: String,
+    pub(super) name: String,
+    pub(super) kind: String,
+    pub(super) is_current: bool,
+    pub(super) is_active: bool,
+    pub(super) last_seen_ms: i64,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub(super) struct PlayerDeviceCommandDto {
+    pub(super) id: String,
+    pub(super) command: String,
+    pub(super) payload: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub(super) struct PlayerDevicePlaybackStateDto {
+    pub(super) track: Option<serde_json::Value>,
+    #[serde(default)]
+    pub(super) tracks: Vec<serde_json::Value>,
+    pub(super) index: i32,
+    pub(super) position_seconds: f64,
+    pub(super) duration_seconds: f64,
+    pub(super) paused: bool,
+    pub(super) shuffle: bool,
+    pub(super) repeat_mode: String,
+    pub(super) volume: f64,
+    #[serde(default)]
+    pub(super) updated_at_ms: i64,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub(super) struct PlayerDevicesResponse {
+    pub(super) device_id: String,
+    pub(super) active_device_id: Option<String>,
+    pub(super) devices: Vec<PlayerDeviceDto>,
+    pub(super) playback_state: Option<PlayerDevicePlaybackStateDto>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub(super) struct PlayerDevicePollResponse {
+    pub(super) device_id: String,
+    pub(super) active_device_id: Option<String>,
+    pub(super) devices: Vec<PlayerDeviceDto>,
+    pub(super) commands: Vec<PlayerDeviceCommandDto>,
+    pub(super) playback_state: Option<PlayerDevicePlaybackStateDto>,
+}
+
 #[derive(Debug, Serialize, JsonSchema)]
 pub(super) struct PlaylistDetail {
     pub(super) id: i64,
