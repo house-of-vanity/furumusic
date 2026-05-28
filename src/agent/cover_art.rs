@@ -323,27 +323,50 @@ pub async fn save_cover_to_storage(
     let hash = hash_image(&cover.data);
 
     // Check if we already have this exact image in the DB
-    let existing: Option<(i64,)> = sqlx::query_as(
-        "SELECT id FROM furumusic__media_file WHERE sha256_hash = $1 AND file_type = 'cover_art' LIMIT 1",
+    let existing: Option<(i64, String)> = sqlx::query_as(
+        "SELECT id, file_path FROM furumusic__media_file WHERE sha256_hash = $1 AND file_type = 'cover_art' LIMIT 1",
     )
     .bind(&hash)
     .fetch_optional(pool)
     .await?;
 
-    if let Some((id,)) = existing {
-        if let Some((file_path,)) = sqlx::query_as::<_, (String,)>(
-            "SELECT file_path FROM furumusic__media_file WHERE id = $1",
-        )
-        .bind(id)
-        .fetch_optional(pool)
-        .await?
-        {
-            let path = crate::media_paths::resolve_media_file_path(storage_dir, &file_path);
+    if let Some((id, file_path)) = existing {
+        let path = crate::media_paths::resolve_media_file_path(storage_dir, &file_path);
+        let is_inside_storage = crate::media_paths::path_for_root(storage_dir, &path).is_some();
+        if !is_inside_storage {
+            tracing::warn!(
+                media_file_id = id,
+                path = %path.display(),
+                "Ignoring duplicate cover hash whose stored file is outside agent_storage_dir"
+            );
+        } else if !path.exists() {
+            if let Some(parent) = path.parent() {
+                tokio::fs::create_dir_all(parent).await?;
+            }
+            match tokio::fs::write(&path, &cover.data).await {
+                Ok(()) => {
+                    tracing::info!(
+                        media_file_id = id,
+                        path = %path.display(),
+                        "Restored missing cover file for existing MediaFile"
+                    );
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        media_file_id = id,
+                        path = %path.display(),
+                        error = %err,
+                        "Failed to restore missing cover file for existing MediaFile; creating a new cover file"
+                    );
+                }
+            }
+        }
+        if is_inside_storage && path.exists() {
             if let Err(err) = crate::agent::cover_variants::ensure_cover_variants(&path).await {
                 tracing::warn!(media_file_id = id, error = %err, "Failed to generate cover variants");
             }
+            return Ok(id);
         }
-        return Ok(id);
     }
 
     let ext = extension_for_mime(&cover.mime_type);
@@ -352,7 +375,9 @@ pub async fn save_cover_to_storage(
     let artist_dir = sanitize_dir_name(artist_name);
     let album_dir = sanitize_dir_name(release_title);
 
-    let dest_dir = Path::new(storage_dir).join(&artist_dir).join(&album_dir);
+    let dest_dir = crate::media_paths::resolve_config_path_buf(storage_dir)
+        .join(&artist_dir)
+        .join(&album_dir);
     tokio::fs::create_dir_all(&dest_dir).await?;
 
     let dest_path = dest_dir.join(&filename);

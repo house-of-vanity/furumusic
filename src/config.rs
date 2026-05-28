@@ -416,6 +416,13 @@ impl AppConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard};
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn lock_env() -> MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner())
+    }
 
     #[test]
     fn defaults_are_sane() {
@@ -439,20 +446,14 @@ mod tests {
     }
 
     #[test]
-    fn maps_foreign_windows_media_paths_to_working_dir() {
-        let expected = std::env::current_dir()
-            .unwrap()
-            .join("media")
-            .join("uploads")
-            .to_string_lossy()
-            .to_string();
+    fn keeps_absolute_windows_media_paths() {
         assert_eq!(
             crate::media_paths::resolve_config_path(r"C:\Users\ab\repos\furumusic\media\uploads"),
-            expected
+            "C:/Users/ab/repos/furumusic/media/uploads"
         );
     }
 
-    // SAFETY: tests run with --test-threads=1 so no concurrent env access.
+    // SAFETY: environment-mutating tests take ENV_LOCK before changing vars.
     unsafe fn set(k: &str, v: &str) {
         unsafe { std::env::set_var(k, v) };
     }
@@ -462,6 +463,7 @@ mod tests {
 
     #[test]
     fn env_override_string_field() {
+        let _guard = lock_env();
         unsafe {
             set("FURU_OIDC_ISSUER", "https://example.com");
         }
@@ -474,6 +476,7 @@ mod tests {
 
     #[test]
     fn env_override_bool_field() {
+        let _guard = lock_env();
         unsafe {
             set("FURU_AUTH_SSO_ENABLED", "true");
         }
@@ -486,6 +489,7 @@ mod tests {
 
     #[test]
     fn source_tracking_env() {
+        let _guard = lock_env();
         unsafe {
             set("FURU_OIDC_ISSUER", "https://tracked.example.com");
         }

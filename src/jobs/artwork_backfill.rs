@@ -1,7 +1,10 @@
 use std::path::PathBuf;
 
 use reqwest::Client;
-use serde::Deserialize;
+use serde::{
+    Deserialize,
+    de::{self, DeserializeOwned},
+};
 
 use crate::agent::cover_art::{self, CoverImage, CoverSource};
 use crate::agent::cover_variants;
@@ -26,6 +29,13 @@ struct ArtistCandidate {
     name: String,
 }
 
+#[derive(Debug, sqlx::FromRow)]
+struct ArtworkRefCandidate {
+    entity_id: i64,
+    media_file_id: i64,
+    file_path: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct LastfmAlbumResponse {
     album: Option<LastfmImageContainer>,
@@ -38,6 +48,24 @@ struct LastfmArtistResponse {
     artist: Option<LastfmImageContainer>,
     error: Option<i32>,
     message: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LastfmTopAlbumsResponse {
+    topalbums: Option<LastfmTopAlbumsContainer>,
+    error: Option<i32>,
+    message: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LastfmTopAlbumsContainer {
+    #[serde(default, deserialize_with = "deserialize_one_or_many")]
+    album: Vec<LastfmTopAlbum>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LastfmTopAlbum {
+    image: Option<Vec<LastfmImage>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -54,6 +82,9 @@ struct LastfmImage {
 
 #[derive(Default)]
 struct ArtworkStats {
+    broken_release_refs_cleared: u64,
+    broken_track_refs_cleared: u64,
+    broken_artist_refs_cleared: u64,
     release_local_assigned: u64,
     release_lastfm_assigned: u64,
     release_lastfm_not_found: u64,
@@ -108,6 +139,7 @@ impl Job for ArtworkBackfillJob {
             log.info("Media path normalization pass: all media file paths are already relative");
         }
 
+        repair_missing_artwork_refs(ctx, log, storage_dir, &mut stats).await?;
         backfill_release_local(ctx, log, storage_dir, &mut stats).await?;
 
         let api_key = ctx.config.lastfm_api_key.trim();
@@ -118,10 +150,14 @@ impl Job for ArtworkBackfillJob {
             backfill_artist_lastfm(ctx, log, storage_dir, api_key, &client, &mut stats).await?;
         }
 
+        backfill_artist_album_fallbacks(ctx, log, &mut stats).await?;
         repair_cover_variants(ctx, log, storage_dir, &mut stats).await?;
 
         log.info(&format!(
-            "Artwork backfill complete: release_local_assigned={}, release_lastfm_assigned={}, release_lastfm_not_found={}, release_skipped_no_audio={}, artist_lastfm_assigned={}, artist_lastfm_not_found={}, artist_album_fallback_assigned={}, variants_created={}, variants_unchanged={}, variants_missing_original={}, failed={}",
+            "Artwork backfill complete: broken_release_refs_cleared={}, broken_track_refs_cleared={}, broken_artist_refs_cleared={}, release_local_assigned={}, release_lastfm_assigned={}, release_lastfm_not_found={}, release_skipped_no_audio={}, artist_lastfm_assigned={}, artist_lastfm_not_found={}, artist_album_fallback_assigned={}, variants_created={}, variants_unchanged={}, variants_missing_original={}, failed={}",
+            stats.broken_release_refs_cleared,
+            stats.broken_track_refs_cleared,
+            stats.broken_artist_refs_cleared,
             stats.release_local_assigned,
             stats.release_lastfm_assigned,
             stats.release_lastfm_not_found,
@@ -136,6 +172,188 @@ impl Job for ArtworkBackfillJob {
         ));
         Ok(())
     }
+}
+
+async fn repair_missing_artwork_refs(
+    ctx: &JobContext,
+    log: &mut JobLog,
+    storage_dir: &str,
+    stats: &mut ArtworkStats,
+) -> anyhow::Result<()> {
+    repair_missing_release_cover_refs(ctx, log, storage_dir, stats).await?;
+    repair_missing_track_cover_refs(ctx, log, storage_dir, stats).await?;
+    repair_missing_artist_image_refs(ctx, log, storage_dir, stats).await?;
+    Ok(())
+}
+
+async fn repair_missing_release_cover_refs(
+    ctx: &JobContext,
+    log: &mut JobLog,
+    storage_dir: &str,
+    stats: &mut ArtworkStats,
+) -> anyhow::Result<()> {
+    let rows = sqlx::query_as::<_, ArtworkRefCandidate>(
+        r#"SELECT r.id AS entity_id,
+                  r.cover_file_id AS media_file_id,
+                  mf.file_path::text AS file_path
+             FROM furumusic__release r
+             LEFT JOIN furumusic__media_file mf ON mf.id = r.cover_file_id
+            WHERE r.cover_file_id IS NOT NULL
+              AND r.is_hidden = false
+            ORDER BY r.id"#,
+    )
+    .fetch_all(&ctx.pool)
+    .await?;
+
+    for row in rows {
+        if artwork_ref_exists(storage_dir, row.file_path.as_deref()) {
+            continue;
+        }
+
+        let result = sqlx::query(
+            r#"UPDATE furumusic__release
+                  SET cover_file_id = NULL,
+                      updated_at = $3
+                WHERE id = $1
+                  AND cover_file_id = $2"#,
+        )
+        .bind(row.entity_id)
+        .bind(row.media_file_id)
+        .bind(now_iso())
+        .execute(&ctx.pool)
+        .await?;
+
+        if result.rows_affected() > 0 {
+            reset_lookup_state(&ctx.pool, "release", row.entity_id).await?;
+            stats.broken_release_refs_cleared += 1;
+            log.warn(&format!(
+                "Release {}: cleared missing cover reference media_file_id={}{}",
+                row.entity_id,
+                row.media_file_id,
+                artwork_ref_location(storage_dir, row.file_path.as_deref())
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+async fn repair_missing_track_cover_refs(
+    ctx: &JobContext,
+    log: &mut JobLog,
+    storage_dir: &str,
+    stats: &mut ArtworkStats,
+) -> anyhow::Result<()> {
+    let rows = sqlx::query_as::<_, ArtworkRefCandidate>(
+        r#"SELECT t.id AS entity_id,
+                  t.cover_file_id AS media_file_id,
+                  mf.file_path::text AS file_path
+             FROM furumusic__track t
+             LEFT JOIN furumusic__media_file mf ON mf.id = t.cover_file_id
+            WHERE t.cover_file_id IS NOT NULL
+              AND t.is_hidden = false
+            ORDER BY t.id"#,
+    )
+    .fetch_all(&ctx.pool)
+    .await?;
+
+    for row in rows {
+        if artwork_ref_exists(storage_dir, row.file_path.as_deref()) {
+            continue;
+        }
+
+        let result = sqlx::query(
+            r#"UPDATE furumusic__track
+                  SET cover_file_id = NULL,
+                      updated_at = $3
+                WHERE id = $1
+                  AND cover_file_id = $2"#,
+        )
+        .bind(row.entity_id)
+        .bind(row.media_file_id)
+        .bind(now_iso())
+        .execute(&ctx.pool)
+        .await?;
+
+        if result.rows_affected() > 0 {
+            stats.broken_track_refs_cleared += 1;
+            log.warn(&format!(
+                "Track {}: cleared missing cover reference media_file_id={}{}",
+                row.entity_id,
+                row.media_file_id,
+                artwork_ref_location(storage_dir, row.file_path.as_deref())
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+async fn repair_missing_artist_image_refs(
+    ctx: &JobContext,
+    log: &mut JobLog,
+    storage_dir: &str,
+    stats: &mut ArtworkStats,
+) -> anyhow::Result<()> {
+    let rows = sqlx::query_as::<_, ArtworkRefCandidate>(
+        r#"SELECT a.id AS entity_id,
+                  a.image_file_id AS media_file_id,
+                  mf.file_path::text AS file_path
+             FROM furumusic__artist a
+             LEFT JOIN furumusic__media_file mf ON mf.id = a.image_file_id
+            WHERE a.image_file_id IS NOT NULL
+              AND a.is_hidden = false
+            ORDER BY a.id"#,
+    )
+    .fetch_all(&ctx.pool)
+    .await?;
+
+    for row in rows {
+        if artwork_ref_exists(storage_dir, row.file_path.as_deref()) {
+            continue;
+        }
+
+        let result = sqlx::query(
+            r#"UPDATE furumusic__artist
+                  SET image_file_id = NULL,
+                      updated_at = $3
+                WHERE id = $1
+                  AND image_file_id = $2"#,
+        )
+        .bind(row.entity_id)
+        .bind(row.media_file_id)
+        .bind(now_iso())
+        .execute(&ctx.pool)
+        .await?;
+
+        if result.rows_affected() > 0 {
+            reset_lookup_state(&ctx.pool, "artist", row.entity_id).await?;
+            stats.broken_artist_refs_cleared += 1;
+            log.warn(&format!(
+                "Artist {}: cleared missing image reference media_file_id={}{}",
+                row.entity_id,
+                row.media_file_id,
+                artwork_ref_location(storage_dir, row.file_path.as_deref())
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn artwork_ref_exists(storage_dir: &str, file_path: Option<&str>) -> bool {
+    file_path
+        .map(|value| crate::media_paths::resolve_media_file_path(storage_dir, value).exists())
+        .unwrap_or(false)
+}
+
+fn artwork_ref_location(storage_dir: &str, file_path: Option<&str>) -> String {
+    file_path
+        .map(|value| {
+            let path = crate::media_paths::resolve_media_file_path(storage_dir, value);
+            format!(" at {}", path.display())
+        })
+        .unwrap_or_else(|| " with missing media_file row".to_string())
 }
 
 async fn backfill_release_local(
@@ -475,11 +693,15 @@ async fn backfill_artist_lastfm(
     let artists = sqlx::query_as::<_, ArtistCandidate>(
         r#"SELECT a.id, a.name::text AS name
              FROM furumusic__artist a
+             LEFT JOIN furumusic__media_file mf ON mf.id = a.image_file_id
              LEFT JOIN furumusic__artwork_lookup_state s
                ON s.entity_kind = 'artist'
               AND s.entity_id = a.id
               AND s.source = 'lastfm'
-            WHERE a.image_file_id IS NULL
+            WHERE (
+                    a.image_file_id IS NULL
+                 OR mf.file_path NOT LIKE '%/__artist_image__/%'
+                  )
               AND a.is_hidden = false
               AND (
                     s.entity_id IS NULL
@@ -532,7 +754,15 @@ async fn backfill_artist_lastfm(
                                       SET image_file_id = $1,
                                           updated_at = $3
                                     WHERE id = $2
-                                      AND image_file_id IS NULL"#,
+                                      AND (
+                                            image_file_id IS NULL
+                                         OR EXISTS (
+                                                SELECT 1
+                                                  FROM furumusic__media_file mf
+                                                 WHERE mf.id = furumusic__artist.image_file_id
+                                                   AND mf.file_path NOT LIKE '%/__artist_image__/%'
+                                            )
+                                          )"#,
                         )
                         .bind(image_file_id)
                         .bind(artist.id)
@@ -659,6 +889,70 @@ async fn backfill_artist_lastfm(
     Ok(())
 }
 
+async fn backfill_artist_album_fallbacks(
+    ctx: &JobContext,
+    log: &mut JobLog,
+    stats: &mut ArtworkStats,
+) -> anyhow::Result<()> {
+    let artists = sqlx::query_as::<_, ArtistCandidate>(
+        r#"SELECT a.id, a.name::text AS name
+             FROM furumusic__artist a
+            WHERE a.image_file_id IS NULL
+              AND a.is_hidden = false
+              AND EXISTS (
+                    SELECT 1
+                      FROM furumusic__release_artist ra
+                      JOIN furumusic__release r ON r.id = ra.release_id
+                     WHERE ra.artist_id = a.id
+                       AND r.cover_file_id IS NOT NULL
+                       AND r.is_hidden = false
+                    UNION
+                    SELECT 1
+                      FROM furumusic__track_artist ta
+                      JOIN furumusic__track t ON t.id = ta.track_id
+                      JOIN furumusic__release r ON r.id = t.release_id
+                     WHERE ta.artist_id = a.id
+                       AND r.cover_file_id IS NOT NULL
+                       AND r.is_hidden = false
+                  )
+            ORDER BY a.id"#,
+    )
+    .fetch_all(&ctx.pool)
+    .await?;
+
+    if artists.is_empty() {
+        log.info("Artist album fallback pass: no artists need local album fallback");
+        return Ok(());
+    }
+
+    log.info(&format!(
+        "Artist album fallback pass: checking {} artist(s) without images",
+        artists.len()
+    ));
+
+    for artist in artists {
+        match assign_artist_album_fallback(ctx, artist.id).await {
+            Ok(Some(media_file_id)) => {
+                stats.artist_album_fallback_assigned += 1;
+                log.info(&format!(
+                    "Artist {} \"{}\": assigned local album cover fallback (media_file_id={media_file_id})",
+                    artist.id, artist.name
+                ));
+            }
+            Ok(None) => {}
+            Err(err) => {
+                stats.failed += 1;
+                log.warn(&format!(
+                    "Artist {} \"{}\": failed to assign album fallback artwork: {err}",
+                    artist.id, artist.name
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 async fn repair_cover_variants(
     ctx: &JobContext,
     log: &mut JobLog,
@@ -666,17 +960,25 @@ async fn repair_cover_variants(
     stats: &mut ArtworkStats,
 ) -> anyhow::Result<()> {
     let rows: Vec<(i64, String)> = sqlx::query_as(
-        "SELECT id, file_path FROM furumusic__media_file WHERE file_type = 'cover_art' ORDER BY id",
+        r#"SELECT DISTINCT mf.id, mf.file_path::text
+             FROM furumusic__media_file mf
+            WHERE mf.file_type = 'cover_art'
+              AND (
+                    EXISTS (SELECT 1 FROM furumusic__release r WHERE r.cover_file_id = mf.id)
+                 OR EXISTS (SELECT 1 FROM furumusic__track t WHERE t.cover_file_id = mf.id)
+                 OR EXISTS (SELECT 1 FROM furumusic__artist a WHERE a.image_file_id = mf.id)
+                  )
+            ORDER BY mf.id"#,
     )
     .fetch_all(&ctx.pool)
     .await?;
 
     if rows.is_empty() {
-        log.info("Cover variant pass: no cover art media files found");
+        log.info("Cover variant pass: no referenced cover art media files found");
         return Ok(());
     }
     log.info(&format!(
-        "Cover variant pass: checking {} cover art media file(s)",
+        "Cover variant pass: checking {} referenced cover art media file(s)",
         rows.len()
     ));
 
@@ -806,6 +1108,18 @@ async fn fetch_lastfm_artist_image(
     api_key: &str,
     artist: &str,
 ) -> anyhow::Result<Option<String>> {
+    if let Some(image_url) = fetch_lastfm_artist_info_image(client, api_key, artist).await? {
+        return Ok(Some(image_url));
+    }
+
+    fetch_lastfm_artist_top_album_image(client, api_key, artist).await
+}
+
+async fn fetch_lastfm_artist_info_image(
+    client: &Client,
+    api_key: &str,
+    artist: &str,
+) -> anyhow::Result<Option<String>> {
     let response = client
         .get("https://ws.audioscrobbler.com/2.0/")
         .query(&[
@@ -834,6 +1148,70 @@ async fn fetch_lastfm_artist_image(
     Ok(parsed
         .artist
         .and_then(|artist| choose_best_image(artist.image)))
+}
+
+async fn fetch_lastfm_artist_top_album_image(
+    client: &Client,
+    api_key: &str,
+    artist: &str,
+) -> anyhow::Result<Option<String>> {
+    let response = client
+        .get("https://ws.audioscrobbler.com/2.0/")
+        .query(&[
+            ("method", "artist.getTopAlbums"),
+            ("api_key", api_key),
+            ("artist", artist),
+            ("autocorrect", "1"),
+            ("limit", "10"),
+            ("format", "json"),
+        ])
+        .send()
+        .await?;
+    let body = response.text().await?;
+    let parsed: LastfmTopAlbumsResponse = serde_json::from_str(&body)?;
+    if let Some(code) = parsed.error {
+        if code == 6 || code == 7 {
+            return Ok(None);
+        }
+        if code == 29 {
+            anyhow::bail!("Last.fm rate limit exceeded");
+        }
+        anyhow::bail!(
+            "Last.fm API error {code}: {}",
+            parsed.message.unwrap_or_default()
+        );
+    }
+
+    let albums = parsed
+        .topalbums
+        .map(|topalbums| topalbums.album)
+        .unwrap_or_default();
+    Ok(albums
+        .into_iter()
+        .filter_map(|album| choose_best_image(album.image))
+        .next())
+}
+
+fn deserialize_one_or_many<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: de::Deserializer<'de>,
+    T: DeserializeOwned,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+
+    match value {
+        serde_json::Value::Array(values) => values
+            .into_iter()
+            .map(|value| serde_json::from_value(value).map_err(de::Error::custom))
+            .collect(),
+        serde_json::Value::Object(_) => serde_json::from_value(value)
+            .map(|item| vec![item])
+            .map_err(de::Error::custom),
+        _ => Ok(Vec::new()),
+    }
 }
 
 fn choose_best_image(images: Option<Vec<LastfmImage>>) -> Option<String> {
@@ -941,6 +1319,24 @@ async fn record_lookup_state(
     .bind(now_iso())
     .bind(error)
     .bind(source_url)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+async fn reset_lookup_state(
+    pool: &sqlx::PgPool,
+    entity_kind: &str,
+    entity_id: i64,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"DELETE FROM furumusic__artwork_lookup_state
+            WHERE entity_kind = $1
+              AND entity_id = $2
+              AND source = 'lastfm'"#,
+    )
+    .bind(entity_kind)
+    .bind(entity_id)
     .execute(pool)
     .await?;
     Ok(())

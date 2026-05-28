@@ -3907,7 +3907,6 @@ impl App for PlayerApp {
                 {
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    let config = Arc::clone(&self.config);
                     get(
                         move |session: Session,
                               db: Database,
@@ -3915,7 +3914,6 @@ impl App for PlayerApp {
                               request: cot::request::Request| {
                             let pool = Arc::clone(&pool);
                             let pool_config = Arc::clone(&pool_config);
-                            let config = Arc::clone(&config);
                             async move {
                                 let pg_pool = pool
                                     .get_or_init(|| async {
@@ -3926,7 +3924,9 @@ impl App for PlayerApp {
                                             .expect("player pool")
                                     })
                                     .await;
-                                stream_handler(session, db, pg_pool, &config, &request, path).await
+                                let (live_config, _) = AppConfig::load_with_db(&db).await;
+                                stream_handler(session, db, pg_pool, &live_config, &request, path)
+                                    .await
                             }
                         },
                     )
@@ -3939,12 +3939,10 @@ impl App for PlayerApp {
                 {
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    let config = Arc::clone(&self.config);
                     get(
                         move |session: Session, db: Database, path: Path<PathMediaFileVariant>| {
                             let pool = Arc::clone(&pool);
                             let pool_config = Arc::clone(&pool_config);
-                            let config = Arc::clone(&config);
                             async move {
                                 let pg_pool = pool
                                     .get_or_init(|| async {
@@ -3955,7 +3953,9 @@ impl App for PlayerApp {
                                             .expect("player pool")
                                     })
                                     .await;
-                                cover_variant_handler(session, db, pg_pool, &config, path).await
+                                let (live_config, _) = AppConfig::load_with_db(&db).await;
+                                cover_variant_handler(session, db, pg_pool, &live_config, path)
+                                    .await
                             }
                         },
                     )
@@ -3967,12 +3967,10 @@ impl App for PlayerApp {
                 {
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    let config = Arc::clone(&self.config);
                     get(
                         move |session: Session, db: Database, path: Path<PathMediaFileId>| {
                             let pool = Arc::clone(&pool);
                             let pool_config = Arc::clone(&pool_config);
-                            let config = Arc::clone(&config);
                             async move {
                                 let pg_pool = pool
                                     .get_or_init(|| async {
@@ -3983,7 +3981,8 @@ impl App for PlayerApp {
                                             .expect("player pool")
                                     })
                                     .await;
-                                cover_handler(session, db, pg_pool, &config, path).await
+                                let (live_config, _) = AppConfig::load_with_db(&db).await;
+                                cover_handler(session, db, pg_pool, &live_config, path).await
                             }
                         },
                     )

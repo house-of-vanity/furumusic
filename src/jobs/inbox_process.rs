@@ -225,14 +225,13 @@ fn group_reviews_by_folder(
     reviews: &[PendingReview],
     inbox_dir: &str,
 ) -> Vec<(String, Vec<PendingReview>)> {
-    let inbox = Path::new(inbox_dir);
     let mut map: HashMap<String, Vec<PendingReview>> = HashMap::new();
 
     for r in reviews {
-        let path = Path::new(r.input_path_str());
-        let folder = path.parent().unwrap_or(path);
-        let rel = folder.strip_prefix(inbox).unwrap_or(folder);
-        let key = rel.to_string_lossy().to_string();
+        let path = crate::media_paths::resolve_path_from_root(inbox_dir, r.input_path_str());
+        let folder = path.parent().unwrap_or(path.as_path());
+        let key = crate::media_paths::path_for_root(inbox_dir, folder)
+            .unwrap_or_else(|| folder.to_string_lossy().to_string());
         map.entry(key).or_default().push(r.clone());
     }
 
@@ -287,8 +286,9 @@ async fn process_folder_batch(
     let mut failed_reviews: Vec<PendingReview> = Vec::new();
 
     for mut review in reviews {
-        let input_path_str = review.input_path_str().to_owned();
-        let file_path = Path::new(&input_path_str);
+        let stored_input_path = review.input_path_str().to_owned();
+        let file_path =
+            crate::media_paths::resolve_path_from_root(&config.agent_inbox_dir, &stored_input_path);
         let filename = file_path
             .file_name()
             .and_then(|n| n.to_str())
@@ -336,7 +336,7 @@ async fn process_folder_batch(
             };
 
         // Parse path hints
-        let relative = file_path.strip_prefix(inbox_path).unwrap_or(file_path);
+        let relative = file_path.strip_prefix(inbox_path).unwrap_or(&file_path);
         let uploader = crate::jobs::uploader_from_relative_path(pool, relative).await;
         let hinted_relative = crate::jobs::strip_user_upload_prefix(relative);
         let hints = crate::agent::path_hints::parse(&hinted_relative);
@@ -471,8 +471,11 @@ async fn process_folder_batch(
 
     // Build folder context from the first file's folder
     let folder_ctx = {
-        let first_path = Path::new(prepared[0].review.input_path_str());
-        let folder = first_path.parent().unwrap_or(first_path);
+        let first_path = crate::media_paths::resolve_path_from_root(
+            &config.agent_inbox_dir,
+            prepared[0].review.input_path_str(),
+        );
+        let folder = first_path.parent().unwrap_or(first_path.as_path());
         let mut folder_files: Vec<String> = std::fs::read_dir(folder)
             .ok()
             .map(|rd| {
@@ -631,7 +634,11 @@ async fn process_folder_batch(
         p.review.result_json = Some(result_json);
         let _ = p.review.save(db).await;
 
-        let input_path_str = p.review.input_path_str().to_owned();
+        let input_path = crate::media_paths::resolve_path_from_root(
+            &config.agent_inbox_dir,
+            p.review.input_path_str(),
+        );
+        let input_path_str = input_path.to_string_lossy().to_string();
 
         if confidence >= config.agent_confidence_threshold {
             match finalize_approved(
@@ -787,10 +794,10 @@ pub async fn finalize_approved(
         format!("{}.{}", sanitize_filename(track_title), ext)
     };
 
-    let storage_dir = Path::new(storage_dir_str);
+    let storage_dir = crate::media_paths::resolve_config_path_buf(storage_dir_str);
     let storage_path = if source_path.exists() {
         match mover::move_to_storage(
-            storage_dir,
+            &storage_dir,
             artist_name,
             release_title,
             &dest_filename,

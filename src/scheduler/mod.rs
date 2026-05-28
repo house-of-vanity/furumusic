@@ -1481,6 +1481,20 @@ pub async fn start_scheduler(
             Err(e) => tracing::warn!("Failed to normalize media file paths: {e:#}"),
         }
     }
+    if !live_config.agent_inbox_dir.trim().is_empty() {
+        match crate::media_paths::normalize_pending_review_paths(
+            &pool,
+            &live_config.agent_inbox_dir,
+        )
+        .await
+        {
+            Ok(0) => {}
+            Ok(n) => {
+                tracing::info!("Normalized {n} pending review path(s) to relative inbox paths")
+            }
+            Err(e) => tracing::warn!("Failed to normalize pending review paths: {e:#}"),
+        }
+    }
 
     // Upsert ScheduledJob rows
     for job in registry.all_jobs() {

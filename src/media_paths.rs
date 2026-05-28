@@ -1,7 +1,5 @@
 use std::path::{Component, Path, PathBuf};
 
-const KNOWN_MEDIA_ROOTS: &[&str] = &["media/library", "media/uploads"];
-
 pub fn resolve_config_path(value: &str) -> String {
     let path = resolve_config_path_buf(value);
     if path.as_os_str().is_empty() {
@@ -18,97 +16,75 @@ pub fn resolve_config_path_buf(value: &str) -> PathBuf {
     }
 
     let normalized = normalize_slashes(trimmed);
-    if is_host_absolute(&normalized) {
-        return PathBuf::from(normalized);
+    if is_absolute_path(&normalized) {
+        PathBuf::from(normalized)
+    } else {
+        app_root().join(slash_path(&normalized))
     }
-
-    if looks_like_windows_absolute(&normalized) {
-        if let Some(relative) = extract_known_media_root(&normalized) {
-            return app_root().join(slash_path(&relative));
-        }
-        return PathBuf::from(normalized);
-    }
-
-    app_root().join(slash_path(&normalized))
 }
 
 pub fn resolve_media_file_path(storage_dir: &str, file_path: &str) -> PathBuf {
-    let storage_root = resolve_config_path_buf(storage_dir);
-    if let Some(relative) = normalize_stored_media_file_path(storage_dir, file_path) {
-        return storage_root.join(slash_path(&relative));
-    }
-
-    let normalized = normalize_slashes(file_path.trim());
-    let path = PathBuf::from(&normalized);
-    if path.is_absolute() {
-        path
-    } else {
-        storage_root.join(path)
-    }
+    resolve_path_from_root(storage_dir, file_path)
 }
 
 pub fn media_file_path_for_storage(storage_dir: &str, path: &Path) -> Option<String> {
-    let storage_root = resolve_config_path_buf(storage_dir);
-    if let Ok(relative) = path.strip_prefix(&storage_root) {
-        return relative_path_string(relative);
-    }
-
-    let normalized = normalize_slashes(&path.to_string_lossy());
-    relative_after_storage_marker(&storage_root, &normalized).or_else(|| {
-        if !is_host_absolute(&normalized) && !looks_like_windows_absolute(&normalized) {
-            normalize_relative_path(&normalized)
-        } else {
-            None
-        }
-    })
+    path_for_root(storage_dir, path)
 }
 
-pub fn normalize_stored_media_file_path(storage_dir: &str, file_path: &str) -> Option<String> {
-    let trimmed = file_path.trim();
-    if trimmed.is_empty() {
-        return None;
+pub fn resolve_path_from_root(root_dir: &str, stored_path: &str) -> PathBuf {
+    let normalized = normalize_slashes(stored_path.trim());
+    if is_absolute_path(&normalized) {
+        PathBuf::from(normalized)
+    } else {
+        resolve_config_path_buf(root_dir).join(slash_path(&normalized))
+    }
+}
+
+pub fn path_for_root(root_dir: &str, path: &Path) -> Option<String> {
+    let root = resolve_config_path_buf(root_dir);
+    let normalized = normalize_slashes(&path.to_string_lossy());
+    if is_absolute_path(&normalized) {
+        return strip_root_prefix(&root, &normalized);
     }
 
-    let storage_root = resolve_config_path_buf(storage_dir);
-    let normalized = normalize_slashes(trimmed);
-    let path = PathBuf::from(&normalized);
-    if path.is_absolute() {
-        if let Ok(relative) = path.strip_prefix(&storage_root) {
-            return relative_path_string(relative);
-        }
-        return relative_after_storage_marker(&storage_root, &normalized);
-    }
-
-    if looks_like_windows_absolute(&normalized) {
-        return relative_after_storage_marker(&storage_root, &normalized);
-    }
-
-    if let Some(relative) = relative_after_storage_marker_prefix(&storage_root, &normalized) {
-        return Some(relative);
-    }
-
-    normalize_relative_path(&normalized)
+    relative_path_string(path)
 }
 
 pub async fn normalize_media_file_paths(
     pool: &sqlx::PgPool,
     storage_dir: &str,
 ) -> anyhow::Result<u64> {
-    let rows: Vec<(i64, String)> =
-        sqlx::query_as("SELECT id, file_path FROM furumusic__media_file ORDER BY id")
-            .fetch_all(pool)
-            .await?;
+    normalize_table_paths(pool, "furumusic__media_file", "file_path", storage_dir).await
+}
+
+pub async fn normalize_pending_review_paths(
+    pool: &sqlx::PgPool,
+    inbox_dir: &str,
+) -> anyhow::Result<u64> {
+    normalize_table_paths(pool, "furumusic__pending_review", "input_path", inbox_dir).await
+}
+
+async fn normalize_table_paths(
+    pool: &sqlx::PgPool,
+    table: &str,
+    column: &str,
+    root_dir: &str,
+) -> anyhow::Result<u64> {
+    let sql = format!("SELECT id, {column} FROM {table} WHERE {column} IS NOT NULL ORDER BY id");
+    let rows: Vec<(i64, String)> = sqlx::query_as(&sql).fetch_all(pool).await?;
 
     let mut updated = 0;
-    for (id, file_path) in rows {
-        let Some(relative) = normalize_stored_media_file_path(storage_dir, &file_path) else {
+    for (id, stored_path) in rows {
+        let Some(normalized) = normalize_stored_path(root_dir, &stored_path) else {
             continue;
         };
-        if relative == file_path {
+        if normalized == stored_path {
             continue;
         }
-        sqlx::query("UPDATE furumusic__media_file SET file_path = $1 WHERE id = $2")
-            .bind(&relative)
+
+        let sql = format!("UPDATE {table} SET {column} = $1 WHERE id = $2");
+        sqlx::query(&sql)
+            .bind(&normalized)
             .bind(id)
             .execute(pool)
             .await?;
@@ -116,6 +92,19 @@ pub async fn normalize_media_file_paths(
     }
 
     Ok(updated)
+}
+
+fn normalize_stored_path(root_dir: &str, stored_path: &str) -> Option<String> {
+    let normalized = normalize_slashes(stored_path);
+    if normalized.is_empty() {
+        return None;
+    }
+
+    if is_absolute_path(&normalized) {
+        strip_root_prefix(&resolve_config_path_buf(root_dir), &normalized)
+    } else {
+        normalize_relative_path(&normalized)
+    }
 }
 
 fn app_root() -> PathBuf {
@@ -126,8 +115,8 @@ fn normalize_slashes(value: &str) -> String {
     value.trim().replace('\\', "/")
 }
 
-fn is_host_absolute(value: &str) -> bool {
-    Path::new(value).is_absolute()
+fn is_absolute_path(value: &str) -> bool {
+    value.starts_with('/') || Path::new(value).is_absolute() || looks_like_windows_absolute(value)
 }
 
 fn looks_like_windows_absolute(value: &str) -> bool {
@@ -156,6 +145,35 @@ fn normalize_relative_path(value: &str) -> Option<String> {
     Some(parts.join("/"))
 }
 
+fn strip_root_prefix(root: &Path, normalized_path: &str) -> Option<String> {
+    let root_string = normalize_slashes(&root.to_string_lossy());
+    let root_trimmed = root_string.trim_end_matches('/');
+    let path_trimmed = normalized_path.trim();
+
+    let root_cmp = comparable_path(root_trimmed);
+    let path_cmp = comparable_path(path_trimmed);
+    if path_cmp == root_cmp {
+        return None;
+    }
+
+    let prefix = format!("{root_cmp}/");
+    if path_cmp.starts_with(&prefix) {
+        let tail = &path_trimmed[root_trimmed.len() + 1..];
+        return normalize_relative_path(tail);
+    }
+
+    None
+}
+
+fn comparable_path(value: &str) -> String {
+    let normalized = normalize_slashes(value).trim_end_matches('/').to_owned();
+    if cfg!(windows) || looks_like_windows_absolute(&normalized) {
+        normalized.to_ascii_lowercase()
+    } else {
+        normalized
+    }
+}
+
 fn relative_path_string(path: &Path) -> Option<String> {
     let mut parts = Vec::new();
     for component in path.components() {
@@ -172,75 +190,6 @@ fn relative_path_string(path: &Path) -> Option<String> {
     }
 }
 
-fn extract_known_media_root(value: &str) -> Option<String> {
-    KNOWN_MEDIA_ROOTS
-        .iter()
-        .filter_map(|marker| relative_from_marker(value, marker, true))
-        .next()
-}
-
-fn relative_after_storage_marker(storage_root: &Path, value: &str) -> Option<String> {
-    let marker = storage_marker(storage_root)?;
-    relative_from_marker(value, &marker, false)
-}
-
-fn relative_after_storage_marker_prefix(storage_root: &Path, value: &str) -> Option<String> {
-    let marker = storage_marker(storage_root)?;
-    let normalized = normalize_slashes(value);
-    let normalized_lower = normalized.to_ascii_lowercase();
-    let marker_lower = marker.to_ascii_lowercase();
-    if normalized_lower == marker_lower {
-        return None;
-    }
-    normalized_lower
-        .strip_prefix(&(marker_lower + "/"))
-        .and_then(|_| normalize_relative_path(&normalized[marker.len() + 1..]))
-}
-
-fn storage_marker(storage_root: &Path) -> Option<String> {
-    let parts: Vec<String> = storage_root
-        .components()
-        .filter_map(|component| match component {
-            Component::Normal(value) => Some(value.to_string_lossy().to_string()),
-            _ => None,
-        })
-        .collect();
-
-    if parts.len() >= 2 {
-        Some(format!(
-            "{}/{}",
-            parts[parts.len() - 2],
-            parts[parts.len() - 1]
-        ))
-    } else {
-        parts.last().cloned()
-    }
-}
-
-fn relative_from_marker(value: &str, marker: &str, include_marker: bool) -> Option<String> {
-    let normalized = normalize_slashes(value);
-    let haystack = format!("/{}", normalized.trim_matches('/'));
-    let marker = marker.trim_matches('/');
-    let needle = format!("/{marker}");
-    let haystack_lower = haystack.to_ascii_lowercase();
-    let needle_lower = needle.to_ascii_lowercase();
-    let index = haystack_lower.rfind(&needle_lower)?;
-    let after_marker = index + needle.len();
-    if after_marker < haystack.len() && haystack.as_bytes().get(after_marker) != Some(&b'/') {
-        return None;
-    }
-    let tail = haystack[after_marker..].trim_matches('/');
-    if include_marker {
-        if tail.is_empty() {
-            Some(marker.to_string())
-        } else {
-            Some(format!("{marker}/{tail}"))
-        }
-    } else {
-        normalize_relative_path(tail)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,11 +201,26 @@ mod tests {
     }
 
     #[test]
-    fn maps_foreign_windows_config_media_root_to_app_root() {
-        let expected = app_root().join("media").join("uploads");
+    fn keeps_absolute_config_path() {
+        assert_eq!(resolve_config_path_buf("/media"), PathBuf::from("/media"));
+    }
+
+    #[test]
+    fn resolves_relative_media_file_under_storage_root() {
         assert_eq!(
-            resolve_config_path_buf(r"C:\Users\ab\repos\furumusic\media\uploads"),
-            expected
+            resolve_media_file_path("/media", "Buckethead/Pike/cover.jpg"),
+            PathBuf::from("/media")
+                .join("Buckethead")
+                .join("Pike")
+                .join("cover.jpg")
+        );
+    }
+
+    #[test]
+    fn keeps_absolute_media_file_path() {
+        assert_eq!(
+            resolve_media_file_path("/media", "/media/Buckethead/Pike/cover.jpg"),
+            PathBuf::from("/media/Buckethead/Pike/cover.jpg")
         );
     }
 
@@ -271,40 +235,22 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_legacy_windows_media_file_path() {
-        let storage = app_root().join("media").join("library");
+    fn stores_windows_path_relative_to_windows_storage_root() {
         assert_eq!(
-            normalize_stored_media_file_path(
-                &storage.to_string_lossy(),
-                r"C:\Users\ab\repos\furumusic\media\library\Buckethead\Pike\cover.jpg",
+            path_for_root(
+                r"C:\Users\ab\repos\furumusic\library",
+                Path::new(r"C:\Users\ab\repos\furumusic\library\Artist\Album\track.mp3"),
             )
             .as_deref(),
-            Some("Buckethead/Pike/cover.jpg")
+            Some("Artist/Album/track.mp3")
         );
     }
 
     #[test]
-    fn strips_accidental_relative_storage_root_prefix() {
-        let storage = app_root().join("media").join("library");
+    fn normalizes_relative_backslashes() {
         assert_eq!(
-            normalize_stored_media_file_path(
-                &storage.to_string_lossy(),
-                "media/library/Buckethead/Pike/cover.jpg",
-            )
-            .as_deref(),
-            Some("Buckethead/Pike/cover.jpg")
-        );
-    }
-
-    #[test]
-    fn resolves_legacy_windows_media_file_path_to_current_storage() {
-        let storage = app_root().join("media").join("library");
-        assert_eq!(
-            resolve_media_file_path(
-                &storage.to_string_lossy(),
-                r"C:\Users\ab\repos\furumusic\media\library\Buckethead\Pike\cover.jpg",
-            ),
-            storage.join("Buckethead").join("Pike").join("cover.jpg")
+            normalize_stored_path("/media", r"Artist\Album\track.mp3").as_deref(),
+            Some("Artist/Album/track.mp3")
         );
     }
 }

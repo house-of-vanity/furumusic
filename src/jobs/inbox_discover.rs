@@ -75,7 +75,9 @@ impl Job for InboxDiscoverJob {
 
         for (_folder, files) in &groups {
             for file_path in files {
-                let input_path_str = file_path.to_string_lossy().to_string();
+                let input_path_str =
+                    crate::media_paths::path_for_root(&config.agent_inbox_dir, file_path)
+                        .unwrap_or_else(|| file_path.to_string_lossy().to_string());
 
                 // Skip if a PendingReview already exists for this path
                 match PendingReview::exists_for_path(&ctx.db, &input_path_str).await {
