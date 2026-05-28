@@ -762,7 +762,7 @@
                     <template x-for="(track, idx) in $store.library.currentRelease.tracks" :key="track.id">
                         <div class="track-row"
                              :class="{ playing: $store.player.currentTrack && $store.player.currentTrack.id === track.id }"
-                             @dblclick="$store.queue.playRelease($store.library.currentRelease.tracks, idx)">
+                             @dblclick="$store.queue.playRelease([track], 0)">
                             <span class="track-num" x-text="track.track_number || (idx + 1)"></span>
                             <div class="track-info">
                                 <div class="track-title" x-text="track.title"></div>
@@ -786,7 +786,7 @@
                                     <span x-show="$store.library.hasPopularity(track)" x-text="$store.library.popularityLabel(track)"></span>
                                     <span x-show="!$store.library.hasPopularity(track)" class="info-letter">i</span>
                                 </button>
-                                <button class="track-action-btn play-btn" @click.stop="$store.queue.playRelease($store.library.currentRelease.tracks, idx)" title="{{ t.player_play }}">
+                                <button class="track-action-btn play-btn" @click.stop="$store.queue.playRelease([track], 0)" title="{{ t.player_play }}">
                                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                                 </button>
                                 <button class="like-btn" :class="{ liked: $store.likes.has(track.id) }" @click.stop="$store.likes.toggle(track.id)" title="{{ t.player_like }}">
@@ -1073,7 +1073,7 @@
                 <div class="device-popover" x-show="$store.devices.open" x-transition x-cloak>
                     <template x-for="device in $store.devices.devices" :key="device.id">
                         <button class="device-row"
-                                :class="{ active: device.is_active }"
+                                :class="{ active: device.is_active, 'current-device': device.is_current }"
                                 @click="$store.devices.select(device.id)">
                             <span class="device-row-icon">
                                 <template x-if="device.kind === 'phone'">
@@ -1101,6 +1101,69 @@
                             </span>
                         </button>
                     </template>
+                    <template x-if="$store.devices.jams.length > 0">
+                        <div class="device-section-label jam-section-label">Jams</div>
+                    </template>
+                    <template x-for="jam in $store.devices.jams" :key="jam.id">
+                        <button class="device-row jam-row"
+                                :class="{ active: jam.is_active, pending: jam.is_pending }"
+                                @click="$store.devices.selectJam(jam)">
+                            <span class="device-row-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="8" cy="8" r="3"/>
+                                    <circle cx="16" cy="8" r="3"/>
+                                    <path d="M4 20v-1a4 4 0 014-4h0a4 4 0 014 4v1"/>
+                                    <path d="M12 20v-1a4 4 0 014-4h0a4 4 0 014 4v1"/>
+                                </svg>
+                            </span>
+                            <span class="device-row-main">
+                                <span class="device-row-name" x-text="jam.name"></span>
+                                <span class="device-row-current"
+                                      x-text="!jam.host_device_online ? 'Host offline' : (jam.is_pending ? 'Invite pending' : (jam.is_owner ? 'Your Jam' : 'Shared queue'))"></span>
+                            </span>
+                            <span class="device-row-check" x-show="jam.is_active">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+                                    <polyline points="20 6 9 17 4 12"/>
+                                </svg>
+                            </span>
+                        </button>
+                    </template>
+                    <button class="device-row start-jam-row" @click="$store.devices.openJamPanel()">
+                        <span class="device-row-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 5v14"/>
+                                <path d="M5 12h14"/>
+                            </svg>
+                        </span>
+                        <span class="device-row-main">
+                            <span class="device-row-name">Start Jam</span>
+                            <span class="device-row-current">Invite listeners</span>
+                        </span>
+                    </button>
+                    <div class="jam-create-panel" x-show="$store.devices.jamPanelOpen" x-transition x-cloak>
+                        <div class="jam-selected-users" x-show="$store.devices.jamSelectedUsers.length > 0">
+                            <template x-for="user in $store.devices.jamSelectedUsers" :key="user.id">
+                                <button class="jam-user-chip" @click="$store.devices.removeJamInvitee(user.id)">
+                                    <span x-text="user.display_name || user.username"></span>
+                                    <span aria-hidden="true">×</span>
+                                </button>
+                            </template>
+                        </div>
+                        <input class="jam-user-search"
+                               type="search"
+                               placeholder="Search users"
+                               x-model="$store.devices.jamQuery"
+                               @input="$store.devices.queueJamSearch()">
+                        <div class="jam-search-results" x-show="$store.devices.jamUsers.length > 0">
+                            <template x-for="user in $store.devices.jamUsers" :key="user.id">
+                                <button class="jam-search-row" @click="$store.devices.addJamInvitee(user)">
+                                    <span x-text="user.display_name || user.username"></span>
+                                    <small x-text="user.email || user.username"></small>
+                                </button>
+                            </template>
+                        </div>
+                        <button class="jam-create-btn" @click="$store.devices.createJam()">Create Jam</button>
+                    </div>
                 </div>
             </div>
         </div>

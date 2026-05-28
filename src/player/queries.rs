@@ -20,6 +20,11 @@ pub(super) struct TracksByIdsRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub(super) struct UserUploadsQuery {
+    pub(super) limit: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
 pub(super) struct CreatePlaylistRequest {
     pub(super) title: String,
 }
@@ -59,6 +64,12 @@ pub(super) struct PathStringId {
 #[derive(Debug, Deserialize)]
 pub(super) struct SearchQuery {
     pub(super) q: String,
+    pub(super) limit: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct JamUserSearchQuery {
+    pub(super) q: Option<String>,
     pub(super) limit: Option<i32>,
 }
 

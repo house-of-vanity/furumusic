@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use cot::db::Database;
@@ -7,7 +7,7 @@ use cot::http::header::{
     ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, HeaderName, RANGE,
 };
 use cot::json::Json;
-use cot::request::extractors::Path;
+use cot::request::extractors::{Path, UrlQuery};
 use cot::response::IntoResponse;
 use cot::router::method::{get, post};
 use cot::router::{Route, Router};
@@ -54,6 +54,8 @@ struct LocalUploadResponse {
 const PLAYER_DEVICE_TTL_MS: i64 = 30_000;
 const PLAYER_DEVICE_COMMAND_TTL_MS: i64 = 20_000;
 const PLAYER_DEVICE_MAX_COMMANDS: usize = 32;
+const PLAYER_JAM_IDLE_TTL_MS: i64 = 4 * 60 * 60 * 1000;
+const PLAYER_JAM_MAX_INVITEES: usize = 25;
 
 #[derive(Debug, Clone)]
 struct PlayerDevice {
@@ -71,12 +73,34 @@ struct PendingPlayerDeviceCommand {
     created_at_ms: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PlayerJamMemberStatus {
+    Invited,
+    Joined,
+}
+
+#[derive(Debug, Clone)]
+struct PlayerJamMember {
+    status: PlayerJamMemberStatus,
+    last_seen_ms: i64,
+}
+
+#[derive(Debug, Clone)]
+struct PlayerJamSession {
+    id: String,
+    host_user_id: i64,
+    host_name: String,
+    host_last_seen_ms: i64,
+    members: HashMap<i64, PlayerJamMember>,
+}
+
 #[derive(Debug, Default)]
 struct PlayerDeviceHubState {
     devices_by_user: HashMap<i64, HashMap<String, PlayerDevice>>,
     active_device_by_user: HashMap<i64, String>,
     commands_by_device: HashMap<(i64, String), VecDeque<PendingPlayerDeviceCommand>>,
     playback_state_by_user: HashMap<i64, PlayerDevicePlaybackStateDto>,
+    jams_by_id: HashMap<String, PlayerJamSession>,
 }
 
 #[derive(Debug, Default)]
@@ -90,6 +114,7 @@ impl PlayerDeviceHub {
         user_id: i64,
         device_id: &str,
         user_agent: Option<&str>,
+        current_jam_id: Option<&str>,
         playback_state: Option<PlayerDevicePlaybackStateDto>,
     ) -> PlayerDevicesResponse {
         let now = current_millis();
@@ -97,7 +122,8 @@ impl PlayerDeviceHub {
         self.prune_locked(&mut state, now);
         self.touch_locked(&mut state, user_id, device_id, user_agent, now);
         self.update_playback_state_locked(&mut state, user_id, device_id, playback_state, now);
-        self.snapshot_locked(&state, user_id, device_id, now)
+        self.touch_jam_locked(&mut state, user_id, device_id, current_jam_id, now);
+        self.snapshot_locked(&state, user_id, device_id, current_jam_id, now)
     }
 
     fn poll(
@@ -105,6 +131,7 @@ impl PlayerDeviceHub {
         user_id: i64,
         device_id: &str,
         user_agent: Option<&str>,
+        current_jam_id: Option<&str>,
         playback_state: Option<PlayerDevicePlaybackStateDto>,
     ) -> PlayerDevicePollResponse {
         let now = current_millis();
@@ -112,6 +139,7 @@ impl PlayerDeviceHub {
         self.prune_locked(&mut state, now);
         self.touch_locked(&mut state, user_id, device_id, user_agent, now);
         self.update_playback_state_locked(&mut state, user_id, device_id, playback_state, now);
+        self.touch_jam_locked(&mut state, user_id, device_id, current_jam_id, now);
         let commands = state
             .commands_by_device
             .remove(&(user_id, device_id.to_string()))
@@ -123,11 +151,13 @@ impl PlayerDeviceHub {
                 payload: cmd.payload,
             })
             .collect();
-        let snapshot = self.snapshot_locked(&state, user_id, device_id, now);
+        let snapshot = self.snapshot_locked(&state, user_id, device_id, current_jam_id, now);
         PlayerDevicePollResponse {
             device_id: snapshot.device_id,
             active_device_id: snapshot.active_device_id,
             devices: snapshot.devices,
+            jams: snapshot.jams,
+            current_jam_id: snapshot.current_jam_id,
             commands,
             playback_state: snapshot.playback_state,
         }
@@ -172,13 +202,14 @@ impl PlayerDeviceHub {
                 }
             }
         }
-        Some(self.snapshot_locked(&state, user_id, current_device_id, now))
+        Some(self.snapshot_locked(&state, user_id, current_device_id, None, now))
     }
 
     fn enqueue_command(
         &self,
         user_id: i64,
         target_device_id: Option<&str>,
+        jam_id: Option<&str>,
         command: &str,
         payload: serde_json::Value,
     ) -> Result<(), &'static str> {
@@ -186,24 +217,44 @@ impl PlayerDeviceHub {
         let mut state = self.state.lock().expect("player device hub lock");
         self.prune_locked(&mut state, now);
 
-        let target_id = match target_device_id {
-            Some(id) => id.to_string(),
-            None => state
-                .active_device_by_user
+        let (target_user_id, target_id) = if let Some(jam_id) = jam_id {
+            let jam = state.jams_by_id.get(jam_id).ok_or("jam is not available")?;
+            let member = jam.members.get(&user_id).ok_or("jam is not available")?;
+            if member.status != PlayerJamMemberStatus::Joined {
+                return Err("join the jam first");
+            }
+            let target_id = self
+                .jam_target_device_id_locked(&state, jam)
+                .ok_or("jam playback device is offline")?;
+            (jam.host_user_id, target_id)
+        } else {
+            let target_id = match target_device_id {
+                Some(id) => id.to_string(),
+                None => state
+                    .active_device_by_user
+                    .get(&user_id)
+                    .cloned()
+                    .ok_or("no active device")?,
+            };
+
+            let devices = state
+                .devices_by_user
                 .get(&user_id)
-                .cloned()
-                .ok_or("no active device")?,
+                .ok_or("target device is offline")?;
+            if !devices.contains_key(&target_id) {
+                return Err("target device is offline");
+            }
+            (user_id, target_id)
         };
 
-        let devices = state
-            .devices_by_user
-            .get(&user_id)
-            .ok_or("target device is offline")?;
-        if !devices.contains_key(&target_id) {
-            return Err("target device is offline");
-        }
-
-        self.enqueue_command_locked(&mut state, user_id, &target_id, command, payload, now);
+        self.enqueue_command_locked(
+            &mut state,
+            target_user_id,
+            &target_id,
+            command,
+            payload,
+            now,
+        );
         Ok(())
     }
 
@@ -279,6 +330,7 @@ impl PlayerDeviceHub {
         };
         playback_state.updated_at_ms = now;
         state.playback_state_by_user.insert(user_id, playback_state);
+        self.touch_host_jams_locked(state, user_id, device_id, now);
     }
 
     fn snapshot_locked(
@@ -286,9 +338,12 @@ impl PlayerDeviceHub {
         state: &PlayerDeviceHubState,
         user_id: i64,
         current_device_id: &str,
+        current_jam_id: Option<&str>,
         now: i64,
     ) -> PlayerDevicesResponse {
         let active_device_id = state.active_device_by_user.get(&user_id).cloned();
+        let current_jam_id = current_jam_id
+            .filter(|jam_id| self.jam_accessible_locked(state, user_id, jam_id, false));
         let mut devices: Vec<PlayerDeviceDto> = state
             .devices_by_user
             .get(&user_id)
@@ -316,11 +371,278 @@ impl PlayerDeviceHub {
             device_id: current_device_id.to_string(),
             active_device_id,
             devices,
-            playback_state: state.playback_state_by_user.get(&user_id).cloned(),
+            jams: self.jam_dtos_locked(state, user_id, current_jam_id, now),
+            current_jam_id: current_jam_id.map(str::to_string),
+            playback_state: self.playback_state_for_context_locked(
+                state,
+                user_id,
+                current_jam_id,
+                now,
+            ),
         }
     }
 
+    fn create_jam(
+        &self,
+        host_user_id: i64,
+        host_name: &str,
+        current_device_id: &str,
+        invitees: Vec<(i64, String)>,
+    ) -> Result<PlayerDevicesResponse, &'static str> {
+        let now = current_millis();
+        let mut state = self.state.lock().expect("player device hub lock");
+        self.prune_locked(&mut state, now);
+
+        let devices = state
+            .devices_by_user
+            .get(&host_user_id)
+            .ok_or("current device is offline")?;
+        if !devices.contains_key(current_device_id) {
+            return Err("current device is offline");
+        }
+
+        state
+            .active_device_by_user
+            .insert(host_user_id, current_device_id.to_string());
+
+        let mut seen = HashSet::new();
+        let mut members = HashMap::new();
+        members.insert(
+            host_user_id,
+            PlayerJamMember {
+                status: PlayerJamMemberStatus::Joined,
+                last_seen_ms: now,
+            },
+        );
+        seen.insert(host_user_id);
+
+        for (user_id, _name) in invitees.into_iter().take(PLAYER_JAM_MAX_INVITEES) {
+            if !seen.insert(user_id) {
+                continue;
+            }
+            members.insert(
+                user_id,
+                PlayerJamMember {
+                    status: PlayerJamMemberStatus::Invited,
+                    last_seen_ms: 0,
+                },
+            );
+        }
+
+        let jam_id = uuid::Uuid::new_v4().simple().to_string();
+        let jam = PlayerJamSession {
+            id: jam_id.clone(),
+            host_user_id,
+            host_name: host_name.to_string(),
+            host_last_seen_ms: now,
+            members,
+        };
+        state.jams_by_id.insert(jam_id.clone(), jam);
+        Ok(self.snapshot_locked(&state, host_user_id, current_device_id, Some(&jam_id), now))
+    }
+
+    fn join_jam(
+        &self,
+        user_id: i64,
+        device_id: &str,
+        jam_id: &str,
+    ) -> Result<PlayerDevicesResponse, &'static str> {
+        let now = current_millis();
+        let mut state = self.state.lock().expect("player device hub lock");
+        self.prune_locked(&mut state, now);
+
+        let Some(jam) = state.jams_by_id.get_mut(jam_id) else {
+            return Err("jam is not available");
+        };
+        let Some(member) = jam.members.get_mut(&user_id) else {
+            return Err("jam is not available");
+        };
+        member.status = PlayerJamMemberStatus::Joined;
+        member.last_seen_ms = now;
+        if user_id == jam.host_user_id {
+            jam.host_last_seen_ms = now;
+        }
+
+        Ok(self.snapshot_locked(&state, user_id, device_id, Some(jam_id), now))
+    }
+
+    fn leave_jam(
+        &self,
+        user_id: i64,
+        device_id: &str,
+        jam_id: &str,
+    ) -> Result<PlayerDevicesResponse, &'static str> {
+        let now = current_millis();
+        let mut state = self.state.lock().expect("player device hub lock");
+        self.prune_locked(&mut state, now);
+
+        let Some(jam) = state.jams_by_id.get(jam_id) else {
+            return Ok(self.snapshot_locked(&state, user_id, device_id, None, now));
+        };
+        if !jam.members.contains_key(&user_id) {
+            return Err("jam is not available");
+        }
+        if jam.host_user_id == user_id {
+            state.jams_by_id.remove(jam_id);
+        } else if let Some(jam) = state.jams_by_id.get_mut(jam_id) {
+            jam.members.remove(&user_id);
+        }
+
+        Ok(self.snapshot_locked(&state, user_id, device_id, None, now))
+    }
+
+    fn touch_jam_locked(
+        &self,
+        state: &mut PlayerDeviceHubState,
+        user_id: i64,
+        device_id: &str,
+        current_jam_id: Option<&str>,
+        now: i64,
+    ) {
+        let Some(jam_id) = current_jam_id else {
+            return;
+        };
+        let is_active_host_device = state
+            .active_device_by_user
+            .get(&user_id)
+            .is_some_and(|active_id| active_id == device_id);
+        let Some(jam) = state.jams_by_id.get_mut(jam_id) else {
+            return;
+        };
+        let Some(member) = jam.members.get_mut(&user_id) else {
+            return;
+        };
+        member.last_seen_ms = now;
+        if member.status == PlayerJamMemberStatus::Invited {
+            return;
+        }
+        if user_id == jam.host_user_id && is_active_host_device {
+            jam.host_last_seen_ms = now;
+        }
+    }
+
+    fn touch_host_jams_locked(
+        &self,
+        state: &mut PlayerDeviceHubState,
+        user_id: i64,
+        device_id: &str,
+        now: i64,
+    ) {
+        let is_active = state
+            .active_device_by_user
+            .get(&user_id)
+            .is_some_and(|active_id| active_id == device_id);
+        if !is_active {
+            return;
+        }
+        for jam in state.jams_by_id.values_mut() {
+            if jam.host_user_id == user_id {
+                jam.host_last_seen_ms = now;
+                if let Some(member) = jam.members.get_mut(&user_id) {
+                    member.last_seen_ms = now;
+                }
+            }
+        }
+    }
+
+    fn jam_accessible_locked(
+        &self,
+        state: &PlayerDeviceHubState,
+        user_id: i64,
+        jam_id: &str,
+        require_joined: bool,
+    ) -> bool {
+        let Some(jam) = state.jams_by_id.get(jam_id) else {
+            return false;
+        };
+        let Some(member) = jam.members.get(&user_id) else {
+            return false;
+        };
+        !require_joined || member.status == PlayerJamMemberStatus::Joined
+    }
+
+    fn jam_target_device_id_locked(
+        &self,
+        state: &PlayerDeviceHubState,
+        jam: &PlayerJamSession,
+    ) -> Option<String> {
+        let active_device_id = state.active_device_by_user.get(&jam.host_user_id)?;
+        let host_devices = state.devices_by_user.get(&jam.host_user_id)?;
+        host_devices
+            .contains_key(active_device_id)
+            .then(|| active_device_id.clone())
+    }
+
+    fn playback_state_for_context_locked(
+        &self,
+        state: &PlayerDeviceHubState,
+        user_id: i64,
+        current_jam_id: Option<&str>,
+        now: i64,
+    ) -> Option<PlayerDevicePlaybackStateDto> {
+        let playback_user_id = current_jam_id
+            .and_then(|jam_id| state.jams_by_id.get(jam_id))
+            .and_then(|jam| {
+                jam.members.get(&user_id).and_then(|member| {
+                    (member.status == PlayerJamMemberStatus::Joined).then_some(jam.host_user_id)
+                })
+            })
+            .unwrap_or(user_id);
+        state
+            .playback_state_by_user
+            .get(&playback_user_id)
+            .cloned()
+            .map(|playback_state| playback_state_at(playback_state, now))
+    }
+
+    fn jam_dtos_locked(
+        &self,
+        state: &PlayerDeviceHubState,
+        user_id: i64,
+        current_jam_id: Option<&str>,
+        now: i64,
+    ) -> Vec<PlayerJamDto> {
+        let mut jams: Vec<PlayerJamDto> = state
+            .jams_by_id
+            .values()
+            .filter_map(|jam| {
+                let member = jam.members.get(&user_id)?;
+                let member_count = jam
+                    .members
+                    .values()
+                    .filter(|member| member.status == PlayerJamMemberStatus::Joined)
+                    .count() as i64;
+                let host_device_online = self.jam_target_device_id_locked(state, jam).is_some();
+                Some(PlayerJamDto {
+                    id: jam.id.clone(),
+                    name: format!("{}'s Jam", jam.host_name),
+                    host_user_id: jam.host_user_id,
+                    host_name: jam.host_name.clone(),
+                    is_owner: jam.host_user_id == user_id,
+                    is_member: member.status == PlayerJamMemberStatus::Joined,
+                    is_pending: member.status == PlayerJamMemberStatus::Invited,
+                    is_active: current_jam_id == Some(jam.id.as_str()),
+                    member_count,
+                    host_last_seen_ms: now.saturating_sub(jam.host_last_seen_ms),
+                    host_device_online,
+                })
+            })
+            .collect();
+        jams.sort_by(|a, b| {
+            b.is_active
+                .cmp(&a.is_active)
+                .then_with(|| b.is_owner.cmp(&a.is_owner))
+                .then_with(|| b.is_pending.cmp(&a.is_pending))
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        jams
+    }
+
     fn prune_locked(&self, state: &mut PlayerDeviceHubState, now: i64) {
+        state
+            .jams_by_id
+            .retain(|_, jam| now.saturating_sub(jam.host_last_seen_ms) <= PLAYER_JAM_IDLE_TTL_MS);
+
         state.devices_by_user.retain(|user_id, devices| {
             devices.retain(|_, device| {
                 now.saturating_sub(device.last_seen_ms) <= PLAYER_DEVICE_TTL_MS
@@ -1070,6 +1392,1262 @@ async fn agent_queue_handler(
         processing_count,
     })
     .into_response()
+}
+
+// ---------------------------------------------------------------------------
+// User-uploaded tracks
+// ---------------------------------------------------------------------------
+
+async fn user_uploads_handler(
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+    UrlQuery(query): UrlQuery<UserUploadsQuery>,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    let limit = query.limit.unwrap_or(120).clamp(1, 500);
+    let page = load_user_uploads_page(pool, user.id, limit as i64).await?;
+    Json(page).into_response()
+}
+
+async fn user_upload_track_update_handler(
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+    path: Path<PathTrackId>,
+    Json(body): Json<UserUploadTrackUpdateRequest>,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    let track_id = path.0.track_id;
+    let Some(existing) = sqlx::query_as::<_, UploadTrackEditRow>(
+        r#"SELECT t.release_id,
+                  t.title::text AS title,
+                  t.track_number,
+                  t.disc_number,
+                  t.is_hidden,
+                  r.title::text AS release_title,
+                  r.release_type::text AS release_type,
+                  r.year AS release_year
+           FROM furumusic__track t
+           JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
+           JOIN furumusic__release r ON r.id = t.release_id
+           WHERE t.id = $1 AND mf.uploaded_by_user_id = $2"#,
+    )
+    .bind(track_id)
+    .bind(user.id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?
+    else {
+        return Ok(json_error(
+            StatusCode::NOT_FOUND,
+            "uploaded track not found",
+        ));
+    };
+
+    let title = match clean_required_string(body.title.as_deref(), &existing.title, 255) {
+        Ok(value) => value,
+        Err(message) => return Ok(json_error(StatusCode::BAD_REQUEST, message)),
+    };
+    let release_title =
+        match clean_required_string(body.release_title.as_deref(), &existing.release_title, 255) {
+            Ok(value) => value,
+            Err(message) => return Ok(json_error(StatusCode::BAD_REQUEST, message)),
+        };
+    let release_type = body
+        .release_type
+        .as_deref()
+        .map(normalize_release_type)
+        .unwrap_or_else(|| existing.release_type.clone());
+    let release_year = match parse_optional_i32(
+        body.release_year.as_deref(),
+        existing.release_year,
+        0,
+        3000,
+        "invalid release year",
+    ) {
+        Ok(value) => value,
+        Err(message) => return Ok(json_error(StatusCode::BAD_REQUEST, message)),
+    };
+    let track_number = match parse_optional_i32(
+        body.track_number.as_deref(),
+        existing.track_number,
+        1,
+        999,
+        "invalid track number",
+    ) {
+        Ok(value) => value,
+        Err(message) => return Ok(json_error(StatusCode::BAD_REQUEST, message)),
+    };
+    let disc_number = match parse_optional_i32(
+        body.disc_number.as_deref(),
+        existing.disc_number,
+        1,
+        99,
+        "invalid disc number",
+    ) {
+        Ok(value) => value,
+        Err(message) => return Ok(json_error(StatusCode::BAD_REQUEST, message)),
+    };
+    let is_hidden = body.is_hidden.unwrap_or(existing.is_hidden);
+
+    let release_changed = release_title != existing.release_title
+        || release_type != existing.release_type
+        || release_year != existing.release_year;
+    if release_changed && !user_owns_release_tracks(pool, user.id, existing.release_id).await? {
+        return Ok(json_error(
+            StatusCode::FORBIDDEN,
+            "release contains tracks uploaded by another user",
+        ));
+    }
+
+    let artist_names = match body.artist_names {
+        Some(names) => match clean_artist_names(names) {
+            Ok(names) => Some(names),
+            Err(message) => return Ok(json_error(StatusCode::BAD_REQUEST, message)),
+        },
+        None => None,
+    };
+    let featured_artist_names = match body.featured_artist_names {
+        Some(names) => match clean_optional_artist_names(names) {
+            Ok(names) => Some(names),
+            Err(message) => return Ok(json_error(StatusCode::BAD_REQUEST, message)),
+        },
+        None => None,
+    };
+
+    let now = now_iso_string();
+    if release_changed {
+        sqlx::query(
+            r#"UPDATE furumusic__release
+               SET title = $1, title_sort = $2, release_type = $3, year = $4, updated_at = $5
+               WHERE id = $6"#,
+        )
+        .bind(&release_title)
+        .bind(sort_name(&release_title))
+        .bind(&release_type)
+        .bind(release_year)
+        .bind(&now)
+        .bind(existing.release_id)
+        .execute(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    }
+
+    sqlx::query(
+        r#"UPDATE furumusic__track
+           SET title = $1,
+               title_sort = $2,
+               track_number = $3,
+               disc_number = $4,
+               year = $5,
+               is_hidden = $6,
+               updated_at = $7
+           WHERE id = $8"#,
+    )
+    .bind(&title)
+    .bind(sort_name(&title))
+    .bind(track_number)
+    .bind(disc_number)
+    .bind(release_year)
+    .bind(is_hidden)
+    .bind(&now)
+    .bind(track_id)
+    .execute(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    if let Some(artist_names) = artist_names {
+        sqlx::query("DELETE FROM furumusic__track_artist WHERE track_id = $1 AND role = 'main'")
+            .bind(track_id)
+            .execute(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
+        for (position, name) in artist_names.iter().enumerate() {
+            let artist_id = find_or_create_player_artist(pool, name).await?;
+            sqlx::query(
+                r#"INSERT INTO furumusic__track_artist (track_id, artist_id, role, position)
+                   VALUES ($1, $2, 'main', $3)"#,
+            )
+            .bind(track_id)
+            .bind(artist_id)
+            .bind(position as i32)
+            .execute(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
+        }
+    }
+    if let Some(featured_artist_names) = featured_artist_names {
+        replace_track_role_artists(pool, track_id, "featuring", &featured_artist_names, 1).await?;
+    }
+
+    let mut tracks = load_user_upload_tracks(pool, user.id, Some(track_id), 1).await?;
+    let Some(track) = tracks.pop() else {
+        return Ok(json_error(
+            StatusCode::NOT_FOUND,
+            "uploaded track not found",
+        ));
+    };
+    Json(track).into_response()
+}
+
+async fn user_upload_release_update_handler(
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+    path: Path<PathId>,
+    Json(body): Json<UserUploadReleaseUpdateRequest>,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    let release_id = path.0.id;
+    if !user_owns_release_tracks(pool, user.id, release_id).await? {
+        return Ok(json_error(
+            StatusCode::FORBIDDEN,
+            "release contains tracks uploaded by another user",
+        ));
+    }
+
+    let Some(existing) = sqlx::query_as::<_, UploadTrackEditRow>(
+        r#"SELECT t.release_id,
+                  t.title::text AS title,
+                  t.track_number,
+                  t.disc_number AS disc_number,
+                  t.is_hidden,
+                  r.title::text AS release_title,
+                  r.release_type::text AS release_type,
+                  r.year AS release_year
+           FROM furumusic__release r
+           JOIN furumusic__track t ON t.release_id = r.id
+           WHERE r.id = $1
+           ORDER BY t.id
+           LIMIT 1"#,
+    )
+    .bind(release_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?
+    else {
+        return Ok(json_error(
+            StatusCode::NOT_FOUND,
+            "uploaded release not found",
+        ));
+    };
+
+    let title = match clean_required_string(body.title.as_deref(), &existing.release_title, 255) {
+        Ok(value) => value,
+        Err(message) => return Ok(json_error(StatusCode::BAD_REQUEST, message)),
+    };
+    let release_type = body
+        .release_type
+        .as_deref()
+        .map(normalize_release_type)
+        .unwrap_or(existing.release_type);
+    let year = match parse_optional_i32(
+        body.year.as_deref(),
+        existing.release_year,
+        0,
+        3000,
+        "invalid release year",
+    ) {
+        Ok(value) => value,
+        Err(message) => return Ok(json_error(StatusCode::BAD_REQUEST, message)),
+    };
+    let artist_names = match body.artist_names {
+        Some(names) => match clean_artist_names(names) {
+            Ok(names) => Some(names),
+            Err(message) => return Ok(json_error(StatusCode::BAD_REQUEST, message)),
+        },
+        None => None,
+    };
+    let now = now_iso_string();
+    sqlx::query(
+        r#"UPDATE furumusic__release
+           SET title = $1,
+               title_sort = $2,
+               release_type = $3,
+               year = $4,
+               is_hidden = COALESCE($5, is_hidden),
+               updated_at = $6
+           WHERE id = $7"#,
+    )
+    .bind(&title)
+    .bind(sort_name(&title))
+    .bind(&release_type)
+    .bind(year)
+    .bind(body.is_hidden)
+    .bind(&now)
+    .bind(release_id)
+    .execute(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    sqlx::query(
+        r#"UPDATE furumusic__track
+           SET year = $1, updated_at = $2
+           WHERE release_id = $3"#,
+    )
+    .bind(year)
+    .bind(&now)
+    .bind(release_id)
+    .execute(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    if let Some(artist_names) = artist_names {
+        replace_release_artists(pool, release_id, &artist_names).await?;
+    }
+
+    let page = load_user_uploads_page(pool, user.id, 500).await?;
+    Json(page).into_response()
+}
+
+async fn user_upload_tracks_bulk_update_handler(
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+    Json(body): Json<UserUploadBulkTrackUpdateRequest>,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    let mut track_ids = body
+        .track_ids
+        .into_iter()
+        .filter(|id| *id > 0)
+        .collect::<Vec<_>>();
+    track_ids.sort_unstable();
+    track_ids.dedup();
+    if track_ids.is_empty() {
+        return Ok(json_error(StatusCode::BAD_REQUEST, "no tracks selected"));
+    }
+    if track_ids.len() > 500 {
+        return Ok(json_error(
+            StatusCode::BAD_REQUEST,
+            "too many tracks selected",
+        ));
+    }
+
+    let release_ids = uploaded_track_release_ids(pool, user.id, &track_ids).await?;
+    if release_ids.is_empty() {
+        return Ok(json_error(
+            StatusCode::NOT_FOUND,
+            "uploaded tracks not found",
+        ));
+    }
+    if release_ids.len() > track_ids.len() {
+        return Ok(json_error(
+            StatusCode::BAD_REQUEST,
+            "invalid track selection",
+        ));
+    }
+
+    let artist_names = match body.artist_names {
+        Some(names) => match clean_artist_names(names) {
+            Ok(names) => Some(names),
+            Err(message) => return Ok(json_error(StatusCode::BAD_REQUEST, message)),
+        },
+        None => None,
+    };
+    let featured_artist_names = match body.featured_artist_names {
+        Some(names) => match clean_optional_artist_names(names) {
+            Ok(names) => Some(names),
+            Err(message) => return Ok(json_error(StatusCode::BAD_REQUEST, message)),
+        },
+        None => None,
+    };
+    let release_title = match clean_optional_string(body.release_title.as_deref(), 255) {
+        Ok(value) => value,
+        Err(message) => return Ok(json_error(StatusCode::BAD_REQUEST, message)),
+    };
+    let release_type = body.release_type.as_deref().map(normalize_release_type);
+    let release_year = match parse_optional_i32(
+        body.release_year.as_deref(),
+        None,
+        0,
+        3000,
+        "invalid release year",
+    ) {
+        Ok(value) => value,
+        Err(message) => return Ok(json_error(StatusCode::BAD_REQUEST, message)),
+    };
+    let now = now_iso_string();
+
+    if body.is_hidden.is_some() {
+        sqlx::query(
+            r#"UPDATE furumusic__track
+               SET is_hidden = $1, updated_at = $2
+               WHERE id = ANY($3)"#,
+        )
+        .bind(body.is_hidden)
+        .bind(&now)
+        .bind(&track_ids)
+        .execute(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    }
+    if let Some(artist_names) = artist_names {
+        for track_id in &track_ids {
+            replace_track_role_artists(pool, *track_id, "main", &artist_names, 0).await?;
+        }
+    }
+    if let Some(featured_artist_names) = featured_artist_names {
+        for track_id in &track_ids {
+            replace_track_role_artists(pool, *track_id, "featuring", &featured_artist_names, 1)
+                .await?;
+        }
+    }
+    if release_title.is_some() || release_type.is_some() || body.release_year.is_some() {
+        for release_id in &release_ids {
+            if !user_owns_release_tracks(pool, user.id, *release_id).await? {
+                return Ok(json_error(
+                    StatusCode::FORBIDDEN,
+                    "release contains tracks uploaded by another user",
+                ));
+            }
+            sqlx::query(
+                r#"UPDATE furumusic__release
+                   SET title = COALESCE($1, title),
+                       title_sort = COALESCE($2, title_sort),
+                       release_type = COALESCE($3, release_type),
+                       year = CASE WHEN $4 THEN $5 ELSE year END,
+                       updated_at = $6
+                   WHERE id = $7"#,
+            )
+            .bind(release_title.as_ref())
+            .bind(release_title.as_ref().map(|title| sort_name(title)))
+            .bind(release_type.as_ref())
+            .bind(body.release_year.is_some())
+            .bind(release_year)
+            .bind(&now)
+            .bind(*release_id)
+            .execute(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
+            if body.release_year.is_some() {
+                sqlx::query(
+                    r#"UPDATE furumusic__track
+                       SET year = $1, updated_at = $2
+                       WHERE release_id = $3"#,
+                )
+                .bind(release_year)
+                .bind(&now)
+                .bind(*release_id)
+                .execute(pool)
+                .await
+                .map_err(|e| cot::Error::internal(e.to_string()))?;
+            }
+        }
+    }
+
+    let page = load_user_uploads_page(pool, user.id, 500).await?;
+    Json(page).into_response()
+}
+
+async fn user_upload_review_save_handler(
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+    path: Path<PathId>,
+    Json(body): Json<UserUploadReviewUpdateRequest>,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    let review_id = path.0.id;
+    if !user_owns_review(pool, user.id, review_id).await? {
+        return Ok(json_error(StatusCode::NOT_FOUND, "upload review not found"));
+    }
+    let normalized = match normalized_from_upload_review_body(&body) {
+        Ok(value) => value,
+        Err(message) => return Ok(json_error(StatusCode::BAD_REQUEST, message)),
+    };
+    let result_json = serde_json::to_string(&normalized)
+        .map_err(|e| cot::Error::internal(format!("failed to serialize review fields: {e}")))?;
+    save_user_upload_review_result(&db, review_id, result_json).await?;
+    let mut reviews = load_user_upload_reviews(pool, user.id, Some(review_id), 1)
+        .await?
+        .0;
+    let Some(review) = reviews.pop() else {
+        return Ok(json_error(StatusCode::NOT_FOUND, "upload review not found"));
+    };
+    Json(review).into_response()
+}
+
+async fn user_upload_review_approve_handler(
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+    path: Path<PathId>,
+    Json(body): Json<UserUploadReviewUpdateRequest>,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    let review_id = path.0.id;
+    if !user_owns_review(pool, user.id, review_id).await? {
+        return Ok(json_error(StatusCode::NOT_FOUND, "upload review not found"));
+    }
+    let normalized = match normalized_from_upload_review_body(&body) {
+        Ok(value) => value,
+        Err(message) => return Ok(json_error(StatusCode::BAD_REQUEST, message)),
+    };
+    let result_json = serde_json::to_string(&normalized)
+        .map_err(|e| cot::Error::internal(format!("failed to serialize review fields: {e}")))?;
+    let mut review = crate::scheduler::PendingReview::get_by_id(&db, review_id)
+        .await
+        .map_err(|e| cot::Error::internal(format!("db error: {e}")))?
+        .ok_or_else(|| cot::Error::internal("upload review not found"))?;
+    let status = review.status.as_str();
+    if status == "processing" || status == "approved" || status == "auto_approved" {
+        return Ok(json_error(
+            StatusCode::BAD_REQUEST,
+            "review cannot be approved from this status",
+        ));
+    }
+    review
+        .set_result_json(&db, result_json)
+        .await
+        .map_err(|e| cot::Error::internal(format!("db error: {e}")))?;
+
+    let context: serde_json::Value =
+        serde_json::from_str(review.context_json_str()).unwrap_or_default();
+    let (live_config, _) = AppConfig::load_with_db(&db).await;
+    let input_path = crate::media_paths::resolve_path_from_root(
+        &live_config.agent_inbox_dir,
+        review.input_path_str(),
+    );
+    let input_path = input_path.to_string_lossy().to_string();
+    match crate::jobs::inbox_process::finalize_approved(
+        &db,
+        pool,
+        &live_config,
+        &input_path,
+        &normalized,
+        &context,
+        &live_config.agent_storage_dir,
+        None,
+    )
+    .await
+    {
+        Ok(()) => {
+            let _ = review.set_approved(&db).await;
+            let page = load_user_uploads_page(pool, user.id, 500).await?;
+            Json(page).into_response()
+        }
+        Err(err) => {
+            let message = err.to_string();
+            let _ = review.set_failed(&db, &message).await;
+            Ok(json_error(StatusCode::BAD_REQUEST, &message))
+        }
+    }
+}
+
+async fn load_user_uploads_page(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+    limit: i64,
+) -> cot::Result<UserUploadsPage> {
+    let tracks = load_user_upload_tracks(pool, user_id, None, limit).await?;
+    let releases = group_user_upload_releases(pool, &tracks).await?;
+    let (pending, pending_total) = load_user_upload_reviews(pool, user_id, None, 100).await?;
+    let (queued, queued_total) = load_user_upload_queue(pool, user_id).await?;
+    Ok(UserUploadsPage {
+        tracks,
+        releases,
+        pending,
+        queued,
+        pending_total,
+        queued_total,
+    })
+}
+
+async fn group_user_upload_releases(
+    pool: &sqlx::PgPool,
+    tracks: &[UserUploadTrack],
+) -> cot::Result<Vec<UserUploadRelease>> {
+    let mut release_ids = tracks
+        .iter()
+        .map(|item| item.track.release_id)
+        .collect::<Vec<_>>();
+    release_ids.sort_unstable();
+    release_ids.dedup();
+
+    let release_artists = if release_ids.is_empty() {
+        Vec::new()
+    } else {
+        sqlx::query_as::<_, ReleaseArtistRefRow>(
+            r#"SELECT ra.release_id,
+                      a.id AS artist_id,
+                      a.name::text AS artist_name
+               FROM furumusic__release_artist ra
+               JOIN furumusic__artist a ON a.id = ra.artist_id
+               WHERE ra.release_id = ANY($1)
+               ORDER BY ra.release_id, ra.position"#,
+        )
+        .bind(&release_ids)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?
+    };
+    let mut artists_by_release: HashMap<i64, Vec<ArtistRef>> = HashMap::new();
+    for row in release_artists {
+        artists_by_release
+            .entry(row.release_id)
+            .or_default()
+            .push(ArtistRef {
+                id: row.artist_id,
+                name: row.artist_name,
+            });
+    }
+
+    let mut grouped: Vec<UserUploadRelease> = Vec::new();
+    for track in tracks {
+        let release_id = track.track.release_id;
+        if let Some(release) = grouped.iter_mut().find(|release| release.id == release_id) {
+            release.tracks.push(track.clone());
+            continue;
+        }
+        grouped.push(UserUploadRelease {
+            id: release_id,
+            title: track.track.release_title.clone(),
+            release_type: track.release_type.clone(),
+            year: track.track.release_year,
+            is_hidden: track.release_is_hidden,
+            artists: artists_by_release.remove(&release_id).unwrap_or_default(),
+            tracks: vec![track.clone()],
+        });
+    }
+    grouped.sort_by(|a, b| {
+        b.tracks
+            .first()
+            .map(|track| track.uploaded_at.as_str())
+            .cmp(&a.tracks.first().map(|track| track.uploaded_at.as_str()))
+    });
+    Ok(grouped)
+}
+
+async fn load_user_upload_tracks(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+    track_id: Option<i64>,
+    limit: i64,
+) -> cot::Result<Vec<UserUploadTrack>> {
+    let rows = sqlx::query_as::<_, UploadedTrackRow>(
+        r#"SELECT t.id,
+                  t.title::text AS title,
+                  t.track_number,
+                  t.disc_number,
+                  t.duration_seconds,
+                  t.cover_file_id,
+                  r.cover_file_id AS release_cover_file_id,
+                  r.id AS release_id,
+                  r.title::text AS release_title,
+                  r.release_type::text AS release_type,
+                  r.year AS release_year,
+                  r.is_hidden AS release_is_hidden,
+                  COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
+                  mf.audio_format,
+                  mf.audio_bitrate,
+                  mf.audio_sample_rate,
+                  mf.audio_bit_depth,
+                  mf.file_size_bytes,
+                  t.lastfm_listeners,
+                  t.lastfm_playcount,
+                  t.lastfm_rating,
+                  t.lastfm_updated_at,
+                  mf.id AS media_file_id,
+                  t.is_hidden,
+                  t.year,
+                  mf.created_at::text AS uploaded_at
+           FROM furumusic__track t
+           JOIN furumusic__release r ON r.id = t.release_id
+           JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
+           WHERE mf.uploaded_by_user_id = $1
+             AND ($2::bigint IS NULL OR t.id = $2)
+           ORDER BY mf.created_at DESC, t.id DESC
+           LIMIT $3"#,
+    )
+    .bind(user_id)
+    .bind(track_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    let track_ids = rows.iter().map(|row| row.id).collect::<Vec<_>>();
+    let track_artists = if track_ids.is_empty() {
+        Vec::new()
+    } else {
+        sqlx::query_as::<_, TrackArtistRow>(
+            r#"SELECT ta.track_id, ta.artist_id, a.name::text as artist_name, ta.role::text as role
+               FROM furumusic__track_artist ta
+               JOIN furumusic__artist a ON a.id = ta.artist_id
+               WHERE ta.track_id = ANY($1)
+               ORDER BY ta.track_id, ta.position"#,
+        )
+        .bind(&track_ids)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?
+    };
+    let mut main_artists: HashMap<i64, Vec<ArtistRef>> = HashMap::new();
+    let mut featured_artists: HashMap<i64, Vec<ArtistRef>> = HashMap::new();
+    for ta in track_artists {
+        let artist = ArtistRef {
+            id: ta.artist_id,
+            name: ta.artist_name,
+        };
+        if ta.role == "featuring" {
+            featured_artists
+                .entry(ta.track_id)
+                .or_default()
+                .push(artist);
+        } else {
+            main_artists.entry(ta.track_id).or_default().push(artist);
+        }
+    }
+
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let track_id = row.id;
+            UserUploadTrack {
+                track: TrackItem {
+                    id: row.id,
+                    title: row.title,
+                    track_number: row.track_number,
+                    disc_number: row.disc_number,
+                    duration_seconds: row.duration_seconds,
+                    artists: main_artists.remove(&track_id).unwrap_or_default(),
+                    featured_artists: featured_artists.remove(&track_id).unwrap_or_default(),
+                    release_id: row.release_id,
+                    release_title: row.release_title,
+                    release_year: row.release_year,
+                    cover_url: track_cover_variant_url(
+                        row.cover_file_id,
+                        row.release_cover_file_id,
+                        "medium",
+                    ),
+                    stream_url: format!("/api/player/stream/{track_id}"),
+                    uploader_name: row.uploader_name,
+                    audio_format: row.audio_format,
+                    audio_bitrate: row.audio_bitrate,
+                    audio_sample_rate: row.audio_sample_rate,
+                    audio_bit_depth: row.audio_bit_depth,
+                    file_size_bytes: row.file_size_bytes,
+                    lastfm_listeners: row.lastfm_listeners,
+                    lastfm_playcount: row.lastfm_playcount,
+                    lastfm_rating: row.lastfm_rating,
+                    lastfm_updated_at: row.lastfm_updated_at,
+                },
+                media_file_id: row.media_file_id,
+                is_hidden: row.is_hidden,
+                release_is_hidden: row.release_is_hidden,
+                release_type: row.release_type,
+                year: row.year,
+                uploaded_at: row.uploaded_at,
+            }
+        })
+        .collect())
+}
+
+async fn load_user_upload_reviews(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+    review_id: Option<i64>,
+    limit: i64,
+) -> cot::Result<(Vec<UserUploadReviewItem>, i64)> {
+    let uploaded_by_pattern = format!(r#""uploaded_by_user_id"\s*:\s*{}([^0-9]|$)"#, user_id);
+    let total = sqlx::query_scalar::<_, i64>(
+        r#"SELECT COUNT(*)
+           FROM furumusic__pending_review
+           WHERE context_json IS NOT NULL
+             AND context_json ~ $1
+             AND ($2::bigint IS NULL OR id = $2)
+             AND status IN ('pending', 'failed')"#,
+    )
+    .bind(&uploaded_by_pattern)
+    .bind(review_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let rows = sqlx::query_as::<_, UserUploadReviewRow>(
+        r#"SELECT id,
+                  status::text AS status,
+                  input_path,
+                  result_json,
+                  context_json,
+                  created_at::text AS created_at,
+                  updated_at::text AS updated_at,
+                  error_message
+           FROM furumusic__pending_review
+           WHERE context_json IS NOT NULL
+             AND context_json ~ $1
+             AND ($2::bigint IS NULL OR id = $2)
+             AND status IN ('pending', 'failed')
+           ORDER BY CASE status WHEN 'failed' THEN 0 ELSE 1 END, updated_at DESC
+           LIMIT $3"#,
+    )
+    .bind(uploaded_by_pattern)
+    .bind(review_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let items = rows
+        .into_iter()
+        .map(|row| UserUploadReviewItem {
+            id: row.id,
+            status: row.status,
+            filename: input_path_filename(row.input_path.as_deref()),
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+            error_message: row.error_message,
+            fields: review_fields_from_json(
+                row.result_json.as_deref(),
+                row.context_json.as_deref(),
+            ),
+        })
+        .collect();
+    Ok((items, total))
+}
+
+async fn load_user_upload_queue(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+) -> cot::Result<(Vec<UserUploadQueueItem>, i64)> {
+    let uploaded_by_pattern = format!(r#""uploaded_by_user_id"\s*:\s*{}([^0-9]|$)"#, user_id);
+    let total = sqlx::query_scalar::<_, i64>(
+        r#"SELECT COUNT(*)
+           FROM furumusic__pending_review
+           WHERE context_json IS NOT NULL
+             AND context_json ~ $1
+             AND status IN ('queued', 'processing')"#,
+    )
+    .bind(&uploaded_by_pattern)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let rows = sqlx::query_as::<_, UserUploadQueueRow>(
+        r#"SELECT id,
+                  status::text AS status,
+                  input_path,
+                  created_at::text AS created_at,
+                  updated_at::text AS updated_at,
+                  error_message
+           FROM furumusic__pending_review
+           WHERE context_json IS NOT NULL
+             AND context_json ~ $1
+             AND status IN ('queued', 'processing')
+           ORDER BY
+             CASE status WHEN 'processing' THEN 0 ELSE 1 END,
+             created_at DESC
+           LIMIT 20"#,
+    )
+    .bind(uploaded_by_pattern)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let items = rows
+        .into_iter()
+        .map(|row| UserUploadQueueItem {
+            id: row.id,
+            status: row.status,
+            filename: input_path_filename(row.input_path.as_deref()),
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+            error_message: row.error_message,
+        })
+        .collect();
+    Ok((items, total))
+}
+
+async fn user_owns_release_tracks(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+    release_id: i64,
+) -> cot::Result<bool> {
+    let other_count: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*)
+           FROM furumusic__track t
+           JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
+           WHERE t.release_id = $1
+             AND COALESCE(mf.uploaded_by_user_id, -1) <> $2"#,
+    )
+    .bind(release_id)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    Ok(other_count == 0)
+}
+
+async fn user_owns_review(pool: &sqlx::PgPool, user_id: i64, review_id: i64) -> cot::Result<bool> {
+    let uploaded_by_pattern = format!(r#""uploaded_by_user_id"\s*:\s*{}([^0-9]|$)"#, user_id);
+    let count: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*)
+           FROM furumusic__pending_review
+           WHERE id = $1
+             AND context_json IS NOT NULL
+             AND context_json ~ $2"#,
+    )
+    .bind(review_id)
+    .bind(uploaded_by_pattern)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    Ok(count > 0)
+}
+
+async fn uploaded_track_release_ids(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+    track_ids: &[i64],
+) -> cot::Result<Vec<i64>> {
+    let rows = sqlx::query_scalar::<_, i64>(
+        r#"SELECT DISTINCT t.release_id
+           FROM furumusic__track t
+           JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
+           WHERE t.id = ANY($1)
+             AND mf.uploaded_by_user_id = $2"#,
+    )
+    .bind(track_ids)
+    .bind(user_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let owned_count: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*)
+           FROM furumusic__track t
+           JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
+           WHERE t.id = ANY($1)
+             AND mf.uploaded_by_user_id = $2"#,
+    )
+    .bind(track_ids)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    if owned_count != track_ids.len() as i64 {
+        return Ok(Vec::new());
+    }
+    Ok(rows)
+}
+
+async fn save_user_upload_review_result(
+    db: &Database,
+    review_id: i64,
+    result_json: String,
+) -> cot::Result<()> {
+    let mut review = crate::scheduler::PendingReview::get_by_id(db, review_id)
+        .await
+        .map_err(|e| cot::Error::internal(format!("db error: {e}")))?
+        .ok_or_else(|| cot::Error::internal("upload review not found"))?;
+    review
+        .set_result_json(db, result_json)
+        .await
+        .map_err(|e| cot::Error::internal(format!("db error: {e}")))?;
+    Ok(())
+}
+
+async fn replace_release_artists(
+    pool: &sqlx::PgPool,
+    release_id: i64,
+    names: &[String],
+) -> cot::Result<()> {
+    sqlx::query("DELETE FROM furumusic__release_artist WHERE release_id = $1")
+        .bind(release_id)
+        .execute(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    for (position, name) in names.iter().enumerate() {
+        let artist_id = find_or_create_player_artist(pool, name).await?;
+        sqlx::query(
+            r#"INSERT INTO furumusic__release_artist (release_id, artist_id, position)
+               VALUES ($1, $2, $3)
+               ON CONFLICT DO NOTHING"#,
+        )
+        .bind(release_id)
+        .bind(artist_id)
+        .bind(position as i32)
+        .execute(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    }
+    Ok(())
+}
+
+async fn replace_track_role_artists(
+    pool: &sqlx::PgPool,
+    track_id: i64,
+    role: &str,
+    names: &[String],
+    position_offset: i32,
+) -> cot::Result<()> {
+    sqlx::query("DELETE FROM furumusic__track_artist WHERE track_id = $1 AND role = $2")
+        .bind(track_id)
+        .bind(role)
+        .execute(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    for (index, name) in names.iter().enumerate() {
+        let artist_id = find_or_create_player_artist(pool, name).await?;
+        sqlx::query(
+            r#"INSERT INTO furumusic__track_artist (track_id, artist_id, role, position)
+               VALUES ($1, $2, $3, $4)"#,
+        )
+        .bind(track_id)
+        .bind(artist_id)
+        .bind(role)
+        .bind(position_offset + index as i32)
+        .execute(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    }
+    Ok(())
+}
+
+async fn find_or_create_player_artist(pool: &sqlx::PgPool, name: &str) -> cot::Result<i64> {
+    let name = name.trim();
+    let sort = sort_name(name);
+    if let Some(id) = sqlx::query_scalar::<_, i64>(
+        "SELECT id FROM furumusic__artist WHERE name_sort = $1 ORDER BY id LIMIT 1",
+    )
+    .bind(&sort)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?
+    {
+        return Ok(id);
+    }
+
+    let now = now_iso_string();
+    sqlx::query_scalar(
+        r#"INSERT INTO furumusic__artist (name, name_sort, image_file_id, is_hidden, model_name, created_at, updated_at)
+           VALUES ($1, $2, NULL, false, NULL, $3, $3)
+           RETURNING id"#,
+    )
+    .bind(name)
+    .bind(sort)
+    .bind(now)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))
+}
+
+fn now_iso_string() -> String {
+    chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
+}
+
+fn sort_name(name: &str) -> String {
+    name.trim().to_lowercase()
+}
+
+fn normalize_release_type(value: &str) -> String {
+    let value = value.trim().to_lowercase();
+    if crate::music::RELEASE_TYPES
+        .iter()
+        .any(|(code, _, _)| *code == value)
+    {
+        value
+    } else {
+        "album".to_string()
+    }
+}
+
+fn clean_required_string(
+    raw: Option<&str>,
+    fallback: &str,
+    max_len: usize,
+) -> Result<String, &'static str> {
+    let value = raw.unwrap_or(fallback).trim();
+    if value.is_empty() {
+        return Err("value cannot be empty");
+    }
+    Ok(value.chars().take(max_len).collect())
+}
+
+fn parse_optional_i32(
+    raw: Option<&str>,
+    fallback: Option<i32>,
+    min: i32,
+    max: i32,
+    error: &'static str,
+) -> Result<Option<i32>, &'static str> {
+    let Some(raw) = raw else {
+        return Ok(fallback);
+    };
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    let value = raw.parse::<i32>().map_err(|_| error)?;
+    if value < min || value > max {
+        return Err(error);
+    }
+    Ok(Some(value))
+}
+
+fn clean_artist_names(raw_names: Vec<String>) -> Result<Vec<String>, &'static str> {
+    let mut seen = HashSet::new();
+    let mut names = Vec::new();
+    for raw_name in raw_names {
+        let name = raw_name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        let name: String = name.chars().take(255).collect();
+        if seen.insert(sort_name(&name)) {
+            names.push(name);
+        }
+        if names.len() >= 12 {
+            break;
+        }
+    }
+    if names.is_empty() {
+        return Err("at least one artist is required");
+    }
+    Ok(names)
+}
+
+fn clean_optional_artist_names(raw_names: Vec<String>) -> Result<Vec<String>, &'static str> {
+    let mut seen = HashSet::new();
+    let mut names = Vec::new();
+    for raw_name in raw_names {
+        let name = raw_name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        let name: String = name.chars().take(255).collect();
+        if seen.insert(sort_name(&name)) {
+            names.push(name);
+        }
+        if names.len() >= 12 {
+            break;
+        }
+    }
+    Ok(names)
+}
+
+fn clean_optional_string(
+    raw: Option<&str>,
+    max_len: usize,
+) -> Result<Option<String>, &'static str> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    let value = raw.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(value.chars().take(max_len).collect()))
+}
+
+fn review_fields_from_json(
+    result_json: Option<&str>,
+    context_json: Option<&str>,
+) -> UserUploadReviewFields {
+    let normalized = result_json
+        .and_then(|value| serde_json::from_str::<crate::agent::dto::NormalizedFields>(value).ok())
+        .unwrap_or_default();
+    let context = context_json
+        .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
+        .unwrap_or_default();
+    let ctx_str = |key: &str| {
+        context
+            .get(key)
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_owned()
+    };
+    let ctx_i32 = |key: &str| {
+        context
+            .get(key)
+            .and_then(|value| value.as_i64())
+            .map(|value| value.to_string())
+            .unwrap_or_default()
+    };
+    UserUploadReviewFields {
+        title: normalized
+            .title
+            .unwrap_or_else(|| first_non_empty([ctx_str("raw_title"), ctx_str("path_title")])),
+        artist: normalized
+            .artist
+            .unwrap_or_else(|| first_non_empty([ctx_str("raw_artist"), ctx_str("path_artist")])),
+        album: normalized
+            .album
+            .unwrap_or_else(|| first_non_empty([ctx_str("raw_album"), ctx_str("path_album")])),
+        year: normalized
+            .year
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| first_non_empty([ctx_i32("raw_year"), ctx_i32("path_year")])),
+        track_number: normalized
+            .track_number
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| {
+                first_non_empty([ctx_i32("raw_track_number"), ctx_i32("path_track_number")])
+            }),
+        genre: normalized.genre.unwrap_or_else(|| ctx_str("raw_genre")),
+        featured_artists: normalized.featured_artists,
+        release_type: normalized
+            .release_type
+            .unwrap_or_else(|| "album".to_owned()),
+        notes: normalized.notes.unwrap_or_default(),
+    }
+}
+
+fn first_non_empty<const N: usize>(values: [String; N]) -> String {
+    values
+        .into_iter()
+        .find(|value| !value.trim().is_empty())
+        .unwrap_or_default()
+}
+
+fn normalized_from_upload_review_body(
+    body: &UserUploadReviewUpdateRequest,
+) -> Result<crate::agent::dto::NormalizedFields, &'static str> {
+    let title = clean_required_string(body.title.as_deref(), "", 255)?;
+    let artist = clean_required_string(body.artist.as_deref(), "", 255)?;
+    let album = clean_required_string(body.album.as_deref(), "", 255)?;
+    let year = parse_optional_i32(body.year.as_deref(), None, 0, 3000, "invalid release year")?;
+    let track_number = parse_optional_i32(
+        body.track_number.as_deref(),
+        None,
+        1,
+        999,
+        "invalid track number",
+    )?;
+    let featured_artists =
+        clean_optional_artist_names(body.featured_artists.clone().unwrap_or_default())?;
+    Ok(crate::agent::dto::NormalizedFields {
+        title: Some(title),
+        artist: Some(artist),
+        album: Some(album),
+        year,
+        track_number,
+        genre: clean_optional_string(body.genre.as_deref(), 255)?,
+        featured_artists,
+        release_type: Some(
+            body.release_type
+                .as_deref()
+                .map(normalize_release_type)
+                .unwrap_or_else(|| "album".to_owned()),
+        ),
+        confidence: Some(1.0),
+        notes: clean_optional_string(body.notes.as_deref(), 2000)?,
+    })
+}
+
+fn input_path_filename(path: Option<&str>) -> String {
+    path.and_then(|path| path.rsplit(['/', '\\']).next())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or("queued track")
+        .to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -2194,6 +3772,10 @@ async fn devices_heartbeat_handler(
         user.id,
         &device_id,
         dto.user_agent.as_deref(),
+        dto.current_jam_id
+            .as_deref()
+            .and_then(normalize_device_id)
+            .as_deref(),
         dto.playback_state,
     );
     Json(response).into_response()
@@ -2216,6 +3798,10 @@ async fn devices_poll_handler(
         user.id,
         &device_id,
         dto.user_agent.as_deref(),
+        dto.current_jam_id
+            .as_deref()
+            .and_then(normalize_device_id)
+            .as_deref(),
         dto.playback_state,
     );
     Json(response).into_response()
@@ -2273,9 +3859,181 @@ async fn devices_command_handler(
         }
         None => None,
     };
+    let jam_id = match dto.jam_id.as_deref() {
+        Some(raw) => {
+            let Some(jam_id) = normalize_device_id(raw) else {
+                return Ok(json_error(StatusCode::BAD_REQUEST, "invalid jam id"));
+            };
+            Some(jam_id)
+        }
+        None => None,
+    };
 
-    match hub.enqueue_command(user.id, target_device_id.as_deref(), command, dto.payload) {
+    match hub.enqueue_command(
+        user.id,
+        target_device_id.as_deref(),
+        jam_id.as_deref(),
+        command,
+        dto.payload,
+    ) {
         Ok(()) => Json(serde_json::json!({"ok": true})).into_response(),
+        Err(message) => Ok(json_error(StatusCode::BAD_REQUEST, message)),
+    }
+}
+
+async fn jam_users_search_handler(
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+    UrlQuery(query): UrlQuery<JamUserSearchQuery>,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+
+    let q = query.q.unwrap_or_default();
+    let q = q.trim();
+    if q.is_empty() {
+        return Json(Vec::<PlayerJamUserDto>::new()).into_response();
+    }
+    let limit = query.limit.unwrap_or(10).clamp(1, 20);
+    let pattern = format!("%{q}%");
+    let prefix = format!("{q}%");
+
+    let rows = sqlx::query_as::<_, PlayerJamUserRow>(
+        r#"SELECT id, username::text AS username, display_name, email
+           FROM furumusic__user
+           WHERE is_active = true
+             AND id <> $1
+             AND (
+                 username ILIKE $2
+                 OR COALESCE(display_name, '') ILIKE $2
+                 OR COALESCE(email, '') ILIKE $2
+             )
+           ORDER BY
+             CASE
+               WHEN username ILIKE $3 THEN 0
+               WHEN COALESCE(display_name, '') ILIKE $3 THEN 1
+               ELSE 2
+             END,
+             COALESCE(NULLIF(display_name, ''), username)
+           LIMIT $4"#,
+    )
+    .bind(user.id)
+    .bind(pattern)
+    .bind(prefix)
+    .bind(limit as i64)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    let users = rows
+        .into_iter()
+        .map(|row| PlayerJamUserDto {
+            id: row.id,
+            username: row.username,
+            display_name: row.display_name,
+            email: row.email,
+        })
+        .collect::<Vec<_>>();
+
+    Json(users).into_response()
+}
+
+async fn jam_create_handler(
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+    hub: Arc<PlayerDeviceHub>,
+    Json(dto): Json<PlayerJamCreateRequest>,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    let Some(device_id) = normalize_device_id(&dto.device_id) else {
+        return Ok(json_error(StatusCode::BAD_REQUEST, "invalid device id"));
+    };
+
+    let mut invitee_ids = dto
+        .invitee_user_ids
+        .into_iter()
+        .filter(|id| *id > 0 && *id != user.id)
+        .collect::<Vec<_>>();
+    invitee_ids.sort_unstable();
+    invitee_ids.dedup();
+    invitee_ids.truncate(PLAYER_JAM_MAX_INVITEES);
+
+    let invitees = if invitee_ids.is_empty() {
+        Vec::new()
+    } else {
+        sqlx::query_as::<_, PlayerJamUserRow>(
+            r#"SELECT id, username::text AS username, display_name, email
+               FROM furumusic__user
+               WHERE is_active = true AND id = ANY($1)"#,
+        )
+        .bind(&invitee_ids)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?
+        .into_iter()
+        .map(|row| {
+            let name = row
+                .display_name
+                .as_deref()
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or(&row.username)
+                .to_string();
+            (row.id, name)
+        })
+        .collect::<Vec<_>>()
+    };
+
+    match hub.create_jam(user.id, &user.name, &device_id, invitees) {
+        Ok(response) => Json(response).into_response(),
+        Err(message) => Ok(json_error(StatusCode::BAD_REQUEST, message)),
+    }
+}
+
+async fn jam_join_handler(
+    session: Session,
+    db: Database,
+    hub: Arc<PlayerDeviceHub>,
+    Json(dto): Json<PlayerJamJoinRequest>,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    let Some(jam_id) = normalize_device_id(&dto.jam_id) else {
+        return Ok(json_error(StatusCode::BAD_REQUEST, "invalid jam id"));
+    };
+    let Some(device_id) = normalize_device_id(&dto.device_id) else {
+        return Ok(json_error(StatusCode::BAD_REQUEST, "invalid device id"));
+    };
+
+    match hub.join_jam(user.id, &device_id, &jam_id) {
+        Ok(response) => Json(response).into_response(),
+        Err(message) => Ok(json_error(StatusCode::BAD_REQUEST, message)),
+    }
+}
+
+async fn jam_leave_handler(
+    session: Session,
+    db: Database,
+    hub: Arc<PlayerDeviceHub>,
+    Json(dto): Json<PlayerJamLeaveRequest>,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    let Some(jam_id) = normalize_device_id(&dto.jam_id) else {
+        return Ok(json_error(StatusCode::BAD_REQUEST, "invalid jam id"));
+    };
+    let Some(device_id) = normalize_device_id(&dto.device_id) else {
+        return Ok(json_error(StatusCode::BAD_REQUEST, "invalid device id"));
+    };
+
+    match hub.leave_jam(user.id, &device_id, &jam_id) {
+        Ok(response) => Json(response).into_response(),
         Err(message) => Ok(json_error(StatusCode::BAD_REQUEST, message)),
     }
 }
@@ -3889,6 +5647,166 @@ impl App for PlayerApp {
                 "player_local_upload",
             ),
             Route::with_handler_and_name(
+                "/uploads/tracks",
+                get({
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    move |session: Session, db: Database, query: UrlQuery<UserUploadsQuery>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            user_uploads_handler(session, db, pg_pool, query).await
+                        }
+                    }
+                }),
+                "player_upload_tracks",
+            ),
+            Route::with_handler_and_name(
+                "/uploads/tracks/{track_id}",
+                post({
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    move |session: Session,
+                          db: Database,
+                          path: Path<PathTrackId>,
+                          json: Json<UserUploadTrackUpdateRequest>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            user_upload_track_update_handler(session, db, pg_pool, path, json).await
+                        }
+                    }
+                }),
+                "player_upload_track_update",
+            ),
+            Route::with_handler_and_name(
+                "/uploads/bulk-tracks",
+                post({
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    move |session: Session,
+                          db: Database,
+                          json: Json<UserUploadBulkTrackUpdateRequest>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            user_upload_tracks_bulk_update_handler(session, db, pg_pool, json).await
+                        }
+                    }
+                }),
+                "player_upload_tracks_bulk_update",
+            ),
+            Route::with_handler_and_name(
+                "/uploads/releases/{id}",
+                post({
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    move |session: Session,
+                          db: Database,
+                          path: Path<PathId>,
+                          json: Json<UserUploadReleaseUpdateRequest>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            user_upload_release_update_handler(session, db, pg_pool, path, json)
+                                .await
+                        }
+                    }
+                }),
+                "player_upload_release_update",
+            ),
+            Route::with_handler_and_name(
+                "/uploads/reviews/{id}",
+                post({
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    move |session: Session,
+                          db: Database,
+                          path: Path<PathId>,
+                          json: Json<UserUploadReviewUpdateRequest>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            user_upload_review_save_handler(session, db, pg_pool, path, json).await
+                        }
+                    }
+                }),
+                "player_upload_review_save",
+            ),
+            Route::with_handler_and_name(
+                "/uploads/reviews/{id}/approve",
+                post({
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    move |session: Session,
+                          db: Database,
+                          path: Path<PathId>,
+                          json: Json<UserUploadReviewUpdateRequest>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            user_upload_review_approve_handler(session, db, pg_pool, path, json)
+                                .await
+                        }
+                    }
+                }),
+                "player_upload_review_approve",
+            ),
+            Route::with_handler_and_name(
                 "/torrents/{id}/start",
                 {
                     let pool = Arc::clone(&pool);
@@ -4537,6 +6455,78 @@ impl App for PlayerApp {
                     }
                 }),
                 "player_devices_command",
+            ),
+            Route::with_handler_and_name(
+                "/jams/users",
+                get({
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    move |session: Session, db: Database, query: UrlQuery<JamUserSearchQuery>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            jam_users_search_handler(session, db, pg_pool, query).await
+                        }
+                    }
+                }),
+                "player_jam_users",
+            ),
+            Route::with_handler_and_name(
+                "/jams",
+                post({
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    let device_hub = Arc::clone(&device_hub);
+                    move |session: Session, db: Database, json: Json<PlayerJamCreateRequest>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        let device_hub = Arc::clone(&device_hub);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            jam_create_handler(session, db, pg_pool, device_hub, json).await
+                        }
+                    }
+                }),
+                "player_jams_create",
+            ),
+            Route::with_handler_and_name(
+                "/jams/join",
+                post({
+                    let device_hub = Arc::clone(&device_hub);
+                    move |session: Session, db: Database, json: Json<PlayerJamJoinRequest>| {
+                        let device_hub = Arc::clone(&device_hub);
+                        async move { jam_join_handler(session, db, device_hub, json).await }
+                    }
+                }),
+                "player_jams_join",
+            ),
+            Route::with_handler_and_name(
+                "/jams/leave",
+                post({
+                    let device_hub = Arc::clone(&device_hub);
+                    move |session: Session, db: Database, json: Json<PlayerJamLeaveRequest>| {
+                        let device_hub = Arc::clone(&device_hub);
+                        async move { jam_leave_handler(session, db, device_hub, json).await }
+                    }
+                }),
+                "player_jams_leave",
             ),
             // -- Playback state GET --
             Route::with_handler_and_name(

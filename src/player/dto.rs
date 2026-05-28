@@ -40,13 +40,13 @@ pub(super) struct ArtistDetail {
     pub(super) featured_tracks: Vec<ArtistAppearanceTrack>,
 }
 
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub(super) struct ArtistRef {
     pub(super) id: i64,
     pub(super) name: String,
 }
 
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub(super) struct TrackItem {
     pub(super) id: i64,
     pub(super) title: String,
@@ -141,6 +141,7 @@ pub(super) struct PlaybackStateDto {
 pub(super) struct DeviceHeartbeatRequest {
     pub(super) device_id: String,
     pub(super) user_agent: Option<String>,
+    pub(super) current_jam_id: Option<String>,
     pub(super) playback_state: Option<PlayerDevicePlaybackStateDto>,
 }
 
@@ -153,6 +154,7 @@ pub(super) struct DeviceSelectRequest {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(super) struct DeviceCommandRequest {
     pub(super) target_device_id: Option<String>,
+    pub(super) jam_id: Option<String>,
     pub(super) command: String,
     #[serde(default)]
     pub(super) payload: serde_json::Value,
@@ -166,6 +168,48 @@ pub(super) struct PlayerDeviceDto {
     pub(super) is_current: bool,
     pub(super) is_active: bool,
     pub(super) last_seen_ms: i64,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub(super) struct PlayerJamDto {
+    pub(super) id: String,
+    pub(super) name: String,
+    pub(super) host_user_id: i64,
+    pub(super) host_name: String,
+    pub(super) is_owner: bool,
+    pub(super) is_member: bool,
+    pub(super) is_pending: bool,
+    pub(super) is_active: bool,
+    pub(super) member_count: i64,
+    pub(super) host_last_seen_ms: i64,
+    pub(super) host_device_online: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(super) struct PlayerJamCreateRequest {
+    pub(super) device_id: String,
+    #[serde(default)]
+    pub(super) invitee_user_ids: Vec<i64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(super) struct PlayerJamJoinRequest {
+    pub(super) jam_id: String,
+    pub(super) device_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(super) struct PlayerJamLeaveRequest {
+    pub(super) jam_id: String,
+    pub(super) device_id: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub(super) struct PlayerJamUserDto {
+    pub(super) id: i64,
+    pub(super) username: String,
+    pub(super) display_name: Option<String>,
+    pub(super) email: Option<String>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -196,6 +240,8 @@ pub(super) struct PlayerDevicesResponse {
     pub(super) device_id: String,
     pub(super) active_device_id: Option<String>,
     pub(super) devices: Vec<PlayerDeviceDto>,
+    pub(super) jams: Vec<PlayerJamDto>,
+    pub(super) current_jam_id: Option<String>,
     pub(super) playback_state: Option<PlayerDevicePlaybackStateDto>,
 }
 
@@ -204,6 +250,8 @@ pub(super) struct PlayerDevicePollResponse {
     pub(super) device_id: String,
     pub(super) active_device_id: Option<String>,
     pub(super) devices: Vec<PlayerDeviceDto>,
+    pub(super) jams: Vec<PlayerJamDto>,
+    pub(super) current_jam_id: Option<String>,
     pub(super) commands: Vec<PlayerDeviceCommandDto>,
     pub(super) playback_state: Option<PlayerDevicePlaybackStateDto>,
 }
@@ -276,6 +324,118 @@ pub(super) struct LastfmScrobbleRequest {
 pub(super) struct AgentQueueStatus {
     pub(super) queued_count: i64,
     pub(super) processing_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub(super) struct UserUploadTrack {
+    pub(super) track: TrackItem,
+    pub(super) media_file_id: i64,
+    pub(super) is_hidden: bool,
+    pub(super) release_is_hidden: bool,
+    pub(super) release_type: String,
+    pub(super) year: Option<i32>,
+    pub(super) uploaded_at: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub(super) struct UserUploadRelease {
+    pub(super) id: i64,
+    pub(super) title: String,
+    pub(super) release_type: String,
+    pub(super) year: Option<i32>,
+    pub(super) is_hidden: bool,
+    pub(super) artists: Vec<ArtistRef>,
+    pub(super) tracks: Vec<UserUploadTrack>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub(super) struct UserUploadReviewFields {
+    pub(super) title: String,
+    pub(super) artist: String,
+    pub(super) album: String,
+    pub(super) year: String,
+    pub(super) track_number: String,
+    pub(super) genre: String,
+    pub(super) featured_artists: Vec<String>,
+    pub(super) release_type: String,
+    pub(super) notes: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub(super) struct UserUploadReviewItem {
+    pub(super) id: i64,
+    pub(super) status: String,
+    pub(super) filename: String,
+    pub(super) created_at: String,
+    pub(super) updated_at: String,
+    pub(super) error_message: Option<String>,
+    pub(super) fields: UserUploadReviewFields,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub(super) struct UserUploadQueueItem {
+    pub(super) id: i64,
+    pub(super) status: String,
+    pub(super) filename: String,
+    pub(super) created_at: String,
+    pub(super) updated_at: String,
+    pub(super) error_message: Option<String>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub(super) struct UserUploadsPage {
+    pub(super) tracks: Vec<UserUploadTrack>,
+    pub(super) releases: Vec<UserUploadRelease>,
+    pub(super) pending: Vec<UserUploadReviewItem>,
+    pub(super) queued: Vec<UserUploadQueueItem>,
+    pub(super) pending_total: i64,
+    pub(super) queued_total: i64,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(super) struct UserUploadTrackUpdateRequest {
+    pub(super) title: Option<String>,
+    pub(super) artist_names: Option<Vec<String>>,
+    pub(super) featured_artist_names: Option<Vec<String>>,
+    pub(super) release_title: Option<String>,
+    pub(super) release_type: Option<String>,
+    pub(super) release_year: Option<String>,
+    pub(super) track_number: Option<String>,
+    pub(super) disc_number: Option<String>,
+    pub(super) is_hidden: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(super) struct UserUploadReleaseUpdateRequest {
+    pub(super) title: Option<String>,
+    pub(super) artist_names: Option<Vec<String>>,
+    pub(super) release_type: Option<String>,
+    pub(super) year: Option<String>,
+    pub(super) is_hidden: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(super) struct UserUploadBulkTrackUpdateRequest {
+    pub(super) track_ids: Vec<i64>,
+    pub(super) artist_names: Option<Vec<String>>,
+    pub(super) featured_artist_names: Option<Vec<String>>,
+    pub(super) release_title: Option<String>,
+    pub(super) release_type: Option<String>,
+    pub(super) release_year: Option<String>,
+    pub(super) is_hidden: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(super) struct UserUploadReviewUpdateRequest {
+    pub(super) title: Option<String>,
+    pub(super) artist: Option<String>,
+    pub(super) album: Option<String>,
+    pub(super) year: Option<String>,
+    pub(super) track_number: Option<String>,
+    pub(super) genre: Option<String>,
+    pub(super) featured_artists: Option<Vec<String>>,
+    pub(super) release_type: Option<String>,
+    pub(super) notes: Option<String>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]

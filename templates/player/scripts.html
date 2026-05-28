@@ -849,6 +849,16 @@ document.addEventListener('alpine:init', () => {
                     this.setVolume(payload.volume);
                 } else if (command.command === 'set_options') {
                     // Options were already applied above.
+                } else if (command.command === 'queue_add_end') {
+                    queue._addToEndLocal(payload.tracks || []);
+                } else if (command.command === 'queue_add_next') {
+                    queue._addNextLocal(payload.tracks || []);
+                } else if (command.command === 'queue_remove') {
+                    queue._removeLocal(Number(payload.index));
+                } else if (command.command === 'queue_move') {
+                    queue._moveTrackLocal(Number(payload.from_index), Number(payload.to_index));
+                } else if (command.command === 'queue_clear') {
+                    queue._clearLocal();
                 }
                 this._saveState();
                 Alpine.store('devices')?.heartbeat();
@@ -1055,13 +1065,22 @@ document.addEventListener('alpine:init', () => {
     Alpine.store('devices', {
         id: null,
         devices: [],
+        jams: [],
         activeDeviceId: null,
+        currentJamId: null,
         open: false,
+        jamPanelOpen: false,
+        jamQuery: '',
+        jamUsers: [],
+        jamSelectedUsers: [],
+        jamSearching: false,
         _pollTimer: null,
+        _jamSearchTimer: null,
         _stateRefreshTick: 0,
 
         init() {
             this.id = this._ensureId();
+            this.currentJamId = sessionStorage.getItem('furu_player_jam_id') || null;
             this.heartbeat();
             this._pollTimer = setInterval(() => this.poll(), 500);
             document.addEventListener('visibilitychange', () => {
@@ -1087,6 +1106,7 @@ document.addEventListener('alpine:init', () => {
             return {
                 device_id: this.id,
                 user_agent: navigator.userAgent || '',
+                current_jam_id: this.currentJamId,
                 playback_state: player && this.isActive() ? player._devicePlaybackStatePayload() : null,
             };
         },
@@ -1132,16 +1152,36 @@ document.addEventListener('alpine:init', () => {
             const wasActive = this.isActive();
             this.activeDeviceId = data.active_device_id || null;
             this.devices = Array.isArray(data.devices) ? data.devices : [];
+            this.jams = Array.isArray(data.jams) ? data.jams : [];
+            if (data.current_jam_id) {
+                this.currentJamId = data.current_jam_id;
+                sessionStorage.setItem('furu_player_jam_id', this.currentJamId);
+            } else if (this.currentJamId && !this.jams.some(jam => jam.id === this.currentJamId)) {
+                this.currentJamId = null;
+                sessionStorage.removeItem('furu_player_jam_id');
+            }
             if (wasActive && !this.isActive()) {
                 Alpine.store('player')?._pauseLocal();
             }
         },
 
+        selectedJam() {
+            return this.currentJamId ? this.jams.find(jam => jam.id === this.currentJamId) : null;
+        },
+
+        isControllingRemoteJam() {
+            const jam = this.selectedJam();
+            return !!jam && !jam.is_owner;
+        },
+
         isActive() {
+            if (this.isControllingRemoteJam()) return false;
             return !this.activeDeviceId || this.activeDeviceId === this.id;
         },
 
         activeLabel() {
+            const jam = this.selectedJam();
+            if (jam) return jam.name;
             const active = this.devices.find(device => device.id === this.activeDeviceId);
             return active ? active.name : 'Devices';
         },
@@ -1156,6 +1196,7 @@ document.addEventListener('alpine:init', () => {
             const player = Alpine.store('player');
 
             try {
+                this.clearJamSelection();
                 const res = await fetch('/api/player/devices/active', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1181,14 +1222,16 @@ document.addEventListener('alpine:init', () => {
         },
 
         async sendCommand(command, payload = {}, targetDeviceId = null) {
-            const target = targetDeviceId || this.activeDeviceId;
-            if (!target || target === this.id) return false;
+            const jamId = this.isControllingRemoteJam() ? this.currentJamId : null;
+            const target = jamId ? null : (targetDeviceId || this.activeDeviceId);
+            if (!jamId && (!target || target === this.id)) return false;
             try {
                 const res = await fetch('/api/player/devices/command', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         target_device_id: target,
+                        jam_id: jamId,
                         command,
                         payload,
                     }),
@@ -1197,6 +1240,118 @@ document.addEventListener('alpine:init', () => {
             } catch {
                 return false;
             }
+        },
+
+        openJamPanel() {
+            this.jamPanelOpen = !this.jamPanelOpen;
+            if (this.jamPanelOpen && this.jamQuery.trim()) this.searchJamUsers();
+        },
+
+        queueJamSearch() {
+            clearTimeout(this._jamSearchTimer);
+            this._jamSearchTimer = setTimeout(() => this.searchJamUsers(), 180);
+        },
+
+        async searchJamUsers() {
+            const query = this.jamQuery.trim();
+            if (!query) {
+                this.jamUsers = [];
+                return;
+            }
+            this.jamSearching = true;
+            try {
+                const res = await fetch('/api/player/jams/users?q=' + encodeURIComponent(query));
+                if (!res.ok) return;
+                const selected = new Set(this.jamSelectedUsers.map(user => user.id));
+                this.jamUsers = (await res.json()).filter(user => !selected.has(user.id));
+            } catch {
+            } finally {
+                this.jamSearching = false;
+            }
+        },
+
+        addJamInvitee(user) {
+            if (!user || this.jamSelectedUsers.some(item => item.id === user.id)) return;
+            this.jamSelectedUsers.push(user);
+            this.jamUsers = this.jamUsers.filter(item => item.id !== user.id);
+            this.jamQuery = '';
+        },
+
+        removeJamInvitee(userId) {
+            this.jamSelectedUsers = this.jamSelectedUsers.filter(user => user.id !== userId);
+        },
+
+        async createJam() {
+            try {
+                const res = await fetch('/api/player/jams', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        device_id: this.id,
+                        invitee_user_ids: this.jamSelectedUsers.map(user => user.id),
+                    }),
+                });
+                if (!res.ok) return;
+                const data = await res.json();
+                this._apply(data);
+                this.jamPanelOpen = false;
+                this.jamQuery = '';
+                this.jamUsers = [];
+                this.jamSelectedUsers = [];
+                this.open = false;
+            } catch {}
+        },
+
+        async selectJam(jam) {
+            if (!jam) return;
+            try {
+                if (jam.is_pending) {
+                    const ok = window.confirm('Join this Jam and control the shared queue?');
+                    if (!ok) return;
+                }
+                const res = await fetch('/api/player/jams/join', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        jam_id: jam.id,
+                        device_id: this.id,
+                    }),
+                });
+                if (!res.ok) return;
+                const data = await res.json();
+                this.currentJamId = jam.id;
+                sessionStorage.setItem('furu_player_jam_id', jam.id);
+                this._apply(data);
+                this.open = false;
+                const player = Alpine.store('player');
+                if (player && this.isControllingRemoteJam() && data.playback_state) {
+                    player._applyRemotePlaybackState(data.playback_state);
+                }
+            } catch {}
+        },
+
+        async leaveJam(jamId = null) {
+            const id = jamId || this.currentJamId;
+            if (!id) return;
+            try {
+                const res = await fetch('/api/player/jams/leave', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        jam_id: id,
+                        device_id: this.id,
+                    }),
+                });
+                if (res.ok) this._apply(await res.json());
+            } catch {
+            } finally {
+                this.clearJamSelection();
+            }
+        },
+
+        clearJamSelection() {
+            this.currentJamId = null;
+            sessionStorage.removeItem('furu_player_jam_id');
         },
     });
 
@@ -1210,16 +1365,27 @@ document.addEventListener('alpine:init', () => {
         _dragIdx: null,
 
         add(track) {
-            this.tracks.push(track);
+            this.addToEnd([track]);
         },
 
         addToEnd(tracks) {
-            this.tracks = [...this.tracks, ...tracks];
+            const items = this._trackList(tracks);
+            if (!items.length) return;
+            if (this._sendRemoteQueueCommand('queue_add_end', { tracks: items })) {
+                this._addToEndLocal(items);
+                return;
+            }
+            this._addToEndLocal(items);
         },
 
         addNextInQueue(tracks) {
-            const insertAt = this.currentIndex + 1;
-            this.tracks.splice(insertAt, 0, ...tracks);
+            const items = this._trackList(tracks);
+            if (!items.length) return;
+            if (this._sendRemoteQueueCommand('queue_add_next', { tracks: items })) {
+                this._addNextLocal(items);
+                return;
+            }
+            this._addNextLocal(items);
         },
 
         playRelease(tracks, startIndex) {
@@ -1233,6 +1399,54 @@ document.addEventListener('alpine:init', () => {
         },
 
         remove(idx) {
+            if (this._sendRemoteQueueCommand('queue_remove', { index: idx })) {
+                this._removeLocal(idx);
+                return;
+            }
+            this._removeLocal(idx);
+        },
+
+        moveTrack(fromIdx, toIdx) {
+            if (this._sendRemoteQueueCommand('queue_move', { from_index: fromIdx, to_index: toIdx })) {
+                this._moveTrackLocal(fromIdx, toIdx);
+                return;
+            }
+            this._moveTrackLocal(fromIdx, toIdx);
+        },
+
+        clear() {
+            if (this._sendRemoteQueueCommand('queue_clear')) {
+                this._clearLocal();
+                return;
+            }
+            this._clearLocal();
+        },
+
+        _trackList(tracks) {
+            return (Array.isArray(tracks) ? tracks : [tracks]).filter(Boolean);
+        },
+
+        _sendRemoteQueueCommand(command, payload = {}) {
+            const player = Alpine.store('player');
+            if (!player?._shouldSendRemote()) return false;
+            Alpine.store('devices')?.sendCommand(command, payload);
+            return true;
+        },
+
+        _addToEndLocal(tracks) {
+            const items = this._trackList(tracks);
+            if (!items.length) return;
+            this.tracks = [...this.tracks, ...items];
+        },
+
+        _addNextLocal(tracks) {
+            const items = this._trackList(tracks);
+            if (!items.length) return;
+            const insertAt = Math.min(this.currentIndex + 1, this.tracks.length);
+            this.tracks.splice(insertAt, 0, ...items);
+        },
+
+        _removeLocal(idx) {
             if (idx < 0 || idx >= this.tracks.length) return;
             this.tracks.splice(idx, 1);
             if (this.tracks.length === 0) {
@@ -1246,7 +1460,7 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        moveTrack(fromIdx, toIdx) {
+        _moveTrackLocal(fromIdx, toIdx) {
             if (fromIdx === toIdx) return;
             if (fromIdx < 0 || fromIdx >= this.tracks.length) return;
             if (toIdx < 0 || toIdx >= this.tracks.length) return;
@@ -1262,7 +1476,7 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        clear() {
+        _clearLocal() {
             this.tracks = [];
             this.currentIndex = 0;
         },
@@ -1933,6 +2147,35 @@ document.addEventListener('alpine:init', () => {
         loadingAgentStatus: false,
         uploadProgress: 0,
         uploadProgressText: '',
+        activeTab: 'import',
+        uploadTracks: [],
+        uploadReleases: [],
+        uploadPending: [],
+        uploadQueued: [],
+        uploadPendingTotal: 0,
+        uploadQueuedTotal: 0,
+        uploadLoaded: false,
+        uploadLoading: false,
+        uploadEditId: null,
+        uploadSavingId: null,
+        uploadDraft: null,
+        uploadReviewEditId: null,
+        uploadReviewSavingId: null,
+        uploadReviewDraft: null,
+        uploadReleaseEditId: null,
+        uploadReleaseSavingId: null,
+        uploadReleaseDraft: null,
+        selectedUploadTracks: new Set(),
+        expandedUploadReleases: new Set(),
+        uploadBulkSaving: false,
+        uploadBulkDraft: {
+            artists: '',
+            featured_artists: '',
+            release_title: '',
+            release_type: '',
+            release_year: '',
+            hidden: '',
+        },
 
         open() {
             this.modal = true;
@@ -1940,6 +2183,7 @@ document.addEventListener('alpine:init', () => {
             this.error = false;
             this.loadSessions();
             this.loadAgentStatus();
+            if (this.activeTab === 'uploads') this.loadUploads();
             this._startRefresh();
         },
 
@@ -1957,6 +2201,18 @@ document.addEventListener('alpine:init', () => {
 
         isImporting() {
             return this.workspaceMode === 'new';
+        },
+
+        showImportTab() {
+            this.activeTab = 'import';
+            this._setMessage('');
+        },
+
+        showUploadsTab() {
+            this.activeTab = 'uploads';
+            this._stopPoll();
+            this._setMessage('');
+            this.loadUploads();
         },
 
         addNew() {
@@ -2161,11 +2417,390 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        async loadUploads({ silent = false, preserveEditor = true } = {}) {
+            if (preserveEditor && this.uploadHasEditorOpen()) return;
+            if (this.uploadLoading) return;
+            this.uploadLoading = true;
+            try {
+                const res = await fetch('/api/player/uploads/tracks');
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Failed to load uploaded tracks');
+                this.applyUploadPage(data);
+                this.uploadLoaded = true;
+                if (this.uploadEditId && !this.uploadTracks.some(item => item.track.id === this.uploadEditId)) {
+                    this.cancelUploadEdit();
+                }
+            } catch (err) {
+                if (!silent) this._setMessage(err.message || String(err), true);
+                if (!this.uploadLoaded) {
+                    this.uploadTracks = [];
+                    this.uploadReleases = [];
+                    this.uploadPending = [];
+                    this.uploadQueued = [];
+                    this.uploadPendingTotal = 0;
+                    this.uploadQueuedTotal = 0;
+                }
+            } finally {
+                this.uploadLoading = false;
+            }
+        },
+
+        uploadSummary() {
+            const trackCount = this.uploadTracks.length;
+            const releaseCount = this.uploadReleases.length;
+            const parts = [trackCount + ' tracks', releaseCount + ' releases'];
+            if (this.uploadPendingTotal > 0) parts.push(this.uploadPendingTotal + ' need approval');
+            if (this.uploadQueuedTotal > 0) parts.push(this.uploadQueuedTotal + ' queued');
+            return parts.join(' / ');
+        },
+
+        uploadArtistsText(item) {
+            const track = item?.track || item;
+            const names = [
+                ...((track?.artists || []).map(artist => artist.name)),
+                ...((track?.featured_artists || []).map(artist => 'ft. ' + artist.name)),
+            ];
+            return names.join(', ') || T.unknown;
+        },
+
+        uploadReleaseArtistsText(release) {
+            const names = (release?.artists || []).map(artist => artist.name);
+            return names.join(', ') || T.unknown;
+        },
+
+        uploadFeaturedArtistsText(item) {
+            const track = item?.track || item;
+            return (track?.featured_artists || []).map(artist => artist.name).join(', ');
+        },
+
+        compactQueuedUploads() {
+            return this.uploadQueued.slice(0, 6);
+        },
+
+        uploadHasEditorOpen() {
+            return !!(this.uploadEditId || this.uploadReviewEditId || this.uploadReleaseEditId);
+        },
+
+        uploadEditorKicker() {
+            if (this.uploadReviewDraft) return 'Needs approval';
+            if (this.uploadReleaseDraft) return 'Release metadata';
+            if (this.uploadDraft) return 'Track metadata';
+            return 'Metadata';
+        },
+
+        uploadEditorTitle() {
+            if (this.uploadReviewDraft) return 'Approve metadata';
+            if (this.uploadReleaseDraft) return this.uploadReleaseDraft.title || 'Edit release';
+            if (this.uploadDraft) return this.uploadDraft.title || 'Edit track';
+            return 'Edit metadata';
+        },
+
+        closeUploadEditor() {
+            this.cancelUploadEdit();
+            this.cancelUploadReleaseEdit();
+            this.cancelUploadReviewEdit();
+        },
+
+        uploadReleaseExpanded(releaseId) {
+            return this.expandedUploadReleases.has(releaseId);
+        },
+
+        toggleUploadRelease(releaseId) {
+            if (this.expandedUploadReleases.has(releaseId)) this.expandedUploadReleases.delete(releaseId);
+            else this.expandedUploadReleases.add(releaseId);
+        },
+
+        uploadReleaseTrackIds(release) {
+            return (release?.tracks || []).map(item => item.track.id);
+        },
+
+        uploadReleaseSelectionState(release) {
+            const ids = this.uploadReleaseTrackIds(release);
+            const selected = ids.filter(id => this.selectedUploadTracks.has(id)).length;
+            if (selected === 0) return 'empty';
+            return selected === ids.length ? 'checked' : 'partial';
+        },
+
+        toggleUploadReleaseSelection(release) {
+            const ids = this.uploadReleaseTrackIds(release);
+            const state = this.uploadReleaseSelectionState(release);
+            if (state === 'checked') ids.forEach(id => this.selectedUploadTracks.delete(id));
+            else ids.forEach(id => this.selectedUploadTracks.add(id));
+        },
+
+        toggleUploadTrackSelection(trackId) {
+            if (this.selectedUploadTracks.has(trackId)) this.selectedUploadTracks.delete(trackId);
+            else this.selectedUploadTracks.add(trackId);
+        },
+
+        uploadSelectedCount() {
+            return this.selectedUploadTracks.size;
+        },
+
+        clearUploadSelection() {
+            this.selectedUploadTracks.clear();
+            this.uploadBulkDraft = {
+                artists: '',
+                featured_artists: '',
+                release_title: '',
+                release_type: '',
+                release_year: '',
+                hidden: '',
+            };
+        },
+
+        pruneUploadSelection() {
+            const valid = new Set(this.uploadTracks.map(item => item.track.id));
+            for (const id of [...this.selectedUploadTracks]) {
+                if (!valid.has(id)) this.selectedUploadTracks.delete(id);
+            }
+        },
+
+        editUpload(item) {
+            if (!item || !item.track) return;
+            this.cancelUploadReleaseEdit();
+            this.cancelUploadReviewEdit();
+            this.uploadEditId = item.track.id;
+            this.uploadDraft = {
+                title: item.track.title || '',
+                artists: (item.track.artists || []).map(artist => artist.name).join(', '),
+                featured_artists: this.uploadFeaturedArtistsText(item),
+                release_title: item.track.release_title || '',
+                release_type: item.release_type || 'album',
+                release_year: item.track.release_year == null ? '' : String(item.track.release_year),
+                track_number: item.track.track_number == null ? '' : String(item.track.track_number),
+                disc_number: item.track.disc_number == null ? '' : String(item.track.disc_number),
+                is_hidden: !!item.is_hidden,
+            };
+        },
+
+        cancelUploadEdit() {
+            this.uploadEditId = null;
+            this.uploadSavingId = null;
+            this.uploadDraft = null;
+        },
+
+        async saveUploadEdit() {
+            if (!this.uploadEditId || !this.uploadDraft) return;
+            const id = this.uploadEditId;
+            const draft = this.uploadDraft;
+            const artistNames = String(draft.artists || '')
+                .split(',')
+                .map(name => name.trim())
+                .filter(Boolean);
+            this.uploadSavingId = id;
+            try {
+                const res = await fetch(`/api/player/uploads/tracks/${id}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        title: draft.title,
+                        artist_names: artistNames,
+                        featured_artist_names: String(draft.featured_artists || '').split(',').map(name => name.trim()).filter(Boolean),
+                        release_title: draft.release_title,
+                        release_type: draft.release_type,
+                        release_year: String(draft.release_year || ''),
+                        track_number: String(draft.track_number || ''),
+                        disc_number: String(draft.disc_number || ''),
+                        is_hidden: !!draft.is_hidden,
+                    }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Failed to save track');
+                this.uploadTracks = this.uploadTracks.map(item => item.track.id === id ? data : item);
+                this.cancelUploadEdit();
+                this.loadUploads({ silent: true, preserveEditor: false });
+                this._setMessage('Track metadata saved');
+            } catch (err) {
+                this._setMessage(err.message || String(err), true);
+            } finally {
+                this.uploadSavingId = null;
+            }
+        },
+
+        editUploadRelease(release) {
+            if (!release) return;
+            this.cancelUploadEdit();
+            this.cancelUploadReviewEdit();
+            this.uploadReleaseEditId = release.id;
+            this.uploadReleaseDraft = {
+                title: release.title || '',
+                artists: this.uploadReleaseArtistsText(release),
+                release_type: release.release_type || 'album',
+                year: release.year == null ? '' : String(release.year),
+                is_hidden: !!release.is_hidden,
+            };
+        },
+
+        cancelUploadReleaseEdit() {
+            this.uploadReleaseEditId = null;
+            this.uploadReleaseSavingId = null;
+            this.uploadReleaseDraft = null;
+        },
+
+        async saveUploadReleaseEdit() {
+            if (!this.uploadReleaseEditId || !this.uploadReleaseDraft) return;
+            const id = this.uploadReleaseEditId;
+            const draft = this.uploadReleaseDraft;
+            this.uploadReleaseSavingId = id;
+            try {
+                const res = await fetch(`/api/player/uploads/releases/${id}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        title: draft.title,
+                        artist_names: String(draft.artists || '').split(',').map(name => name.trim()).filter(Boolean),
+                        release_type: draft.release_type,
+                        year: String(draft.year || ''),
+                        is_hidden: !!draft.is_hidden,
+                    }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Failed to save release');
+                this.applyUploadPage(data);
+                this.cancelUploadReleaseEdit();
+                this._setMessage('Release metadata saved');
+            } catch (err) {
+                this._setMessage(err.message || String(err), true);
+            } finally {
+                this.uploadReleaseSavingId = null;
+            }
+        },
+
+        uploadReviewPayload() {
+            const draft = this.uploadReviewDraft || {};
+            return {
+                title: draft.title,
+                artist: draft.artist,
+                album: draft.album,
+                year: String(draft.year || ''),
+                track_number: String(draft.track_number || ''),
+                genre: draft.genre,
+                featured_artists: String(draft.featured_artists || '').split(',').map(name => name.trim()).filter(Boolean),
+                release_type: draft.release_type || 'album',
+                notes: draft.notes,
+            };
+        },
+
+        editUploadReview(item) {
+            if (!item) return;
+            this.cancelUploadEdit();
+            this.cancelUploadReleaseEdit();
+            this.uploadReviewEditId = item.id;
+            this.uploadReviewDraft = {
+                title: item.fields?.title || '',
+                artist: item.fields?.artist || '',
+                album: item.fields?.album || '',
+                year: item.fields?.year || '',
+                track_number: item.fields?.track_number || '',
+                genre: item.fields?.genre || '',
+                featured_artists: (item.fields?.featured_artists || []).join(', '),
+                release_type: item.fields?.release_type || 'album',
+                notes: item.fields?.notes || '',
+            };
+        },
+
+        cancelUploadReviewEdit() {
+            this.uploadReviewEditId = null;
+            this.uploadReviewSavingId = null;
+            this.uploadReviewDraft = null;
+        },
+
+        async saveUploadReview() {
+            if (!this.uploadReviewEditId || !this.uploadReviewDraft) return;
+            const id = this.uploadReviewEditId;
+            this.uploadReviewSavingId = id;
+            try {
+                const res = await fetch(`/api/player/uploads/reviews/${id}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.uploadReviewPayload()),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Failed to save review');
+                this.uploadPending = this.uploadPending.map(item => item.id === id ? data : item);
+                this._setMessage('Pending metadata saved');
+            } catch (err) {
+                this._setMessage(err.message || String(err), true);
+            } finally {
+                this.uploadReviewSavingId = null;
+            }
+        },
+
+        async approveUploadReview() {
+            if (!this.uploadReviewEditId || !this.uploadReviewDraft) return;
+            const id = this.uploadReviewEditId;
+            this.uploadReviewSavingId = id;
+            try {
+                const res = await fetch(`/api/player/uploads/reviews/${id}/approve`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.uploadReviewPayload()),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Failed to approve review');
+                this.applyUploadPage(data);
+                this.cancelUploadReviewEdit();
+                this._setMessage('Track approved and imported');
+            } catch (err) {
+                this._setMessage(err.message || String(err), true);
+            } finally {
+                this.uploadReviewSavingId = null;
+            }
+        },
+
+        async saveUploadBulkEdit() {
+            const trackIds = [...this.selectedUploadTracks];
+            if (trackIds.length === 0) return;
+            const draft = this.uploadBulkDraft;
+            const hidden = draft.hidden === '' ? null : draft.hidden === 'true';
+            const artists = String(draft.artists || '').split(',').map(name => name.trim()).filter(Boolean);
+            const featured = String(draft.featured_artists || '').split(',').map(name => name.trim()).filter(Boolean);
+            this.uploadBulkSaving = true;
+            try {
+                const res = await fetch('/api/player/uploads/bulk-tracks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        track_ids: trackIds,
+                        artist_names: artists.length ? artists : null,
+                        featured_artist_names: featured.length ? featured : null,
+                        release_title: draft.release_title || null,
+                        release_type: draft.release_type || null,
+                        release_year: draft.release_year === '' ? null : String(draft.release_year),
+                        is_hidden: hidden,
+                    }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Failed to update selected tracks');
+                this.applyUploadPage(data);
+                this.clearUploadSelection();
+                this._setMessage('Selected tracks updated');
+            } catch (err) {
+                this._setMessage(err.message || String(err), true);
+            } finally {
+                this.uploadBulkSaving = false;
+            }
+        },
+
+        applyUploadPage(data) {
+            this.uploadTracks = Array.isArray(data.tracks) ? data.tracks : [];
+            this.uploadReleases = Array.isArray(data.releases) ? data.releases : [];
+            this.uploadPending = Array.isArray(data.pending) ? data.pending : [];
+            this.uploadQueued = Array.isArray(data.queued) ? data.queued : [];
+            this.uploadPendingTotal = Number(data.pending_total || this.uploadPending.length || 0);
+            this.uploadQueuedTotal = Number(data.queued_total || this.uploadQueued.length || 0);
+            this.pruneUploadSelection();
+        },
+
         _startRefresh() {
             this._stopRefresh();
             this._refreshTimer = setInterval(() => {
                 if (!this.modal) return;
-                this.loadSessions();
+                if (this.activeTab === 'uploads') {
+                    this.loadUploads({ silent: true });
+                }
+                else this.loadSessions();
                 this.loadAgentStatus();
             }, 5000);
         },
