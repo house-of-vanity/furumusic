@@ -56,6 +56,9 @@ const PLAYER_DEVICE_COMMAND_TTL_MS: i64 = 20_000;
 const PLAYER_DEVICE_MAX_COMMANDS: usize = 32;
 const PLAYER_JAM_IDLE_TTL_MS: i64 = 4 * 60 * 60 * 1000;
 const PLAYER_JAM_MAX_INVITEES: usize = 25;
+const PLAYER_RADIO_TRACK_LIMIT: usize = 40;
+const PLAYER_RADIO_CANDIDATE_LIMIT: i64 = 220;
+const PLAYER_RADIO_RELEASE_SEED_TRACKS: i64 = 4;
 
 #[derive(Debug, Clone)]
 struct PlayerDevice {
@@ -3023,12 +3026,56 @@ async fn artist_detail_handler(
         })
         .collect();
 
+    let top_tracks = sqlx::query_as::<_, PlaylistTrackRow>(
+        r#"SELECT t.id, t.title::text as title, t.track_number, t.disc_number,
+                  t.duration_seconds, t.cover_file_id,
+                  r.cover_file_id as release_cover_file_id,
+                  r.id as release_id,
+                  r.title::text as release_title,
+                  r.year as release_year,
+                  COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
+                  mf.audio_format,
+                  mf.audio_bitrate,
+                  mf.audio_sample_rate,
+                  mf.audio_bit_depth,
+                  mf.file_size_bytes,
+                  t.lastfm_listeners,
+                  t.lastfm_playcount,
+                  t.lastfm_rating,
+                  t.lastfm_updated_at
+           FROM furumusic__track t
+           JOIN furumusic__release r ON r.id = t.release_id
+           LEFT JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
+           WHERE t.is_hidden = false
+             AND r.is_hidden = false
+             AND EXISTS (
+                 SELECT 1
+                   FROM furumusic__track_artist ta
+                  WHERE ta.track_id = t.id
+                    AND ta.artist_id = $1
+                    AND ta.role <> 'featuring'
+             )
+           ORDER BY COALESCE(t.lastfm_rating, 0) DESC,
+                    COALESCE(t.lastfm_playcount, 0) DESC,
+                    COALESCE(t.lastfm_listeners, 0) DESC,
+                    r.year DESC NULLS LAST,
+                    t.track_number NULLS LAST,
+                    t.id
+           LIMIT 50"#,
+    )
+    .bind(artist_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let top_tracks = build_track_items(top_tracks, pool).await?;
+
     Json(ArtistDetail {
         id: artist.id,
         name: artist.name,
         image_url: cover_variant_url(image_file_id, "large"),
         total_track_count,
         total_play_count,
+        top_tracks,
         releases: release_cards,
         featured_tracks,
     })
@@ -3077,8 +3124,7 @@ async fn release_detail_handler(
     .await
     .map_err(|e| cot::Error::internal(e.to_string()))?;
 
-    // Tracks
-    let tracks = sqlx::query_as::<_, TrackRow>(
+    let tracks = sqlx::query_as::<_, PlaylistTrackRow>(
         r#"SELECT t.id, t.title::text as title, t.track_number, t.disc_number,
                   t.duration_seconds, t.cover_file_id,
                   r.cover_file_id as release_cover_file_id,
@@ -3106,83 +3152,7 @@ async fn release_detail_handler(
     .await
     .map_err(|e| cot::Error::internal(e.to_string()))?;
 
-    let track_ids: Vec<i64> = tracks.iter().map(|t| t.id).collect();
-
-    // Track artists (batch)
-    let track_artists = if track_ids.is_empty() {
-        Vec::new()
-    } else {
-        sqlx::query_as::<_, TrackArtistRow>(
-            r#"SELECT ta.track_id, ta.artist_id, a.name::text as artist_name, ta.role::text as role
-               FROM furumusic__track_artist ta
-               JOIN furumusic__artist a ON a.id = ta.artist_id
-               WHERE ta.track_id = ANY($1)
-               ORDER BY ta.track_id, ta.position"#,
-        )
-        .bind(&track_ids)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| cot::Error::internal(e.to_string()))?
-    };
-
-    // Group track artists
-    let mut track_main_artists: std::collections::HashMap<i64, Vec<ArtistRef>> =
-        std::collections::HashMap::new();
-    let mut track_feat_artists: std::collections::HashMap<i64, Vec<ArtistRef>> =
-        std::collections::HashMap::new();
-
-    for ta in &track_artists {
-        let artist_ref = ArtistRef {
-            id: ta.artist_id,
-            name: ta.artist_name.clone(),
-        };
-        if ta.role == "featuring" {
-            track_feat_artists
-                .entry(ta.track_id)
-                .or_default()
-                .push(artist_ref);
-        } else {
-            track_main_artists
-                .entry(ta.track_id)
-                .or_default()
-                .push(artist_ref);
-        }
-    }
-
-    let track_items: Vec<TrackItem> = tracks
-        .into_iter()
-        .map(|t| {
-            let tid = t.id;
-            TrackItem {
-                id: t.id,
-                title: t.title,
-                track_number: t.track_number,
-                disc_number: t.disc_number,
-                duration_seconds: t.duration_seconds,
-                artists: track_main_artists.remove(&tid).unwrap_or_default(),
-                featured_artists: track_feat_artists.remove(&tid).unwrap_or_default(),
-                release_id: t.release_id,
-                release_title: t.release_title,
-                release_year: t.release_year,
-                cover_url: track_cover_variant_url(
-                    t.cover_file_id,
-                    t.release_cover_file_id,
-                    "medium",
-                ),
-                stream_url: format!("/api/player/stream/{tid}"),
-                uploader_name: t.uploader_name,
-                audio_format: t.audio_format,
-                audio_bitrate: t.audio_bitrate,
-                audio_sample_rate: t.audio_sample_rate,
-                audio_bit_depth: t.audio_bit_depth,
-                file_size_bytes: t.file_size_bytes,
-                lastfm_listeners: t.lastfm_listeners,
-                lastfm_playcount: t.lastfm_playcount,
-                lastfm_rating: t.lastfm_rating,
-                lastfm_updated_at: t.lastfm_updated_at,
-            }
-        })
-        .collect();
+    let track_items = build_track_items(tracks, pool).await?;
     let uploaders = load_release_uploaders(pool, &[release.id])
         .await
         .map_err(|e| cot::Error::internal(e.to_string()))?
@@ -3449,6 +3419,50 @@ async fn build_track_items(
             }
         })
         .collect())
+}
+
+async fn load_track_items_by_ids(
+    pool: &sqlx::PgPool,
+    ids: &[i64],
+) -> cot::Result<Vec<TrackItem>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let tracks = sqlx::query_as::<_, PlaylistTrackRow>(
+        r#"SELECT t.id, t.title::text as title, t.track_number, t.disc_number,
+                  t.duration_seconds, t.cover_file_id,
+                  r.cover_file_id as release_cover_file_id,
+                  r.id as release_id,
+                  r.title::text as release_title,
+                  r.year as release_year,
+                  COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
+                  mf.audio_format,
+                  mf.audio_bitrate,
+                  mf.audio_sample_rate,
+                  mf.audio_bit_depth,
+                  mf.file_size_bytes,
+                  t.lastfm_listeners,
+                  t.lastfm_playcount,
+                  t.lastfm_rating,
+                  t.lastfm_updated_at
+           FROM furumusic__track t
+           JOIN furumusic__release r ON r.id = t.release_id
+           LEFT JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
+           WHERE t.id = ANY($1) AND t.is_hidden = false AND r.is_hidden = false"#,
+    )
+    .bind(ids)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    let mut track_map: HashMap<i64, TrackItem> = build_track_items(tracks, pool)
+        .await?
+        .into_iter()
+        .map(|track| (track.id, track))
+        .collect();
+
+    Ok(ids.iter().filter_map(|id| track_map.remove(id)).collect())
 }
 
 /// Return the virtual "Likes" playlist for a given user.
@@ -4321,17 +4335,35 @@ async fn history_list_handler(
             .await
             .map_err(|e| cot::Error::internal(e.to_string()))?;
 
-    let rows = sqlx::query_as::<_, PlayHistoryRow>(
-        r#"SELECT ph.id,
-                  ph.track_id,
-                  t.title::text AS track_title,
-                  r.title::text AS release_title,
+    let rows = sqlx::query_as::<_, PlayHistoryTrackRow>(
+        r#"SELECT ph.id AS history_id,
                   ph.played_at::text AS played_at,
                   ph.duration_listened,
-                  ph.completed
+                  ph.completed,
+                  t.id,
+                  t.title::text as title,
+                  t.track_number,
+                  t.disc_number,
+                  t.duration_seconds,
+                  t.cover_file_id,
+                  r.cover_file_id as release_cover_file_id,
+                  t.release_id,
+                  COALESCE(r.title::text, '') as release_title,
+                  r.year as release_year,
+                  COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
+                  mf.audio_format,
+                  mf.audio_bitrate,
+                  mf.audio_sample_rate,
+                  mf.audio_bit_depth,
+                  mf.file_size_bytes,
+                  t.lastfm_listeners,
+                  t.lastfm_playcount,
+                  t.lastfm_rating,
+                  t.lastfm_updated_at
            FROM furumusic__play_history ph
            JOIN furumusic__track t ON t.id = ph.track_id
            LEFT JOIN furumusic__release r ON r.id = t.release_id
+           LEFT JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
            WHERE ph.user_id = $1
            ORDER BY ph.played_at DESC, ph.id DESC
            LIMIT $2 OFFSET $3"#,
@@ -4343,14 +4375,86 @@ async fn history_list_handler(
     .await
     .map_err(|e| cot::Error::internal(e.to_string()))?;
 
+    let track_ids: Vec<i64> = rows.iter().map(|t| t.id).collect();
+    let track_artists = if track_ids.is_empty() {
+        Vec::new()
+    } else {
+        sqlx::query_as::<_, TrackArtistRow>(
+            r#"SELECT ta.track_id, ta.artist_id, a.name::text as artist_name, ta.role::text as role
+               FROM furumusic__track_artist ta
+               JOIN furumusic__artist a ON a.id = ta.artist_id
+               WHERE ta.track_id = ANY($1)
+               ORDER BY ta.track_id, ta.position"#,
+        )
+        .bind(&track_ids)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?
+    };
+
+    let mut track_main_artists: HashMap<i64, Vec<ArtistRef>> = HashMap::new();
+    let mut track_feat_artists: HashMap<i64, Vec<ArtistRef>> = HashMap::new();
+    for ta in &track_artists {
+        let artist_ref = ArtistRef {
+            id: ta.artist_id,
+            name: ta.artist_name.clone(),
+        };
+        if ta.role == "featuring" {
+            track_feat_artists
+                .entry(ta.track_id)
+                .or_default()
+                .push(artist_ref);
+        } else {
+            track_main_artists
+                .entry(ta.track_id)
+                .or_default()
+                .push(artist_ref);
+        }
+    }
+
     Json(PlayHistoryPage {
         items: rows
             .into_iter()
             .map(|row| PlayHistoryItem {
-                id: row.id,
-                track_id: row.track_id,
-                track_title: row.track_title,
-                release_title: row.release_title,
+                id: row.history_id,
+                track_id: row.id,
+                track_title: row.title.clone(),
+                release_title: if row.release_title.trim().is_empty() {
+                    None
+                } else {
+                    Some(row.release_title.clone())
+                },
+                track: {
+                    let tid = row.id;
+                    TrackItem {
+                        id: row.id,
+                        title: row.title,
+                        track_number: row.track_number,
+                        disc_number: row.disc_number,
+                        duration_seconds: row.duration_seconds,
+                        artists: track_main_artists.remove(&tid).unwrap_or_default(),
+                        featured_artists: track_feat_artists.remove(&tid).unwrap_or_default(),
+                        release_id: row.release_id,
+                        release_title: row.release_title,
+                        release_year: row.release_year,
+                        cover_url: track_cover_variant_url(
+                            row.cover_file_id,
+                            row.release_cover_file_id,
+                            "medium",
+                        ),
+                        stream_url: format!("/api/player/stream/{tid}"),
+                        uploader_name: row.uploader_name,
+                        audio_format: row.audio_format,
+                        audio_bitrate: row.audio_bitrate,
+                        audio_sample_rate: row.audio_sample_rate,
+                        audio_bit_depth: row.audio_bit_depth,
+                        file_size_bytes: row.file_size_bytes,
+                        lastfm_listeners: row.lastfm_listeners,
+                        lastfm_playcount: row.lastfm_playcount,
+                        lastfm_rating: row.lastfm_rating,
+                        lastfm_updated_at: row.lastfm_updated_at,
+                    }
+                },
                 played_at: row.played_at,
                 duration_listened: row.duration_listened,
                 completed: row.completed,
@@ -5249,6 +5353,471 @@ async fn toggle_follow_artist_handler(
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/player/radio/{kind}/{id}
+// ---------------------------------------------------------------------------
+
+fn append_unique_track_ids(track_ids: &mut Vec<i64>, candidates: Vec<i64>, limit: usize) {
+    let mut seen: HashSet<i64> = track_ids.iter().copied().collect();
+    for candidate in candidates {
+        if track_ids.len() >= limit {
+            break;
+        }
+        if seen.insert(candidate) {
+            track_ids.push(candidate);
+        }
+    }
+}
+
+async fn track_primary_artist_ids(pool: &sqlx::PgPool, track_id: i64) -> cot::Result<Vec<i64>> {
+    sqlx::query_scalar::<_, i64>(
+        r#"SELECT artist_id
+           FROM furumusic__track_artist
+           WHERE track_id = $1 AND role <> 'featuring'
+           ORDER BY position, artist_id"#,
+    )
+    .bind(track_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))
+}
+
+async fn release_primary_artist_ids(pool: &sqlx::PgPool, release_id: i64) -> cot::Result<Vec<i64>> {
+    sqlx::query_scalar::<_, i64>(
+        r#"SELECT artist_id
+           FROM furumusic__release_artist
+           WHERE release_id = $1
+           ORDER BY position, artist_id"#,
+    )
+    .bind(release_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))
+}
+
+async fn fallback_radio_track_ids(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+    artist_ids: &[i64],
+    excluded_ids: &[i64],
+    limit: i64,
+) -> cot::Result<Vec<i64>> {
+    if limit <= 0 {
+        return Ok(Vec::new());
+    }
+
+    sqlx::query_scalar::<_, i64>(
+        r#"SELECT t.id
+           FROM furumusic__track t
+           JOIN furumusic__release r ON r.id = t.release_id
+           WHERE t.is_hidden = false
+             AND r.is_hidden = false
+             AND NOT (t.id = ANY($3::bigint[]))
+           ORDER BY (
+               CASE WHEN EXISTS (
+                   SELECT 1 FROM furumusic__user_liked_track ult
+                   WHERE ult.user_id = $1 AND ult.track_id = t.id
+               ) THEN 9.0 ELSE 0.0 END
+               + CASE WHEN EXISTS (
+                   SELECT 1 FROM furumusic__track_artist ta
+                   WHERE ta.track_id = t.id
+                     AND ta.role <> 'featuring'
+                     AND ta.artist_id = ANY($2::bigint[])
+               ) THEN 5.0 ELSE 0.0 END
+               + COALESCE(t.lastfm_rating, 0.0) * 0.7
+               + ln(COALESCE(t.lastfm_playcount, 0)::double precision + 1.0) * 0.04
+               + ln(COALESCE(t.lastfm_listeners, 0)::double precision + 1.0) * 0.03
+               + random() * 2.0
+           ) DESC, t.id
+           LIMIT $4"#,
+    )
+    .bind(user_id)
+    .bind(artist_ids)
+    .bind(excluded_ids)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))
+}
+
+async fn track_radio_candidate_ids(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+    track_id: i64,
+    limit: i64,
+) -> cot::Result<Vec<i64>> {
+    sqlx::query_scalar::<_, i64>(
+        r#"WITH seed_track AS (
+               SELECT t.id, t.release_id
+               FROM furumusic__track t
+               JOIN furumusic__release r ON r.id = t.release_id
+               WHERE t.id = $1 AND t.is_hidden = false AND r.is_hidden = false
+           ),
+           seed_artists AS (
+               SELECT ta.artist_id
+               FROM furumusic__track_artist ta
+               JOIN seed_track st ON st.id = ta.track_id
+               WHERE ta.role <> 'featuring'
+           ),
+           seed_tag_sources AS (
+               SELECT egt.genre_id,
+                      ln(greatest(COALESCE(egt.weight, 1.0), 1.0) + 1.0) AS weight
+               FROM furumusic__entity_genre_tag egt
+               JOIN seed_track st ON egt.entity_kind = 'track' AND egt.entity_id = st.id
+               UNION ALL
+               SELECT tg.genre_id, 1.0 AS weight
+               FROM furumusic__track_genre tg
+               JOIN seed_track st ON st.id = tg.track_id
+               UNION ALL
+               SELECT egt.genre_id,
+                      ln(greatest(COALESCE(egt.weight, 1.0), 1.0) + 1.0) AS weight
+               FROM furumusic__entity_genre_tag egt
+               JOIN seed_track st ON egt.entity_kind = 'release' AND egt.entity_id = st.release_id
+           ),
+           seed_tags AS (
+               SELECT genre_id, max(weight) AS seed_weight
+               FROM seed_tag_sources
+               GROUP BY genre_id
+           ),
+           candidate_tag_sources AS (
+               SELECT egt.entity_id AS track_id,
+                      egt.genre_id,
+                      ln(greatest(COALESCE(egt.weight, 1.0), 1.0) + 1.0) AS weight
+               FROM furumusic__entity_genre_tag egt
+               WHERE egt.entity_kind = 'track'
+               UNION ALL
+               SELECT tg.track_id, tg.genre_id, 1.0 AS weight
+               FROM furumusic__track_genre tg
+               UNION ALL
+               SELECT t.id AS track_id,
+                      egt.genre_id,
+                      ln(greatest(COALESCE(egt.weight, 1.0), 1.0) + 1.0) AS weight
+               FROM furumusic__track t
+               JOIN furumusic__entity_genre_tag egt
+                 ON egt.entity_kind = 'release' AND egt.entity_id = t.release_id
+           ),
+           candidate_tags AS (
+               SELECT track_id, genre_id, max(weight) AS weight
+               FROM candidate_tag_sources
+               GROUP BY track_id, genre_id
+           ),
+           tag_scores AS (
+               SELECT ct.track_id, sum(st.seed_weight * ct.weight) AS tag_score
+               FROM candidate_tags ct
+               JOIN seed_tags st ON st.genre_id = ct.genre_id
+               GROUP BY ct.track_id
+           )
+           SELECT t.id
+           FROM furumusic__track t
+           JOIN furumusic__release r ON r.id = t.release_id
+           LEFT JOIN tag_scores score ON score.track_id = t.id
+           WHERE t.is_hidden = false
+             AND r.is_hidden = false
+             AND t.id <> $1
+             AND (
+                 COALESCE(score.tag_score, 0.0) > 0.0
+                 OR EXISTS (
+                     SELECT 1
+                     FROM furumusic__track_artist ta
+                     JOIN seed_artists sa ON sa.artist_id = ta.artist_id
+                     WHERE ta.track_id = t.id AND ta.role <> 'featuring'
+                 )
+                 OR EXISTS (
+                     SELECT 1 FROM furumusic__user_liked_track ult
+                     WHERE ult.user_id = $2 AND ult.track_id = t.id
+                 )
+             )
+           ORDER BY (
+               COALESCE(score.tag_score, 0.0) * 12.0
+               + CASE
+                   WHEN EXISTS (
+                       SELECT 1 FROM furumusic__user_liked_track ult
+                       WHERE ult.user_id = $2 AND ult.track_id = t.id
+                   ) AND COALESCE(score.tag_score, 0.0) > 0.0 THEN 12.0
+                   WHEN EXISTS (
+                       SELECT 1 FROM furumusic__user_liked_track ult
+                       WHERE ult.user_id = $2 AND ult.track_id = t.id
+                   ) THEN 3.0
+                   ELSE 0.0
+                 END
+               + CASE WHEN EXISTS (
+                     SELECT 1
+                     FROM furumusic__track_artist ta
+                     JOIN seed_artists sa ON sa.artist_id = ta.artist_id
+                     WHERE ta.track_id = t.id AND ta.role <> 'featuring'
+                 ) THEN 4.0 ELSE 0.0 END
+               + COALESCE(t.lastfm_rating, 0.0) * 0.65
+               + ln(COALESCE(t.lastfm_playcount, 0)::double precision + 1.0) * 0.04
+               + ln(COALESCE(t.lastfm_listeners, 0)::double precision + 1.0) * 0.03
+               + random() * 1.6
+           ) DESC, t.id
+           LIMIT $3"#,
+    )
+    .bind(track_id)
+    .bind(user_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))
+}
+
+async fn release_radio_candidate_ids(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+    release_id: i64,
+    excluded_ids: &[i64],
+    limit: i64,
+) -> cot::Result<Vec<i64>> {
+    sqlx::query_scalar::<_, i64>(
+        r#"WITH seed_release AS (
+               SELECT id
+               FROM furumusic__release
+               WHERE id = $1 AND is_hidden = false
+           ),
+           seed_artists AS (
+               SELECT ra.artist_id
+               FROM furumusic__release_artist ra
+               JOIN seed_release sr ON sr.id = ra.release_id
+           ),
+           seed_tag_sources AS (
+               SELECT egt.genre_id,
+                      ln(greatest(COALESCE(egt.weight, 1.0), 1.0) + 1.0) AS weight
+               FROM furumusic__entity_genre_tag egt
+               JOIN seed_release sr ON egt.entity_kind = 'release' AND egt.entity_id = sr.id
+               UNION ALL
+               SELECT egt.genre_id,
+                      ln(greatest(COALESCE(egt.weight, 1.0), 1.0) + 1.0) AS weight
+               FROM furumusic__track t
+               JOIN seed_release sr ON sr.id = t.release_id
+               JOIN furumusic__entity_genre_tag egt
+                 ON egt.entity_kind = 'track' AND egt.entity_id = t.id
+               UNION ALL
+               SELECT tg.genre_id, 1.0 AS weight
+               FROM furumusic__track t
+               JOIN seed_release sr ON sr.id = t.release_id
+               JOIN furumusic__track_genre tg ON tg.track_id = t.id
+           ),
+           seed_tags AS (
+               SELECT genre_id, max(weight) AS seed_weight
+               FROM seed_tag_sources
+               GROUP BY genre_id
+           ),
+           candidate_release_tag_sources AS (
+               SELECT egt.entity_id AS release_id,
+                      egt.genre_id,
+                      ln(greatest(COALESCE(egt.weight, 1.0), 1.0) + 1.0) AS weight
+               FROM furumusic__entity_genre_tag egt
+               WHERE egt.entity_kind = 'release'
+               UNION ALL
+               SELECT t.release_id,
+                      egt.genre_id,
+                      ln(greatest(COALESCE(egt.weight, 1.0), 1.0) + 1.0) AS weight
+               FROM furumusic__track t
+               JOIN furumusic__entity_genre_tag egt
+                 ON egt.entity_kind = 'track' AND egt.entity_id = t.id
+               UNION ALL
+               SELECT t.release_id, tg.genre_id, 1.0 AS weight
+               FROM furumusic__track t
+               JOIN furumusic__track_genre tg ON tg.track_id = t.id
+           ),
+           candidate_release_tags AS (
+               SELECT release_id, genre_id, max(weight) AS weight
+               FROM candidate_release_tag_sources
+               GROUP BY release_id, genre_id
+           ),
+           release_scores AS (
+               SELECT crt.release_id, sum(st.seed_weight * crt.weight) AS tag_score
+               FROM candidate_release_tags crt
+               JOIN seed_tags st ON st.genre_id = crt.genre_id
+               GROUP BY crt.release_id
+           ),
+           candidate_tracks AS (
+               SELECT t.id,
+                      t.release_id,
+                      COALESCE(score.tag_score, 0.0) AS tag_score,
+                      EXISTS (
+                          SELECT 1 FROM furumusic__user_liked_track ult
+                          WHERE ult.user_id = $2 AND ult.track_id = t.id
+                      ) AS liked,
+                      EXISTS (
+                          SELECT 1
+                          FROM furumusic__release_artist ra
+                          JOIN seed_artists sa ON sa.artist_id = ra.artist_id
+                          WHERE ra.release_id = t.release_id
+                      ) AS same_artist,
+                      COALESCE(t.lastfm_rating, 0.0) AS rating,
+                      COALESCE(t.lastfm_playcount, 0)::double precision AS playcount,
+                      COALESCE(t.lastfm_listeners, 0)::double precision AS listeners
+               FROM furumusic__track t
+               JOIN furumusic__release r ON r.id = t.release_id
+               LEFT JOIN release_scores score ON score.release_id = t.release_id
+               WHERE t.is_hidden = false
+                 AND r.is_hidden = false
+                 AND t.release_id <> $1
+                 AND NOT (t.id = ANY($3::bigint[]))
+                 AND (
+                     COALESCE(score.tag_score, 0.0) > 0.0
+                     OR EXISTS (
+                         SELECT 1
+                         FROM furumusic__release_artist ra
+                         JOIN seed_artists sa ON sa.artist_id = ra.artist_id
+                         WHERE ra.release_id = t.release_id
+                     )
+                     OR EXISTS (
+                         SELECT 1 FROM furumusic__user_liked_track ult
+                         WHERE ult.user_id = $2 AND ult.track_id = t.id
+                     )
+                 )
+           ),
+           ranked_tracks AS (
+               SELECT *,
+                      row_number() OVER (
+                          PARTITION BY release_id
+                          ORDER BY rating DESC, playcount DESC, listeners DESC, random() DESC, id
+                      ) AS release_rank
+               FROM candidate_tracks
+           )
+           SELECT id
+           FROM ranked_tracks
+           WHERE release_rank <= 4
+           ORDER BY (
+               tag_score * 12.0
+               + CASE
+                   WHEN liked AND tag_score > 0.0 THEN 11.0
+                   WHEN liked THEN 3.0
+                   ELSE 0.0
+                 END
+               + CASE WHEN same_artist THEN 3.5 ELSE 0.0 END
+               + rating * 0.65
+               + ln(playcount + 1.0) * 0.04
+               + ln(listeners + 1.0) * 0.03
+               + random() * 1.6
+           ) DESC, id
+           LIMIT $4"#,
+    )
+    .bind(release_id)
+    .bind(user_id)
+    .bind(excluded_ids)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))
+}
+
+async fn build_track_radio_ids(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+    track_id: i64,
+) -> cot::Result<Option<Vec<i64>>> {
+    let seed_track = sqlx::query_scalar::<_, i64>(
+        r#"SELECT t.id
+           FROM furumusic__track t
+           JOIN furumusic__release r ON r.id = t.release_id
+           WHERE t.id = $1 AND t.is_hidden = false AND r.is_hidden = false"#,
+    )
+    .bind(track_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    if seed_track.is_none() {
+        return Ok(None);
+    }
+
+    let mut ids = vec![track_id];
+    let candidate_ids =
+        track_radio_candidate_ids(pool, user_id, track_id, PLAYER_RADIO_CANDIDATE_LIMIT).await?;
+    append_unique_track_ids(&mut ids, candidate_ids, PLAYER_RADIO_TRACK_LIMIT);
+
+    let artist_ids = track_primary_artist_ids(pool, track_id).await?;
+    let remaining = PLAYER_RADIO_TRACK_LIMIT.saturating_sub(ids.len()) as i64;
+    let fallback_ids = fallback_radio_track_ids(pool, user_id, &artist_ids, &ids, remaining).await?;
+    append_unique_track_ids(&mut ids, fallback_ids, PLAYER_RADIO_TRACK_LIMIT);
+
+    Ok(Some(ids))
+}
+
+async fn build_release_radio_ids(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+    release_id: i64,
+) -> cot::Result<Option<Vec<i64>>> {
+    let seed_release = sqlx::query_scalar::<_, i64>(
+        r#"SELECT id FROM furumusic__release WHERE id = $1 AND is_hidden = false"#,
+    )
+    .bind(release_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    if seed_release.is_none() {
+        return Ok(None);
+    }
+
+    let mut ids = sqlx::query_scalar::<_, i64>(
+        r#"SELECT t.id
+           FROM furumusic__track t
+           JOIN furumusic__release r ON r.id = t.release_id
+           WHERE t.release_id = $1
+             AND t.is_hidden = false
+             AND r.is_hidden = false
+           ORDER BY COALESCE(t.lastfm_rating, 0.0) DESC,
+                    COALESCE(t.lastfm_playcount, 0) DESC,
+                    COALESCE(t.lastfm_listeners, 0) DESC,
+                    t.disc_number NULLS FIRST,
+                    t.track_number NULLS LAST,
+                    t.id
+           LIMIT $2"#,
+    )
+    .bind(release_id)
+    .bind(PLAYER_RADIO_RELEASE_SEED_TRACKS)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    let candidate_ids = release_radio_candidate_ids(
+        pool,
+        user_id,
+        release_id,
+        &ids,
+        PLAYER_RADIO_CANDIDATE_LIMIT,
+    )
+    .await?;
+    append_unique_track_ids(&mut ids, candidate_ids, PLAYER_RADIO_TRACK_LIMIT);
+
+    let artist_ids = release_primary_artist_ids(pool, release_id).await?;
+    let remaining = PLAYER_RADIO_TRACK_LIMIT.saturating_sub(ids.len()) as i64;
+    let fallback_ids = fallback_radio_track_ids(pool, user_id, &artist_ids, &ids, remaining).await?;
+    append_unique_track_ids(&mut ids, fallback_ids, PLAYER_RADIO_TRACK_LIMIT);
+
+    Ok(Some(ids))
+}
+
+async fn radio_handler(
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+    path: Path<PathRadioSeed>,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+
+    let seed = path.0;
+    let ids = match seed.kind.as_str() {
+        "track" => build_track_radio_ids(pool, user.id, seed.id).await?,
+        "release" => build_release_radio_ids(pool, user.id, seed.id).await?,
+        _ => return Ok(json_error(StatusCode::BAD_REQUEST, "unknown radio seed")),
+    };
+
+    let Some(ids) = ids else {
+        return Ok(json_error(StatusCode::NOT_FOUND, "radio seed not found"));
+    };
+
+    let tracks = load_track_items_by_ids(pool, &ids).await?;
+    Json(tracks).into_response()
+}
+
+// ---------------------------------------------------------------------------
 // POST /api/player/tracks-by-ids
 // ---------------------------------------------------------------------------
 
@@ -5266,117 +5835,8 @@ async fn tracks_by_ids_handler(
         return Json(Vec::<TrackItem>::new()).into_response();
     }
 
-    // Limit to 500 IDs to prevent abuse
     let ids: Vec<i64> = body.ids.into_iter().take(500).collect();
-
-    let tracks = sqlx::query_as::<_, TrackRow>(
-        r#"SELECT t.id, t.title::text as title, t.track_number, t.disc_number,
-                  t.duration_seconds, t.cover_file_id,
-                  r.cover_file_id as release_cover_file_id,
-                  r.id as release_id,
-                  r.title::text as release_title,
-                  r.year as release_year,
-                  COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
-                  mf.audio_format,
-                  mf.audio_bitrate,
-                  mf.audio_sample_rate,
-                  mf.audio_bit_depth,
-                  mf.file_size_bytes,
-                  t.lastfm_listeners,
-                  t.lastfm_playcount,
-                  t.lastfm_rating,
-                  t.lastfm_updated_at
-           FROM furumusic__track t
-           JOIN furumusic__release r ON r.id = t.release_id
-           LEFT JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
-           WHERE t.id = ANY($1) AND t.is_hidden = false"#,
-    )
-    .bind(&ids)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| cot::Error::internal(e.to_string()))?;
-
-    let track_ids: Vec<i64> = tracks.iter().map(|t| t.id).collect();
-
-    let track_artists = if track_ids.is_empty() {
-        Vec::new()
-    } else {
-        sqlx::query_as::<_, TrackArtistRow>(
-            r#"SELECT ta.track_id, ta.artist_id, a.name::text as artist_name, ta.role::text as role
-               FROM furumusic__track_artist ta
-               JOIN furumusic__artist a ON a.id = ta.artist_id
-               WHERE ta.track_id = ANY($1)
-               ORDER BY ta.track_id, ta.position"#,
-        )
-        .bind(&track_ids)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| cot::Error::internal(e.to_string()))?
-    };
-
-    let mut track_main_artists: std::collections::HashMap<i64, Vec<ArtistRef>> =
-        std::collections::HashMap::new();
-    let mut track_feat_artists: std::collections::HashMap<i64, Vec<ArtistRef>> =
-        std::collections::HashMap::new();
-
-    for ta in &track_artists {
-        let artist_ref = ArtistRef {
-            id: ta.artist_id,
-            name: ta.artist_name.clone(),
-        };
-        if ta.role == "featuring" {
-            track_feat_artists
-                .entry(ta.track_id)
-                .or_default()
-                .push(artist_ref);
-        } else {
-            track_main_artists
-                .entry(ta.track_id)
-                .or_default()
-                .push(artist_ref);
-        }
-    }
-
-    // Build a map from id -> TrackItem
-    let mut track_map: std::collections::HashMap<i64, TrackItem> = std::collections::HashMap::new();
-    for t in tracks {
-        let tid = t.id;
-        track_map.insert(
-            tid,
-            TrackItem {
-                id: t.id,
-                title: t.title,
-                track_number: t.track_number,
-                disc_number: t.disc_number,
-                duration_seconds: t.duration_seconds,
-                artists: track_main_artists.remove(&tid).unwrap_or_default(),
-                featured_artists: track_feat_artists.remove(&tid).unwrap_or_default(),
-                release_id: t.release_id,
-                release_title: t.release_title,
-                release_year: t.release_year,
-                cover_url: track_cover_variant_url(
-                    t.cover_file_id,
-                    t.release_cover_file_id,
-                    "medium",
-                ),
-                stream_url: format!("/api/player/stream/{tid}"),
-                uploader_name: t.uploader_name,
-                audio_format: t.audio_format,
-                audio_bitrate: t.audio_bitrate,
-                audio_sample_rate: t.audio_sample_rate,
-                audio_bit_depth: t.audio_bit_depth,
-                file_size_bytes: t.file_size_bytes,
-                lastfm_listeners: t.lastfm_listeners,
-                lastfm_playcount: t.lastfm_playcount,
-                lastfm_rating: t.lastfm_rating,
-                lastfm_updated_at: t.lastfm_updated_at,
-            },
-        );
-    }
-
-    // Reorder results to match input order
-    let result: Vec<TrackItem> = ids.iter().filter_map(|id| track_map.remove(id)).collect();
-
+    let result = load_track_items_by_ids(pool, &ids).await?;
     Json(result).into_response()
 }
 
@@ -6223,6 +6683,30 @@ impl App for PlayerApp {
                     })
                 },
                 "player_release_detail",
+            ),
+            Route::with_handler_and_name(
+                "/radio/{kind}/{id}",
+                {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    get(move |session: Session, db: Database, path: Path<PathRadioSeed>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            radio_handler(session, db, pg_pool, path).await
+                        }
+                    })
+                },
+                "player_radio",
             ),
             // -- Playlists (list + create) --
             Route::with_handler_and_name(

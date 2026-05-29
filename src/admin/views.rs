@@ -1402,6 +1402,8 @@ pub struct MetadataBackfillForm {
     audio_sample_rate: Option<String>,
     audio_bit_depth: Option<String>,
     duration_seconds: Option<String>,
+    local_genres: Option<String>,
+    lastfm_tags: Option<String>,
     mode: Option<String>,
 }
 
@@ -1468,6 +1470,8 @@ pub async fn metadata_backfill_run(
         audio_sample_rate: data.audio_sample_rate.is_some(),
         audio_bit_depth: data.audio_bit_depth.is_some(),
         duration_seconds: data.duration_seconds.is_some(),
+        local_genres: data.local_genres.is_some(),
+        lastfm_tags: data.lastfm_tags.is_some(),
         overwrite: data.mode.as_deref() == Some("overwrite"),
     };
 

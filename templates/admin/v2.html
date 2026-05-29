@@ -486,12 +486,58 @@ tbody tr:hover {
 .tag.plays,
 .tag.followers { background: rgba(185, 140, 255, 0.18); color: #d8c2ff; }
 .tag.visibility { background: rgba(29, 185, 84, 0.16); color: #8ef0b2; }
+.tag.metadata-lastfm { background: rgba(90, 167, 255, 0.18); color: #c7e0ff; }
+.tag.metadata-file { background: rgba(29, 185, 84, 0.16); color: #9af0b8; }
+.tag.metadata-review { background: rgba(241, 184, 75, 0.18); color: #ffe1a6; }
+.tag.metadata-track-genre { background: rgba(255, 255, 255, 0.1); color: #d2d2d2; }
+.tag.metadata-release-lastfm { background: rgba(90, 167, 255, 0.12); color: #b7d6ff; border: 1px solid rgba(90, 167, 255, 0.22); }
+.tag.metadata-release-file { background: rgba(29, 185, 84, 0.1); color: #a7eabd; border: 1px solid rgba(29, 185, 84, 0.2); }
+.tag.metadata-release-review { background: rgba(241, 184, 75, 0.12); color: #ffe1a6; border: 1px solid rgba(241, 184, 75, 0.22); }
 
 .jobs-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
     padding: 12px;
+}
+
+.metadata-backfill-options {
+    display: grid;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-primary);
+}
+
+.metadata-backfill-options .option-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.metadata-backfill-options label {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 26px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.metadata-backfill-options input {
+    width: auto;
+    min-height: auto;
+}
+
+.metadata-backfill-options .mode-row {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    padding-top: 4px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .jobs-page {
@@ -524,31 +570,37 @@ tbody tr:hover {
     table-layout: fixed;
 }
 
-.jobs-page .jobs-list-panel .panel-head,
-.jobs-page .jobs-list-panel .action-strip {
+.jobs-page .jobs-list-panel .panel-head {
     flex-shrink: 0;
 }
 
-.jobs-page .jobs-list-panel .action-strip {
-    border-top: 1px solid var(--border-color);
-    border-bottom: 0;
-}
-
-.job-table .job-column { width: 28%; }
-.job-table .state-column { width: 13%; }
-.job-table .schedule-column { width: 20%; }
-.job-table .runs-column { width: 29%; }
+.job-table .job-column { width: 32%; }
+.job-table .state-column { width: 12%; }
+.job-table .schedule-column { width: 22%; }
+.job-table .runs-column { width: 24%; }
 .job-table .actions-column { width: 10%; }
+
+.job-table .toolbar {
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+}
 
 .inline-runs {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 5px;
+    max-width: 100%;
+    overflow: hidden;
 }
 
 .run-chip {
     gap: 5px;
-    max-width: 128px;
+    max-width: 70px;
+    height: 20px;
+    padding: 0 7px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .task-form {
@@ -557,6 +609,76 @@ tbody tr:hover {
     grid-column: 2;
     grid-row: 1 / span 2;
     align-self: start;
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 100px);
+    overflow: hidden;
+}
+
+.task-form-body {
+    min-height: 0;
+    overflow: auto;
+    padding: 12px;
+}
+
+.job-detail-description {
+    margin-bottom: 10px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.job-facts {
+    display: grid;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.job-fact {
+    display: grid;
+    grid-template-columns: 58px minmax(0, 1fr);
+    gap: 8px;
+    align-items: center;
+    min-height: 28px;
+    padding: 6px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 7px;
+    background: var(--bg-primary);
+}
+
+.job-fact span:first-child {
+    color: var(--text-subdued);
+    font-size: 10px;
+    font-weight: 850;
+    text-transform: uppercase;
+}
+
+.job-fact span:last-child {
+    min-width: 0;
+    color: var(--text-secondary);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.job-param-note {
+    margin: -2px 0 10px;
+    color: var(--text-subdued);
+    font-size: 11px;
+}
+
+.job-run-pager {
+    min-height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 0 0;
+}
+
+.job-run-pager .toolbar {
+    flex-wrap: nowrap;
 }
 
 .run-log-panel {
@@ -939,6 +1061,44 @@ tbody tr:hover {
     gap: 6px;
     flex-wrap: wrap;
     margin-bottom: 8px;
+}
+
+.run-log-output.is-following {
+    border-color: rgba(29, 185, 84, 0.36);
+}
+
+.metadata-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    max-height: 112px;
+    overflow: auto;
+    padding: 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-primary);
+}
+
+.metadata-tags .tag {
+    height: auto;
+    min-height: 24px;
+    gap: 5px;
+    padding: 4px 8px;
+}
+
+.metadata-tags small {
+    font-size: 9px;
+    font-weight: 800;
+    opacity: 0.72;
+    text-transform: uppercase;
+}
+
+.metadata-empty {
+    min-height: 34px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-primary);
 }
 
 .artist-picker {
@@ -1335,7 +1495,7 @@ tbody tr:hover {
                                 </tr>
                             </thead>
                             <tbody>
-                                <template x-for="job in pagedJobs()" :key="job.name">
+                                <template x-for="job in jobs" :key="job.name">
                                     <tr :class="{active: activeJob && activeJob.name === job.name}" @click="selectJob(job.name)">
                                         <td>
                                             <div class="primary-line" x-text="job.name"></div>
@@ -1348,7 +1508,7 @@ tbody tr:hover {
                                         </td>
                                         <td>
                                             <div class="inline-runs">
-                                                <template x-for="run in (job.recent_runs || []).slice(0, 5)" :key="run.id">
+                                                <template x-for="run in (job.recent_runs || []).slice(0, 3)" :key="run.id">
                                                     <button class="badge run-chip" :class="run.status" @click.stop="loadRunDetail(run)" :title="runTitle(run)">
                                                         <span x-text="runChipLabel(run)"></span>
                                                     </button>
@@ -1357,10 +1517,10 @@ tbody tr:hover {
                                         </td>
                                         <td>
                                             <div class="toolbar">
-                                                <button class="icon-btn" @click.stop="runJob(job)" :disabled="job.launching" title="Run now">
+                                                <button class="icon-btn" type="button" @click.stop="runJob(job)" :disabled="Boolean(job.launching)" title="Run now">
                                                     <i data-lucide="play"></i>
                                                 </button>
-                                                <button class="icon-btn" @click.stop="toggleJob(job)" :title="job.enabled ? 'Disable' : 'Enable'">
+                                                <button class="icon-btn" type="button" @click.stop="toggleJob(job)" :title="job.enabled ? 'Disable' : 'Enable'">
                                                     <i :data-lucide="job.enabled ? 'pause' : 'power'"></i>
                                                 </button>
                                             </div>
@@ -1369,18 +1529,6 @@ tbody tr:hover {
                                 </template>
                             </tbody>
                         </table>
-                    </div>
-                    <div class="action-strip">
-                        <span class="selection-summary" x-text="jobsRangeText()"></span>
-                        <div class="toolbar">
-                            <select class="search" style="width:92px" x-model.number="jobsPerPage" @change="jobsPage = 0">
-                                <option value="8">8</option>
-                                <option value="12">12</option>
-                                <option value="20">20</option>
-                            </select>
-                            <button class="btn" @click="pageJobs(-1)" :disabled="jobsPage === 0">Previous</button>
-                            <button class="btn" @click="pageJobs(1)" :disabled="(jobsPage + 1) * jobsPerPage >= jobs.length">Next</button>
-                        </div>
                     </div>
                 </section>
 
@@ -1391,25 +1539,45 @@ tbody tr:hover {
                             <span x-text="activeJob ? activeJob.health : 'Select a task'"></span>
                         </div>
                     </div>
-                    <div style="padding:14px" x-show="activeJob">
-                        <div class="field">
-                            <label>Description</label>
-                            <textarea readonly x-text="activeJob?.description || ''"></textarea>
+                    <div class="task-form-body" x-show="activeJob">
+                        <div class="job-detail-description" x-text="activeJob?.description || ''"></div>
+                        <div class="job-facts">
+                            <div class="job-fact">
+                                <span>Cron</span>
+                                <span :title="activeJob?.cron_expression || ''" x-text="cronLabel(activeJob)"></span>
+                            </div>
+                            <div class="job-fact">
+                                <span>Next</span>
+                                <span x-text="relativeDate(activeJob?.next_run_at)"></span>
+                            </div>
+                            <div class="job-fact">
+                                <span>Last</span>
+                                <span x-text="relativeDate(activeJob?.last_run_at)"></span>
+                            </div>
                         </div>
-                        <div class="field">
-                            <label>Cron</label>
-                            <input readonly :value="activeJob?.cron_expression || ''" />
+                        <div class="metadata-backfill-options" x-show="isMetadataBackfillJob(activeJob)">
+                            <div class="option-grid">
+                                <label><input type="checkbox" x-model="metadataBackfillOptions.audio_bitrate" /> audio_bitrate</label>
+                                <label><input type="checkbox" x-model="metadataBackfillOptions.audio_sample_rate" /> audio_sample_rate</label>
+                                <label><input type="checkbox" x-model="metadataBackfillOptions.audio_bit_depth" /> audio_bit_depth</label>
+                                <label><input type="checkbox" x-model="metadataBackfillOptions.duration_seconds" /> duration_seconds</label>
+                                <label><input type="checkbox" x-model="metadataBackfillOptions.local_genres" /> local genres from files</label>
+                                <label><input type="checkbox" x-model="metadataBackfillOptions.lastfm_tags" /> Last.fm tags</label>
+                            </div>
+                            <div class="mode-row">
+                                <label><input type="radio" value="fill_missing" x-model="metadataBackfillOptions.mode" /> Fill missing only</label>
+                                <label><input type="radio" value="overwrite" x-model="metadataBackfillOptions.mode" /> Overwrite existing values</label>
+                            </div>
                         </div>
-                        <div class="field">
-                            <label>Next / Last</label>
-                            <input readonly :value="relativeDate(activeJob?.next_run_at) + ' / ' + relativeDate(activeJob?.last_run_at)" />
+                        <div class="job-param-note" x-show="activeJob && !jobHasParameterForm(activeJob)">
+                            This task has no manual parameters.
                         </div>
                         <div class="toolbar" style="margin-bottom:12px">
-                            <button class="btn primary" @click="runJob(activeJob)">
+                            <button class="btn primary" type="button" @click="runJob(activeJob)">
                                 <i data-lucide="play"></i>
-                                Run now
+                                <span x-text="isMetadataBackfillJob(activeJob) ? 'Run with options' : 'Run now'"></span>
                             </button>
-                            <button class="btn" @click="toggleJob(activeJob)">
+                            <button class="btn" type="button" @click="toggleJob(activeJob)">
                                 <i data-lucide="power"></i>
                                 Toggle
                             </button>
@@ -1417,7 +1585,7 @@ tbody tr:hover {
                         <div class="field">
                             <label>Recent Runs</label>
                             <div class="runs">
-                                <template x-for="run in visibleRuns()" :key="run.id">
+                                <template x-for="run in pagedVisibleRuns()" :key="run.id">
                                     <div class="run-row" @click="loadRunDetail(run)">
                                         <span class="badge" :class="run.status" x-text="run.status"></span>
                                         <span x-text="'#' + run.id"></span>
@@ -1425,6 +1593,14 @@ tbody tr:hover {
                                         <span x-text="duration(run.duration_ms)"></span>
                                     </div>
                                 </template>
+                                <div class="empty" x-show="visibleRuns().length === 0">No runs for this task yet</div>
+                            </div>
+                            <div class="job-run-pager" x-show="visibleRuns().length > recentRunsPerPage">
+                                <span class="selection-summary" x-text="recentRunsRangeText()"></span>
+                                <div class="toolbar">
+                                    <button class="btn" type="button" @click="pageRecentRuns(-1)" :disabled="recentRunsPage === 0">Previous</button>
+                                    <button class="btn" type="button" @click="pageRecentRuns(1)" :disabled="(recentRunsPage + 1) * recentRunsPerPage >= visibleRuns().length">Next</button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1440,10 +1616,14 @@ tbody tr:hover {
                         <div class="toolbar" x-show="activeRunDetail">
                             <span class="badge" :class="activeRunDetail?.run?.status" x-text="activeRunDetail?.run?.status"></span>
                             <span class="selection-summary" x-text="duration(activeRunDetail?.run?.duration_ms)"></span>
+                            <button class="btn" type="button" x-show="!runLogAutoScroll" @click="enableRunLogFollow()">
+                                <i data-lucide="chevrons-down"></i>
+                                Follow
+                            </button>
                         </div>
                     </div>
                     <div class="run-log-body">
-                        <pre class="run-log-output" x-show="activeRunDetail" x-text="activeRunDetail?.log_output || activeRunDetail?.run?.log_excerpt || 'No log output captured for this run.'"></pre>
+                        <pre class="run-log-output" :class="{'is-following': runLogAutoScroll}" x-ref="runLogOutput" x-show="activeRunDetail" @scroll.passive="handleRunLogScroll()" x-text="activeRunDetail?.log_output || activeRunDetail?.run?.log_excerpt || 'No log output captured for this run.'"></pre>
                         <div class="empty" x-show="!activeRunDetail">No run selected</div>
                     </div>
                 </section>
@@ -2015,6 +2195,22 @@ tbody tr:hover {
                         </div>
                     </div>
 
+                    <div class="field" x-show="canShowMetadataTags()">
+                        <label>Metadata genres and tags</label>
+                        <div class="metadata-tags" x-show="metadataTags().length">
+                            <template x-for="tag in metadataTags()" :key="`${tag.source}:${tag.name}`">
+                                <span class="tag" :class="metadataTagClass(tag)" :title="metadataTagTitle(tag)">
+                                    <span x-text="tag.name"></span>
+                                    <small x-text="metadataTagSourceLabel(tag)"></small>
+                                    <small x-show="metadataTagScore(tag)" x-text="metadataTagScore(tag)"></small>
+                                </span>
+                            </template>
+                        </div>
+                        <div class="metadata-empty muted" x-show="!metadataTags().length">
+                            No metadata genres or tags saved yet
+                        </div>
+                    </div>
+
                     <div class="field">
                         <label>Visibility</label>
                         <select class="search" style="width:100%" x-model="editorDraft.hidden">
@@ -2131,8 +2327,19 @@ function adminV2() {
         recentRuns: [],
         activeJobName: null,
         activeRunDetail: null,
-        jobsPage: 0,
-        jobsPerPage: 12,
+        recentRunsPage: 0,
+        recentRunsPerPage: 8,
+        runLogAutoScroll: true,
+        runLogRefreshing: false,
+        metadataBackfillOptions: {
+            audio_bitrate: true,
+            audio_sample_rate: true,
+            audio_bit_depth: true,
+            duration_seconds: true,
+            local_genres: true,
+            lastfm_tags: true,
+            mode: 'fill_missing'
+        },
         libraryKind: 'artists',
         librarySearch: '',
         library: { items: [], total: 0, limit: 40, offset: 0 },
@@ -2186,7 +2393,7 @@ function adminV2() {
                 this.applyRouteFromHash();
                 this.activateCurrentView(false);
             });
-            this.poller = setInterval(() => this.poll(), 6000);
+            this.poller = setInterval(() => this.poll(), 4000);
             this.icons();
         },
 
@@ -2227,7 +2434,15 @@ function adminV2() {
 
         async poll() {
             if (this.loading) return;
-            await Promise.allSettled([this.loadJobs(false), this.loadReviews(false)]);
+            if (this.activeView === 'jobs') {
+                await Promise.allSettled([
+                    this.loadJobs(false),
+                    this.activeJobName ? this.loadRunsForJob(this.activeJobName, false) : Promise.resolve(),
+                    this.refreshActiveRunDetail()
+                ]);
+            } else {
+                await Promise.allSettled([this.loadJobs(false), this.loadReviews(false)]);
+            }
         },
 
         applyRouteFromHash() {
@@ -2336,7 +2551,6 @@ function adminV2() {
             try {
                 this.jobs = await this.request(`${this.apiBase}/jobs`);
                 if (!this.activeJobName && this.jobs.length) this.activeJobName = this.jobs[0].name;
-                if (this.jobsPage * this.jobsPerPage >= this.jobs.length) this.jobsPage = 0;
             } catch (error) {
                 if (showErrors) this.showToast(error.message);
             } finally {
@@ -2578,19 +2792,49 @@ function adminV2() {
         },
 
         async runJob(job) {
+            if (!job) return;
+            if (job.launching) return;
             job.launching = true;
             try {
-                const result = await this.request(`${this.apiBase}/jobs/${encodeURIComponent(job.name)}/run`, { method: 'POST' });
+                const result = this.isMetadataBackfillJob(job)
+                    ? await this.request(`${this.apiBase}/jobs/metadata_backfill/run-options`, {
+                        method: 'POST',
+                        body: JSON.stringify(this.metadataBackfillPayload())
+                    })
+                    : await this.request(`${this.apiBase}/jobs/${encodeURIComponent(job.name)}/run`, { method: 'POST' });
                 this.showToast(`Run #${result.run_id} started`);
                 this.activeJobName = job.name;
+                this.recentRunsPage = 0;
                 await this.loadJobs(false);
                 await this.loadRunsForJob(job.name);
+                await this.loadRunDetail({ id: result.run_id, job_name: job.name }, { silent: true });
             } catch (error) {
                 this.showToast(error.message);
             } finally {
                 job.launching = false;
                 this.icons();
             }
+        },
+
+        isMetadataBackfillJob(job) {
+            return job && job.name === 'metadata_backfill';
+        },
+
+        jobHasParameterForm(job) {
+            return this.isMetadataBackfillJob(job);
+        },
+
+        metadataBackfillPayload() {
+            const options = this.metadataBackfillOptions || {};
+            return {
+                audio_bitrate: Boolean(options.audio_bitrate),
+                audio_sample_rate: Boolean(options.audio_sample_rate),
+                audio_bit_depth: Boolean(options.audio_bit_depth),
+                duration_seconds: Boolean(options.duration_seconds),
+                local_genres: Boolean(options.local_genres),
+                lastfm_tags: Boolean(options.lastfm_tags),
+                overwrite: options.mode === 'overwrite'
+            };
         },
 
         async toggleJob(job) {
@@ -2608,32 +2852,99 @@ function adminV2() {
             this.setRoute(`#jobs/${encodeURIComponent(name)}`);
             this.activeReview = null;
             this.activeRunDetail = null;
+            this.recentRunsPage = 0;
+            this.runLogAutoScroll = true;
             await this.loadRunsForJob(name);
         },
 
-        async loadRunsForJob(name) {
+        async loadRunsForJob(name, showErrors = true) {
             try {
                 const data = await this.request(`${this.apiBase}/jobs/${encodeURIComponent(name)}/runs`);
                 const job = this.jobs.find(item => item.name === name);
                 if (job) job.recent_runs = data.runs;
+                const maxPage = Math.max(0, Math.ceil(((data.runs || []).length) / this.recentRunsPerPage) - 1);
+                this.recentRunsPage = Math.min(this.recentRunsPage, maxPage);
             } catch (error) {
-                this.showToast(error.message);
+                if (showErrors) this.showToast(error.message);
             }
         },
 
-        async loadRunDetail(run) {
+        async loadRunDetail(run, options = {}) {
+            if (!run) return;
             this.activeReview = null;
+            const previousJobName = this.activeJobName;
+            const preserveScroll = Boolean(options.preserveScroll);
+            const sameRun = this.activeRunDetail && Number(this.activeRunDetail.run.id) === Number(run.id);
+            const shouldFollow = !preserveScroll || !sameRun || this.runLogAutoScroll || this.isRunLogAtBottom();
             try {
                 this.activeRunDetail = await this.request(`${this.apiBase}/jobs/${encodeURIComponent(run.job_name)}/runs/${run.id}`);
                 this.activeJobName = run.job_name;
+                if (previousJobName !== run.job_name) this.recentRunsPage = 0;
+                if (!preserveScroll || !sameRun) this.runLogAutoScroll = true;
+                this.$nextTick(() => {
+                    if (shouldFollow) this.scrollRunLogToBottom(true);
+                });
             } catch (error) {
-                this.showToast(error.message);
+                if (!options.silent) this.showToast(error.message);
             }
+        },
+
+        async refreshActiveRunDetail() {
+            if (this.runLogRefreshing || !this.activeRunDetail || this.activeView !== 'jobs') return;
+            this.runLogRefreshing = true;
+            try {
+                await this.loadRunDetail(this.activeRunDetail.run, { preserveScroll: true, silent: true });
+            } finally {
+                this.runLogRefreshing = false;
+            }
+        },
+
+        handleRunLogScroll() {
+            this.runLogAutoScroll = this.isRunLogAtBottom();
+        },
+
+        isRunLogAtBottom() {
+            const el = this.$refs.runLogOutput;
+            if (!el) return true;
+            return el.scrollHeight - el.scrollTop - el.clientHeight < 28;
+        },
+
+        scrollRunLogToBottom(force = false) {
+            const el = this.$refs.runLogOutput;
+            if (!el) return;
+            if (force || this.runLogAutoScroll) {
+                el.scrollTop = el.scrollHeight;
+                this.runLogAutoScroll = true;
+            }
+        },
+
+        enableRunLogFollow() {
+            this.runLogAutoScroll = true;
+            this.$nextTick(() => this.scrollRunLogToBottom(true));
         },
 
         visibleRuns() {
             const job = this.activeJob;
             return job ? (job.recent_runs || []) : this.recentRuns;
+        },
+
+        pagedVisibleRuns() {
+            const runs = this.visibleRuns();
+            const start = this.recentRunsPage * this.recentRunsPerPage;
+            return runs.slice(start, start + this.recentRunsPerPage);
+        },
+
+        pageRecentRuns(delta) {
+            const maxPage = Math.max(0, Math.ceil(this.visibleRuns().length / this.recentRunsPerPage) - 1);
+            this.recentRunsPage = Math.min(maxPage, Math.max(0, this.recentRunsPage + delta));
+        },
+
+        recentRunsRangeText() {
+            const total = this.visibleRuns().length;
+            if (!total) return '0 runs';
+            const start = this.recentRunsPage * this.recentRunsPerPage + 1;
+            const end = Math.min((this.recentRunsPage + 1) * this.recentRunsPerPage, total);
+            return `${start}-${end} of ${total}`;
         },
 
         get activeJob() {
@@ -2723,6 +3034,48 @@ function adminV2() {
 
         canEditLibraryImage() {
             return this.isArtistEditor() || this.isReleaseEditor();
+        },
+
+        canShowMetadataTags() {
+            return this.isArtistEditor() || this.isReleaseEditor() || this.isTrackEditor();
+        },
+
+        metadataTags() {
+            return this.editorDetail && Array.isArray(this.editorDetail.metadata_tags)
+                ? this.editorDetail.metadata_tags
+                : [];
+        },
+
+        metadataTagClass(tag) {
+            const source = String((tag && tag.source) || 'unknown').toLowerCase().replace(/_/g, '-');
+            return `metadata-${source}`;
+        },
+
+        metadataTagSourceLabel(tag) {
+            const source = String((tag && tag.source) || '').toLowerCase();
+            if (source === 'lastfm') return 'Last.fm';
+            if (source === 'file') return 'File';
+            if (source === 'review') return 'Review';
+            if (source === 'track_genre') return 'Track genre';
+            if (source === 'release_lastfm') return 'Release Last.fm';
+            if (source === 'release_file') return 'Release file';
+            if (source === 'release_review') return 'Release review';
+            return source || 'Source';
+        },
+
+        metadataTagScore(tag) {
+            const source = String((tag && tag.source) || '').toLowerCase();
+            const weight = Number((tag && tag.weight) || 0);
+            return (source === 'lastfm' || source === 'release_lastfm') && weight > 1 ? String(Math.round(weight)) : '';
+        },
+
+        metadataTagTitle(tag) {
+            if (!tag) return '';
+            const parts = [this.metadataTagSourceLabel(tag)];
+            const weight = Number(tag.weight || 0);
+            if (weight > 0) parts.push(`weight ${Math.round(weight)}`);
+            if (tag.updated_at) parts.push(tag.updated_at);
+            return parts.join(' / ');
         },
 
         editorCanSave() {
@@ -3086,21 +3439,9 @@ function adminV2() {
             return `${start}-${end} of ${this.fmt(this.library.total)}`;
         },
 
-        pagedJobs() {
-            const start = this.jobsPage * this.jobsPerPage;
-            return this.jobs.slice(start, start + this.jobsPerPage);
-        },
-
-        pageJobs(delta) {
-            const maxPage = Math.max(0, Math.ceil(this.jobs.length / this.jobsPerPage) - 1);
-            this.jobsPage = Math.min(maxPage, Math.max(0, this.jobsPage + delta));
-        },
-
-        jobsRangeText() {
-            if (!this.jobs.length) return '0 tasks';
-            const start = this.jobsPage * this.jobsPerPage + 1;
-            const end = Math.min((this.jobsPage + 1) * this.jobsPerPage, this.jobs.length);
-            return `${start}-${end} of ${this.jobs.length}`;
+        cronLabel(job) {
+            const value = job && job.cron_expression ? String(job.cron_expression).trim() : '';
+            return value || 'manual only';
         },
 
         statusCount(status) {
@@ -3118,8 +3459,7 @@ function adminV2() {
         },
 
         runChipLabel(run) {
-            const duration = run.duration_ms || run.duration_ms === 0 ? this.duration(run.duration_ms) : this.relativeDate(run.started_at);
-            return `#${run.id} · ${duration}`;
+            return `#${run.id}`;
         },
 
         runTitle(run) {

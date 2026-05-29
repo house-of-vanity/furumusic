@@ -878,6 +878,26 @@ pub async fn finalize_approved(
         .await;
     }
 
+    let approved_genre = normalized
+        .genre
+        .as_deref()
+        .or_else(|| context.get("raw_genre").and_then(|v| v.as_str()))
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if let Some(genre) = approved_genre {
+        if let Err(err) =
+            crate::jobs::metadata_backfill::save_approved_track_genres(pool, track.id_val(), genre)
+                .await
+        {
+            tracing::warn!(
+                track_id = track.id_val(),
+                genre,
+                error = %err,
+                "failed to save approved track genre metadata"
+            );
+        }
+    }
+
     // Cover art: if the release has no cover yet, try to find one
     if release.cover_file_id.is_none() {
         let source_folder = Path::new(input_path_str).parent().unwrap_or(Path::new("."));

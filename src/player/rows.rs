@@ -37,30 +37,6 @@ pub(super) struct ArtistBriefRow {
 }
 
 #[derive(sqlx::FromRow)]
-pub(super) struct TrackRow {
-    pub(super) id: i64,
-    pub(super) title: String,
-    pub(super) track_number: Option<i32>,
-    pub(super) disc_number: Option<i32>,
-    pub(super) duration_seconds: f64,
-    pub(super) cover_file_id: Option<i64>,
-    pub(super) release_cover_file_id: Option<i64>,
-    pub(super) release_id: i64,
-    pub(super) release_title: String,
-    pub(super) release_year: Option<i32>,
-    pub(super) uploader_name: String,
-    pub(super) audio_format: Option<String>,
-    pub(super) audio_bitrate: Option<i32>,
-    pub(super) audio_sample_rate: Option<i32>,
-    pub(super) audio_bit_depth: Option<i32>,
-    pub(super) file_size_bytes: Option<i64>,
-    pub(super) lastfm_listeners: Option<i64>,
-    pub(super) lastfm_playcount: Option<i64>,
-    pub(super) lastfm_rating: Option<f64>,
-    pub(super) lastfm_updated_at: Option<String>,
-}
-
-#[derive(sqlx::FromRow)]
 pub(super) struct TrackArtistRow {
     pub(super) track_id: i64,
     pub(super) artist_id: i64,
@@ -276,14 +252,31 @@ pub(super) struct ReleaseUploaderRow {
 }
 
 #[derive(sqlx::FromRow)]
-pub(super) struct PlayHistoryRow {
-    pub(super) id: i64,
-    pub(super) track_id: i64,
-    pub(super) track_title: String,
-    pub(super) release_title: Option<String>,
+pub(super) struct PlayHistoryTrackRow {
+    pub(super) history_id: i64,
     pub(super) played_at: String,
     pub(super) duration_listened: Option<i32>,
     pub(super) completed: bool,
+    pub(super) id: i64,
+    pub(super) title: String,
+    pub(super) track_number: Option<i32>,
+    pub(super) disc_number: Option<i32>,
+    pub(super) duration_seconds: f64,
+    pub(super) cover_file_id: Option<i64>,
+    pub(super) release_cover_file_id: Option<i64>,
+    pub(super) release_id: i64,
+    pub(super) release_title: String,
+    pub(super) release_year: Option<i32>,
+    pub(super) uploader_name: String,
+    pub(super) audio_format: Option<String>,
+    pub(super) audio_bitrate: Option<i32>,
+    pub(super) audio_sample_rate: Option<i32>,
+    pub(super) audio_bit_depth: Option<i32>,
+    pub(super) file_size_bytes: Option<i64>,
+    pub(super) lastfm_listeners: Option<i64>,
+    pub(super) lastfm_playcount: Option<i64>,
+    pub(super) lastfm_rating: Option<f64>,
+    pub(super) lastfm_updated_at: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]

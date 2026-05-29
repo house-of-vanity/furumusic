@@ -17,7 +17,7 @@ use crate::agent;
 use crate::auth::{self, AuthenticatedUser, Role};
 use crate::config::{AppConfig, ConfigEntry, ConfigSources};
 use crate::i18n::{I18n, Translations};
-use crate::scheduler::{JobRegistry, ScheduledJob};
+use crate::scheduler::{self, JobRegistry, JobRun, ScheduledJob};
 
 #[derive(Debug, Template)]
 #[template(path = "admin/v2.html")]
@@ -59,6 +59,24 @@ pub(super) struct BulkLibraryRequest {
     mode: Option<String>,
     ids: Option<Vec<i64>>,
     filter: Option<LibraryFilter>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MetadataBackfillRunRequest {
+    #[serde(default = "default_true")]
+    audio_bitrate: bool,
+    #[serde(default = "default_true")]
+    audio_sample_rate: bool,
+    #[serde(default = "default_true")]
+    audio_bit_depth: bool,
+    #[serde(default = "default_true")]
+    duration_seconds: bool,
+    #[serde(default = "default_true")]
+    local_genres: bool,
+    #[serde(default = "default_true")]
+    lastfm_tags: bool,
+    #[serde(default)]
+    overwrite: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -159,6 +177,14 @@ struct StatusCountDto {
 struct TagDto {
     label: String,
     kind: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct MetadataTagDto {
+    name: String,
+    source: String,
+    weight: f64,
+    updated_at: String,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -399,6 +425,7 @@ struct LibraryItemDetailDto {
     artists: Vec<ArtistOptionDto>,
     releases: Vec<ReleaseOptionDto>,
     available_covers: Vec<AvailableCoverDto>,
+    metadata_tags: Vec<MetadataTagDto>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -887,6 +914,68 @@ pub async fn run_job(
         Ok(run_id) => Json(JobRunStartedDto { ok: true, run_id }).into_response(),
         Err(e) => Ok(json_error(StatusCode::BAD_REQUEST, &e.to_string())),
     }
+}
+
+pub async fn run_metadata_backfill(
+    session: Session,
+    db: Database,
+    pool: &PgPool,
+    Json(body): Json<MetadataBackfillRunRequest>,
+) -> cot::Result<cot::response::Response> {
+    if let Err(response) = require_admin_json(&session, &db).await {
+        return Ok(response);
+    }
+
+    let options = crate::jobs::metadata_backfill::MetadataBackfillOptions {
+        audio_bitrate: body.audio_bitrate,
+        audio_sample_rate: body.audio_sample_rate,
+        audio_bit_depth: body.audio_bit_depth,
+        duration_seconds: body.duration_seconds,
+        local_genres: body.local_genres,
+        lastfm_tags: body.lastfm_tags,
+        overwrite: body.overwrite,
+    };
+    if !options.any_field() {
+        return Ok(json_error(
+            StatusCode::BAD_REQUEST,
+            "select at least one metadata field",
+        ));
+    }
+
+    let mut run = JobRun::create_running(&db, "metadata_backfill", "manual")
+        .await
+        .map_err(|e| cot::Error::internal(format!("failed to create job run: {e}")))?;
+    let run_id = run.id_val();
+    let (live_config, _) = AppConfig::load_with_db(&db).await;
+    let db_for_task = db.clone();
+    let pool_for_task = pool.clone();
+
+    tokio::spawn(async move {
+        let start = std::time::Instant::now();
+        let ctx = scheduler::JobContext {
+            config: std::sync::Arc::new(live_config),
+            db: db_for_task.clone(),
+            pool: pool_for_task.clone(),
+            run_id,
+            registry: std::sync::Arc::new(JobRegistry::new()),
+        };
+        let mut log = scheduler::JobLog::with_live_flush(pool_for_task.clone(), run_id);
+        let result =
+            crate::jobs::metadata_backfill::run_with_options(&ctx, &mut log, options).await;
+        let duration_ms = start.elapsed().as_millis() as i64;
+        match result {
+            Ok(()) => {
+                let _ = run.set_completed(&db_for_task, duration_ms, &log.output()).await;
+            }
+            Err(err) => {
+                let _ = run
+                    .set_failed(&db_for_task, duration_ms, &log.output(), &err.to_string())
+                    .await;
+            }
+        }
+    });
+
+    Json(JobRunStartedDto { ok: true, run_id }).into_response()
 }
 
 pub async fn toggle_job(
@@ -1974,6 +2063,7 @@ async fn load_library_item_detail(
         artists: Vec::new(),
         releases: Vec::new(),
         available_covers: Vec::new(),
+        metadata_tags: load_metadata_tags(pool, kind, item.id).await?,
         item,
     };
 
@@ -2042,6 +2132,97 @@ async fn load_library_item_detail(
     }
 
     Ok(detail)
+}
+
+async fn load_metadata_tags(
+    pool: &PgPool,
+    kind: &str,
+    id: i64,
+) -> anyhow::Result<Vec<MetadataTagDto>> {
+    let entity_kind = match kind {
+        "artists" => "artist",
+        "releases" => "release",
+        "tracks" => "track",
+        _ => return Ok(Vec::new()),
+    };
+    let rows = sqlx::query_as::<_, (String, String, f64, String)>(
+        r#"SELECT name, source, weight, updated_at
+           FROM (
+               SELECT g.name::text AS name,
+                      egt.source::text AS source,
+                      egt.weight,
+                      egt.updated_at::text AS updated_at
+                 FROM furumusic__entity_genre_tag egt
+                 JOIN furumusic__genre g ON g.id = egt.genre_id
+                WHERE egt.entity_kind = $1 AND egt.entity_id = $2
+               UNION ALL
+               SELECT g.name::text AS name,
+                      'track_genre'::text AS source,
+                      1.0::double precision AS weight,
+                      ''::text AS updated_at
+                 FROM furumusic__track_genre tg
+                 JOIN furumusic__genre g ON g.id = tg.genre_id
+                WHERE $1 = 'track'
+                  AND tg.track_id = $2
+                  AND NOT EXISTS (
+                      SELECT 1
+                        FROM furumusic__entity_genre_tag egt
+                       WHERE egt.entity_kind = 'track'
+                         AND egt.entity_id = tg.track_id
+                         AND egt.genre_id = tg.genre_id
+                  )
+               UNION ALL
+               SELECT g.name::text AS name,
+                      ('release_' || egt.source)::text AS source,
+                      egt.weight,
+                      egt.updated_at::text AS updated_at
+                 FROM furumusic__track t
+                 JOIN furumusic__entity_genre_tag egt
+                   ON egt.entity_kind = 'release'
+                  AND egt.entity_id = t.release_id
+                 JOIN furumusic__genre g ON g.id = egt.genre_id
+                WHERE $1 = 'track'
+                  AND t.id = $2
+                  AND NOT EXISTS (
+                      SELECT 1
+                        FROM furumusic__entity_genre_tag direct_egt
+                       WHERE direct_egt.entity_kind = 'track'
+                         AND direct_egt.entity_id = t.id
+                         AND direct_egt.genre_id = egt.genre_id
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1
+                        FROM furumusic__track_genre tg
+                       WHERE tg.track_id = t.id
+                         AND tg.genre_id = egt.genre_id
+                  )
+           ) tags
+           ORDER BY CASE source
+                        WHEN 'lastfm' THEN 0
+                        WHEN 'release_lastfm' THEN 1
+                        WHEN 'review' THEN 2
+                        WHEN 'release_review' THEN 3
+                        WHEN 'file' THEN 4
+                        WHEN 'release_file' THEN 5
+                        WHEN 'track_genre' THEN 6
+                        ELSE 7
+                    END,
+                    weight DESC,
+                    name ASC"#,
+    )
+    .bind(entity_kind)
+    .bind(id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(name, source, weight, updated_at)| MetadataTagDto {
+            name,
+            source,
+            weight,
+            updated_at,
+        })
+        .collect())
 }
 
 async fn load_artist_options(pool: &PgPool) -> anyhow::Result<Vec<ArtistOptionDto>> {
@@ -2653,6 +2834,10 @@ fn tag(label: impl Into<String>, kind: impl Into<String>) -> TagDto {
         label: label.into(),
         kind: kind.into(),
     }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn optional_job_time(value: &str) -> Option<String> {

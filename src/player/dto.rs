@@ -36,6 +36,7 @@ pub(super) struct ArtistDetail {
     pub(super) image_url: Option<String>,
     pub(super) total_track_count: i64,
     pub(super) total_play_count: i64,
+    pub(super) top_tracks: Vec<TrackItem>,
     pub(super) releases: Vec<ReleaseCard>,
     pub(super) featured_tracks: Vec<ArtistAppearanceTrack>,
 }
@@ -463,6 +464,7 @@ pub(super) struct PlayHistoryItem {
     pub(super) track_id: i64,
     pub(super) track_title: String,
     pub(super) release_title: Option<String>,
+    pub(super) track: TrackItem,
     pub(super) played_at: String,
     pub(super) duration_listened: Option<i32>,
     pub(super) completed: bool,

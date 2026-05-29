@@ -911,6 +911,12 @@ button.user-stat:hover {
     color: #000;
 }
 
+.release-action-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+    filter: grayscale(0.4);
+}
+
 .release-action-btn.secondary {
     background: var(--bg-active);
     color: var(--text-primary);
@@ -919,6 +925,29 @@ button.user-stat:hover {
 .release-action-btn.followed {
     background: var(--accent);
     color: #000;
+}
+
+.artist-actions {
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.artist-listen-action {
+    min-width: 112px;
+    justify-content: center;
+}
+
+.artist-follow-action,
+.artist-follow-action.followed {
+    background: var(--bg-active);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+}
+
+.artist-follow-action:hover,
+.artist-follow-action.followed:hover {
+    color: var(--text-primary);
+    border-color: var(--text-subdued);
 }
 
 .artist-follow-card-btn {
@@ -2212,6 +2241,46 @@ button.user-stat:hover {
     margin: 0;
 }
 
+.info-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: -4px 0 12px;
+    flex-wrap: wrap;
+    position: relative;
+    z-index: 1;
+}
+
+.info-action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 38px;
+    padding: 9px 15px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #061307;
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+    box-shadow: 0 8px 22px rgba(29, 185, 84, 0.2);
+    transition: background 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+
+.info-action-btn:hover {
+    background: var(--accent-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 10px 26px rgba(29, 185, 84, 0.28);
+}
+
+.info-action-btn:disabled {
+    opacity: 0.7;
+    cursor: default;
+    transform: none;
+    box-shadow: none;
+}
+
 .info-modal-body {
     margin: 0;
     padding: 14px;
@@ -2714,36 +2783,87 @@ button.user-stat:hover {
 }
 
 .history-modal {
-    width: min(620px, calc(100vw - 32px));
-    max-width: 620px;
+    width: min(980px, calc(100vw - 32px));
+    max-width: 980px;
+}
+
+.history-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
 }
 
 .history-list {
     margin-top: 12px;
     overflow-y: auto;
     max-height: min(54vh, 460px);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-top: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-color);
 }
 
-.history-row {
+.history-table-head,
+.history-row.track-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px 12px;
-    padding: 10px 12px;
+    grid-template-columns: 48px minmax(0, 1fr) 144px 154px 72px;
+    align-items: center;
+    gap: 10px;
+}
+
+.history-table-head {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    padding: 8px 12px;
+    background: var(--bg-elevated);
+    color: var(--text-subdued);
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.history-row.track-row {
+    padding: 8px 12px;
+    border-radius: 0;
     border-bottom: 1px solid var(--border-color);
 }
 
 .history-row:last-child { border-bottom: 0; }
 
-.history-title {
-    min-width: 0;
-    color: var(--text-primary);
-    font-size: 13px;
-    font-weight: 700;
+.history-cover {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: 0;
+    border-radius: 5px;
+    background: var(--bg-active);
+    color: var(--text-subdued);
+    overflow: hidden;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.history-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.history-cover svg {
+    width: 21px;
+    height: 21px;
+}
+
+.history-release-line {
+    margin-top: 2px;
+    color: var(--text-subdued);
+    font-size: 12px;
+    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 .history-release,
@@ -2751,13 +2871,15 @@ button.user-stat:hover {
 .history-duration {
     color: var(--text-subdued);
     font-size: 12px;
+    line-height: 1.35;
 }
 
 .history-date,
 .history-duration {
-    text-align: right;
     white-space: nowrap;
 }
+
+.history-duration { text-align: right; }
 
 .history-pager {
     display: flex;
@@ -3678,6 +3800,44 @@ button.user-stat:hover {
         justify-content: flex-end;
     }
 
+    .history-table-head,
+    .history-row.track-row {
+        grid-template-columns: 44px minmax(0, 1fr) auto;
+        gap: 8px;
+    }
+
+    .history-table-head {
+        display: none;
+    }
+
+    .history-row.track-row {
+        padding: 9px 10px;
+    }
+
+    .history-row .history-cover {
+        grid-row: 1 / span 2;
+    }
+
+    .history-row .track-info {
+        grid-column: 2;
+        grid-row: 1;
+    }
+
+    .history-row .history-date {
+        grid-column: 2;
+        grid-row: 2;
+        font-size: 11px;
+    }
+
+    .history-row .track-actions {
+        grid-column: 3;
+        grid-row: 1 / span 2;
+    }
+
+    .history-duration {
+        display: none;
+    }
+
     .queue-panel {
         position: fixed;
         left: 12px;
@@ -4476,6 +4636,42 @@ button.user-stat:hover {
     .history-modal {
         width: min(400px, calc(100vw - 24px));
         max-width: 400px;
+    }
+
+    .history-list {
+        max-height: min(60dvh, 520px);
+    }
+
+    .history-row.track-row {
+        grid-template-columns: 42px minmax(0, 1fr) auto;
+        gap: 8px;
+        padding: 9px 8px;
+    }
+
+    .history-cover {
+        width: 38px;
+        height: 38px;
+    }
+
+    .history-row .track-actions {
+        gap: 0;
+    }
+
+    .history-row .track-actions .track-action-btn,
+    .history-row .track-actions .like-btn {
+        width: 26px;
+        height: 26px;
+        flex-basis: 26px;
+        padding: 5px;
+    }
+
+    .history-row .track-actions .popularity-info-btn {
+        min-width: 24px;
+        padding: 0 2px;
+    }
+
+    .history-release-line {
+        display: none;
     }
 
     .info-table th,

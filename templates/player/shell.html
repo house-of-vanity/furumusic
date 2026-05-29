@@ -570,8 +570,17 @@
                                 <span>•</span>
                                 <span x-text="$store.library.currentArtist.total_play_count + ' {{ t.player_plays_count }}'"></span>
                             </div>
-                            <div class="release-actions">
-                                <button class="release-action-btn secondary"
+                            <div class="release-actions artist-actions">
+                                <button class="release-action-btn primary artist-listen-action"
+                                        :disabled="!($store.library.currentArtist.top_tracks && $store.library.currentArtist.top_tracks.length)"
+                                        @click="$store.library.playArtistTopTracks()"
+                                        title="{{ t.player_listen_artist }}">
+                                    <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                                        <path d="M8 5v14l11-7z"/>
+                                    </svg>
+                                    <span>{{ t.player_listen }}</span>
+                                </button>
+                                <button class="release-action-btn secondary artist-follow-action"
                                         :class="{ followed: $store.follows.has($store.library.currentArtist.id) }"
                                         @click="$store.follows.toggle($store.library.currentArtist.id)"
                                         :title="$store.follows.has($store.library.currentArtist.id) ? '{{ t.player_unfollow_artist }}' : '{{ t.player_follow_artist }}'">

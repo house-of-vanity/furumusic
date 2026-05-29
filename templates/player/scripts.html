@@ -42,6 +42,8 @@ const T = {
     lastfmDisconnectConfirm: "{{ t.player_lastfm_disconnect_confirm }}",
     lastfmConnectFailed: "{{ t.player_lastfm_connect_failed }}",
     lastfmDisconnectFailed: "{{ t.player_lastfm_disconnect_failed }}",
+    startRadio: "{{ t.player_start_radio }}",
+    radioFailed: "{{ t.player_radio_failed }}",
     connectionLost: "{{ t.player_connection_lost }}",
     connectionLostDetail: "{{ t.player_connection_lost_detail }}",
     trackWord: "{{ t.player_tracks_count }}",
@@ -304,26 +306,45 @@ document.addEventListener('alpine:init', () => {
 
     Alpine.store('info', {
         modal: null,
-        open(title, body) {
+        open(title, body, actions = []) {
             if (Array.isArray(body)) {
-                this.openRows(title, body);
+                this.openRows(title, body, actions);
                 return;
             }
             this.modal = {
                 title: title || T.info,
                 body: body || T.noDetails,
                 rows: null,
+                actions: actions || [],
             };
         },
-        openRows(title, rows) {
+        openRows(title, rows, actions = []) {
             this.modal = {
                 title: title || T.info,
                 body: '',
                 rows: (rows || []).filter(row => row && ((row.value !== undefined && row.value !== null && row.value !== '') || (row.links && row.links.length))),
+                actions: actions || [],
             };
         },
         close() {
             this.modal = null;
+        },
+        async runAction(actionOrIndex) {
+            const index = Number.isInteger(actionOrIndex) ? actionOrIndex : this.modal?.actions?.indexOf(actionOrIndex);
+            const action = index >= 0 ? this.modal?.actions?.[index] : actionOrIndex;
+            if (!action || action.busy === true || typeof action.run !== 'function') return;
+            if (index >= 0 && this.modal?.actions) {
+                this.modal.actions[index] = { ...action, busy: true };
+                this.modal.actions = [...this.modal.actions];
+            }
+            try {
+                await action.run();
+            } finally {
+                if (index >= 0 && this.modal?.actions?.[index]) {
+                    this.modal.actions[index] = { ...this.modal.actions[index], busy: false };
+                    this.modal.actions = [...this.modal.actions];
+                }
+            }
         },
         navigate(link) {
             if (!link || !link.id) return;
@@ -486,6 +507,16 @@ document.addEventListener('alpine:init', () => {
 
         totalPages() {
             return Math.max(1, Math.ceil(this.total / this.perPage));
+        },
+
+        tracks() {
+            return (this.items || []).map(item => item.track).filter(Boolean);
+        },
+
+        playFrom(index) {
+            const tracks = this.tracks();
+            if (!tracks.length || index < 0 || index >= tracks.length) return;
+            Alpine.store('queue').playRelease(tracks, index);
         },
 
         async load(page) {
@@ -2117,8 +2148,25 @@ document.addEventListener('alpine:init', () => {
             return `${T.lastfmRating}: ${Math.round(value)}\n${this.trackInfo(track)}`;
         },
 
+        async startRadio(kind, id) {
+            if (!kind || !id) return;
+            try {
+                const res = await fetch(`/api/player/radio/${encodeURIComponent(kind)}/${encodeURIComponent(id)}`);
+                if (!res.ok) throw new Error('radio failed');
+                const tracks = await res.json();
+                if (!Array.isArray(tracks) || tracks.length === 0) throw new Error('radio empty');
+                Alpine.store('queue').playRelease(tracks, 0);
+                Alpine.store('info').close();
+            } catch (err) {
+                console.warn(err);
+                window.alert(T.radioFailed);
+            }
+        },
+
         openTrackInfo(track) {
-            Alpine.store('info').openRows(T.trackInfoTitle, this.trackInfoRows(track));
+            Alpine.store('info').openRows(T.trackInfoTitle, this.trackInfoRows(track), [
+                { label: T.startRadio, run: () => this.startRadio('track', track?.id) },
+            ]);
         },
 
         uploadersInfo(uploaders) {
@@ -2142,7 +2190,9 @@ document.addEventListener('alpine:init', () => {
         },
 
         openReleaseInfo(release) {
-            Alpine.store('info').openRows(T.releaseInfoTitle, this.releaseInfoRows(release));
+            Alpine.store('info').openRows(T.releaseInfoTitle, this.releaseInfoRows(release), [
+                { label: T.startRadio, run: () => this.startRadio('release', release?.id) },
+            ]);
         },
 
         infoLinks(items, type) {
@@ -2228,6 +2278,12 @@ document.addEventListener('alpine:init', () => {
                 rows.push({ label: T.lastfmRating, value: T.lastfmNotLoaded });
             }
             return rows;
+        },
+
+        playArtistTopTracks() {
+            const tracks = this.currentArtist?.top_tracks || [];
+            if (!tracks.length) return;
+            Alpine.store('queue').playRelease(tracks, 0);
         },
 
         async openRelease(id, options = {}) {

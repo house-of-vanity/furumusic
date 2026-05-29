@@ -346,6 +346,11 @@ translations! {
     player_lastfm_connect_failed: "Could not open Last.fm connection" , "Не удалось открыть подключение Last.fm";
     player_lastfm_disconnect_failed: "Could not disconnect Last.fm" , "Не удалось отвязать Last.fm";
     player_play:             "Play"                            , "Играть";
+    player_listen:           "Listen"                          , "Слушать";
+    player_listen_artist:    "Listen to artist"                , "Слушать артиста";
+    player_start_radio:      "Start radio"                     , "Запустить радио";
+    player_radio_failed:     "Could not start radio"           , "Не удалось запустить радио";
+    player_played_at:        "Played"                          , "Прослушано";
     player_like:             "Like"                            , "Лайк";
     player_add_to_queue:     "Add to queue"                    , "Добавить в очередь";
     player_add_to_end_queue: "Add to end of queue"             , "Добавить в конец очереди";
