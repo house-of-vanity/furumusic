@@ -2325,6 +2325,8 @@ function adminV2() {
         ],
         jobs: [],
         recentRuns: [],
+        activeJobRuns: [],
+        activeJobRunsName: null,
         activeJobName: null,
         activeRunDetail: null,
         recentRunsPage: 0,
@@ -2456,7 +2458,15 @@ function adminV2() {
                 this.reviewFilter.status = nextStatus;
             } else if (view === 'jobs') {
                 this.activeView = 'jobs';
-                if (parts[1]) this.activeJobName = decodeURIComponent(parts[1]);
+                if (parts[1]) {
+                    const nextJobName = decodeURIComponent(parts[1]);
+                    if (this.activeJobName !== nextJobName) {
+                        this.activeJobRuns = [];
+                        this.activeJobRunsName = nextJobName;
+                        this.recentRunsPage = 0;
+                    }
+                    this.activeJobName = nextJobName;
+                }
             } else if (view === 'library') {
                 const nextKind = ['artists', 'releases', 'tracks', 'playlists'].includes(parts[1]) ? parts[1] : 'artists';
                 if (this.libraryKind !== nextKind) this.clearLibrarySelection();
@@ -2510,7 +2520,14 @@ function adminV2() {
 
         openJobs(name = this.activeJobName) {
             this.activeView = 'jobs';
-            if (name) this.activeJobName = name;
+            if (name && this.activeJobName !== name) {
+                this.activeJobRuns = [];
+                this.activeJobRunsName = name;
+                this.recentRunsPage = 0;
+                this.activeJobName = name;
+            } else if (name) {
+                this.activeJobName = name;
+            }
             this.setRoute(this.activeJobName ? `#jobs/${encodeURIComponent(this.activeJobName)}` : '#jobs');
             this.loadJobs();
             if (this.activeJobName) this.loadRunsForJob(this.activeJobName);
@@ -2852,6 +2869,8 @@ function adminV2() {
             this.setRoute(`#jobs/${encodeURIComponent(name)}`);
             this.activeReview = null;
             this.activeRunDetail = null;
+            this.activeJobRuns = [];
+            this.activeJobRunsName = name;
             this.recentRunsPage = 0;
             this.runLogAutoScroll = true;
             await this.loadRunsForJob(name);
@@ -2860,10 +2879,15 @@ function adminV2() {
         async loadRunsForJob(name, showErrors = true) {
             try {
                 const data = await this.request(`${this.apiBase}/jobs/${encodeURIComponent(name)}/runs`);
+                const runs = data.runs || [];
                 const job = this.jobs.find(item => item.name === name);
-                if (job) job.recent_runs = data.runs;
-                const maxPage = Math.max(0, Math.ceil(((data.runs || []).length) / this.recentRunsPerPage) - 1);
-                this.recentRunsPage = Math.min(this.recentRunsPage, maxPage);
+                if (job) job.recent_runs = runs;
+                if (this.activeJobName === name) {
+                    this.activeJobRuns = runs;
+                    this.activeJobRunsName = name;
+                    const maxPage = Math.max(0, Math.ceil(runs.length / this.recentRunsPerPage) - 1);
+                    this.recentRunsPage = Math.min(this.recentRunsPage, maxPage);
+                }
             } catch (error) {
                 if (showErrors) this.showToast(error.message);
             }
@@ -2924,6 +2948,9 @@ function adminV2() {
         },
 
         visibleRuns() {
+            if (this.activeJobName && this.activeJobRunsName === this.activeJobName) {
+                return this.activeJobRuns || [];
+            }
             const job = this.activeJob;
             return job ? (job.recent_runs || []) : this.recentRuns;
         },
