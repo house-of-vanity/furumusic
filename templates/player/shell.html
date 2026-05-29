@@ -892,7 +892,9 @@
                 </template>
                 <template x-for="(track, idx) in $store.queue.tracks" :key="idx + '-' + track.id">
                     <div class="queue-track"
-                         :class="{ active: idx === $store.queue.currentIndex, dragging: $store.queue._dragIdx === idx }"
+                         :data-queue-index="idx"
+                         :class="{ active: idx === $store.queue.currentIndex, dragging: $store.queue._dragIdx === idx, 'foreign-jam-track': $store.queue.isForeignJamTrack(track) }"
+                         :style="$store.queue.isForeignJamTrack(track) ? $store.queue.contributorStyle(track) : ''"
                          @click="$store.queue.playFromIndex(idx)"
                          draggable="true"
                          @dragstart="$store.queue._dragIdx = idx; $event.dataTransfer.effectAllowed = 'move'"
@@ -900,7 +902,10 @@
                          @dragover.prevent="$event.dataTransfer.dropEffect = 'move'; $event.currentTarget.classList.add('drag-over')"
                          @dragleave="$event.currentTarget.classList.remove('drag-over')"
                          @drop.prevent="$event.currentTarget.classList.remove('drag-over'); if ($store.queue._dragIdx !== null) { $store.queue.moveTrack($store.queue._dragIdx, idx); $store.queue._dragIdx = null; }">
-                        <div class="queue-drag-handle" @mousedown.stop>
+                        <div class="queue-drag-handle"
+                             @mousedown.stop
+                             @click.stop
+                             @pointerdown.stop="$store.queue.startPointerReorder($event, idx)">
                             <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>
                         </div>
                         <div class="queue-track-cover">
@@ -1072,6 +1077,13 @@
                         <path d="M8 20h8"/>
                         <path d="M12 16v4"/>
                     </svg>
+                    <span class="jam-member-squares"
+                          x-show="$store.devices.activeJamMembers().length > 0"
+                          x-cloak>
+                        <template x-for="member in $store.devices.activeJamMembers().slice(0, 8)" :key="'device-jam-member-' + member.user_id">
+                            <span class="jam-member-square" :style="$store.devices.userColorStyle(member.user_id, member.name)"></span>
+                        </template>
+                    </span>
                 </button>
                 <div class="device-popover" x-show="$store.devices.open" x-transition x-cloak>
                     <template x-for="device in $store.devices.devices" :key="device.id">
@@ -1110,7 +1122,7 @@
                     <template x-for="jam in $store.devices.jams" :key="jam.id">
                         <button class="device-row jam-row"
                                 :class="{ active: jam.is_active, pending: jam.is_pending }"
-                                @click="$store.devices.selectJam(jam)">
+                                @click="$store.devices.handleJamRowClick(jam)">
                             <span class="device-row-icon">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <circle cx="8" cy="8" r="3"/>
@@ -1131,7 +1143,7 @@
                             </span>
                         </button>
                     </template>
-                    <button class="device-row start-jam-row" @click="$store.devices.openJamPanel()">
+                    <button class="device-row start-jam-row" x-show="!$store.devices.hasJoinedJam()" @click="$store.devices.openJamPanel()">
                         <span class="device-row-icon">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M12 5v14"/>
@@ -1144,6 +1156,7 @@
                         </span>
                     </button>
                     <div class="jam-create-panel" x-show="$store.devices.jamPanelOpen" x-transition x-cloak>
+                        <div class="jam-panel-title" x-text="$store.devices.jamPanelMode === 'manage' ? 'Invite listeners' : 'Start Jam'"></div>
                         <div class="jam-selected-users" x-show="$store.devices.jamSelectedUsers.length > 0">
                             <template x-for="user in $store.devices.jamSelectedUsers" :key="user.id">
                                 <button class="jam-user-chip" @click="$store.devices.removeJamInvitee(user.id)">
@@ -1165,7 +1178,15 @@
                                 </button>
                             </template>
                         </div>
-                        <button class="jam-create-btn" @click="$store.devices.createJam()">Create Jam</button>
+                        <div class="jam-panel-actions">
+                            <button class="jam-create-btn"
+                                    :disabled="$store.devices.jamSelectedUsers.length === 0 && $store.devices.jamPanelMode === 'manage'"
+                                    @click="$store.devices.submitJamPanel()"
+                                    x-text="$store.devices.jamPanelMode === 'manage' ? 'Invite' : 'Create Jam'"></button>
+                            <button class="jam-leave-btn"
+                                    x-show="$store.devices.jamPanelMode === 'manage'"
+                                    @click="$store.devices.leaveJam($store.devices.jamPanelJamId)">Leave</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1176,7 +1197,11 @@
                 <div class="mobile-expanded-queue-empty">{{ t.player_queue_empty }}</div>
             </template>
             <template x-for="(track, idx) in $store.queue.upcoming()" :key="'mobile-expanded-queue-' + track.id + '-' + idx">
-                <button class="mobile-expanded-queue-row" type="button" @click="$store.queue.playFromIndex($store.queue.currentIndex + idx + 1)">
+                <button class="mobile-expanded-queue-row"
+                        :class="{ 'foreign-jam-track': $store.queue.isForeignJamTrack(track) }"
+                        :style="$store.queue.isForeignJamTrack(track) ? $store.queue.contributorStyle(track) : ''"
+                        type="button"
+                        @click="$store.queue.playFromIndex($store.queue.currentIndex + idx + 1)">
                     <div class="mobile-expanded-queue-cover">
                         <template x-if="track.cover_url">
                             <img :src="track.cover_url" :alt="track.title" loading="lazy">

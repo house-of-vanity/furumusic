@@ -1210,6 +1210,8 @@ document.addEventListener('alpine:init', () => {
         currentJamId: null,
         open: false,
         jamPanelOpen: false,
+        jamPanelMode: 'create',
+        jamPanelJamId: null,
         jamQuery: '',
         jamUsers: [],
         jamSelectedUsers: [],
@@ -1309,6 +1311,32 @@ document.addEventListener('alpine:init', () => {
             return this.currentJamId ? this.jams.find(jam => jam.id === this.currentJamId) : null;
         },
 
+        hasJoinedJam() {
+            return this.jams.some(jam => jam.is_member);
+        },
+
+        activeJamMembers() {
+            const jam = this.selectedJam();
+            return (jam?.members || []).filter(member => member.is_joined && Number(member.last_seen_ms || 0) <= 45000);
+        },
+
+        jamMemberIds(jamId = this.jamPanelJamId || this.currentJamId) {
+            const jam = this.jams.find(item => item.id === jamId);
+            return new Set((jam?.members || []).map(member => Number(member.user_id)));
+        },
+
+        userColorStyle(userId, name = '') {
+            const palette = ['#4cc9f0', '#f72585', '#f9c74f', '#90be6d', '#f8961e', '#b5179e', '#43aa8b', '#577590'];
+            const raw = String(userId || name || '');
+            let hash = 0;
+            for (let i = 0; i < raw.length; i++) hash = ((hash * 31) + raw.charCodeAt(i)) >>> 0;
+            const hex = palette[hash % palette.length];
+            const r = parseInt(hex.slice(1, 3), 16);
+            const g = parseInt(hex.slice(3, 5), 16);
+            const b = parseInt(hex.slice(5, 7), 16);
+            return `--jam-contributor-color:${hex};--jam-contributor-bg:rgba(${r},${g},${b},0.13);--jam-contributor-bg-active:rgba(${r},${g},${b},0.2)`;
+        },
+
         isControllingRemoteJam() {
             const jam = this.selectedJam();
             return !!jam && !jam.is_owner;
@@ -1383,8 +1411,37 @@ document.addEventListener('alpine:init', () => {
         },
 
         openJamPanel() {
+            if (this.hasJoinedJam()) return;
+            this.jamPanelMode = 'create';
+            this.jamPanelJamId = null;
+            this.jamSelectedUsers = [];
+            this.jamUsers = [];
+            this.jamQuery = '';
             this.jamPanelOpen = !this.jamPanelOpen;
             if (this.jamPanelOpen && this.jamQuery.trim()) this.searchJamUsers();
+        },
+
+        openJamManagePanel(jam) {
+            if (!jam?.is_member) return;
+            if (this.jamPanelOpen && this.jamPanelMode === 'manage' && this.jamPanelJamId === jam.id) {
+                this.jamPanelOpen = false;
+                return;
+            }
+            this.jamPanelMode = 'manage';
+            this.jamPanelJamId = jam.id;
+            this.jamSelectedUsers = [];
+            this.jamUsers = [];
+            this.jamQuery = '';
+            this.jamPanelOpen = true;
+        },
+
+        handleJamRowClick(jam) {
+            if (!jam) return;
+            if (jam.is_active && jam.is_member) {
+                this.openJamManagePanel(jam);
+                return;
+            }
+            this.selectJam(jam);
         },
 
         queueJamSearch() {
@@ -1403,7 +1460,8 @@ document.addEventListener('alpine:init', () => {
                 const res = await fetch('/api/player/jams/users?q=' + encodeURIComponent(query));
                 if (!res.ok) return;
                 const selected = new Set(this.jamSelectedUsers.map(user => user.id));
-                this.jamUsers = (await res.json()).filter(user => !selected.has(user.id));
+                const existing = this.jamMemberIds();
+                this.jamUsers = (await res.json()).filter(user => !selected.has(user.id) && !existing.has(Number(user.id)));
             } catch {
             } finally {
                 this.jamSearching = false;
@@ -1421,7 +1479,13 @@ document.addEventListener('alpine:init', () => {
             this.jamSelectedUsers = this.jamSelectedUsers.filter(user => user.id !== userId);
         },
 
+        submitJamPanel() {
+            if (this.jamPanelMode === 'manage') this.inviteToJam();
+            else this.createJam();
+        },
+
         async createJam() {
+            if (this.hasJoinedJam()) return;
             try {
                 const res = await fetch('/api/player/jams', {
                     method: 'POST',
@@ -1439,6 +1503,26 @@ document.addEventListener('alpine:init', () => {
                 this.jamUsers = [];
                 this.jamSelectedUsers = [];
                 this.open = false;
+            } catch {}
+        },
+
+        async inviteToJam() {
+            if (!this.jamPanelJamId || this.jamSelectedUsers.length === 0) return;
+            try {
+                const res = await fetch('/api/player/jams/invite', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        jam_id: this.jamPanelJamId,
+                        device_id: this.id,
+                        invitee_user_ids: this.jamSelectedUsers.map(user => user.id),
+                    }),
+                });
+                if (!res.ok) return;
+                this._apply(await res.json());
+                this.jamQuery = '';
+                this.jamUsers = [];
+                this.jamSelectedUsers = [];
             } catch {}
         },
 
@@ -1491,6 +1575,8 @@ document.addEventListener('alpine:init', () => {
 
         clearJamSelection() {
             this.currentJamId = null;
+            this.jamPanelOpen = false;
+            this.jamPanelJamId = null;
             sessionStorage.removeItem('furu_player_jam_id');
         },
     });
@@ -1503,6 +1589,9 @@ document.addEventListener('alpine:init', () => {
         currentIndex: 0,
         visible: false,
         _dragIdx: null,
+        _dragOverIdx: null,
+        _pointerDragMove: null,
+        _pointerDragEnd: null,
 
         add(track) {
             this.addToEnd([track]);
@@ -1514,7 +1603,7 @@ document.addEventListener('alpine:init', () => {
         },
 
         addToEnd(tracks) {
-            const items = this._trackList(tracks);
+            const items = this._tracksForQueueAdd(tracks);
             if (!items.length) return;
             if (this._sendRemoteQueueCommand('queue_add_end', { tracks: items })) {
                 this._addToEndLocal(items);
@@ -1524,7 +1613,7 @@ document.addEventListener('alpine:init', () => {
         },
 
         addNextInQueue(tracks) {
-            const items = this._trackList(tracks);
+            const items = this._tracksForQueueAdd(tracks);
             if (!items.length) return;
             if (this._sendRemoteQueueCommand('queue_add_next', { tracks: items })) {
                 this._addNextLocal(items);
@@ -1559,6 +1648,74 @@ document.addEventListener('alpine:init', () => {
             this._moveTrackLocal(fromIdx, toIdx);
         },
 
+        startPointerReorder(event, idx) {
+            if (event.pointerType === 'mouse') return;
+            if (event.button && event.button !== 0) return;
+            if (idx < 0 || idx >= this.tracks.length) return;
+            event.preventDefault();
+            this._endPointerReorder(false);
+            this._dragIdx = idx;
+            this._dragOverIdx = idx;
+            const handle = event.currentTarget;
+            try {
+                handle?.setPointerCapture?.(event.pointerId);
+            } catch (_) {}
+
+            this._pointerDragMove = (moveEvent) => {
+                moveEvent.preventDefault();
+                this._autoScrollDuringReorder(moveEvent.clientY);
+                const target = document
+                    .elementFromPoint(moveEvent.clientX, moveEvent.clientY)
+                    ?.closest?.('.queue-track[data-queue-index]');
+                const targetIdx = Number(target?.dataset?.queueIndex);
+                if (!Number.isInteger(targetIdx) || targetIdx < 0 || targetIdx >= this.tracks.length) return;
+                this._dragOverIdx = targetIdx;
+                document.querySelectorAll('.queue-track.drag-over').forEach(el => el.classList.remove('drag-over'));
+                if (targetIdx !== this._dragIdx) target.classList.add('drag-over');
+            };
+
+            this._pointerDragEnd = (endEvent) => {
+                try {
+                    if (handle?.hasPointerCapture?.(endEvent.pointerId)) handle.releasePointerCapture(endEvent.pointerId);
+                } catch (_) {}
+                this._endPointerReorder(true);
+            };
+
+            window.addEventListener('pointermove', this._pointerDragMove, { passive: false });
+            window.addEventListener('pointerup', this._pointerDragEnd, { passive: false });
+            window.addEventListener('pointercancel', this._pointerDragEnd, { passive: false });
+        },
+
+        _autoScrollDuringReorder(clientY) {
+            const scroller = document.querySelector('.queue-tracks');
+            if (!scroller) return;
+            const rect = scroller.getBoundingClientRect();
+            const edge = 52;
+            if (clientY < rect.top + edge) {
+                scroller.scrollTop -= Math.ceil((rect.top + edge - clientY) / 4);
+            } else if (clientY > rect.bottom - edge) {
+                scroller.scrollTop += Math.ceil((clientY - (rect.bottom - edge)) / 4);
+            }
+        },
+
+        _endPointerReorder(commit) {
+            if (this._pointerDragMove) window.removeEventListener('pointermove', this._pointerDragMove);
+            if (this._pointerDragEnd) {
+                window.removeEventListener('pointerup', this._pointerDragEnd);
+                window.removeEventListener('pointercancel', this._pointerDragEnd);
+            }
+            document.querySelectorAll('.queue-track.drag-over').forEach(el => el.classList.remove('drag-over'));
+            const fromIdx = this._dragIdx;
+            const toIdx = this._dragOverIdx;
+            this._pointerDragMove = null;
+            this._pointerDragEnd = null;
+            this._dragIdx = null;
+            this._dragOverIdx = null;
+            if (commit && Number.isInteger(fromIdx) && Number.isInteger(toIdx) && fromIdx !== toIdx) {
+                this.moveTrack(fromIdx, toIdx);
+            }
+        },
+
         clear() {
             if (this._sendRemoteQueueCommand('queue_clear')) {
                 this._clearLocal();
@@ -1569,6 +1726,35 @@ document.addEventListener('alpine:init', () => {
 
         _trackList(tracks) {
             return (Array.isArray(tracks) ? tracks : [tracks]).filter(Boolean);
+        },
+
+        _tracksForQueueAdd(tracks) {
+            const items = this._trackList(tracks).map(track => ({ ...track }));
+            const devices = Alpine.store('devices');
+            const jam = devices?.selectedJam?.();
+            const user = Alpine.store('user')?.profile;
+            if (!jam || !jam.is_member || !user?.id) return items;
+            return items.map(track => ({
+                ...track,
+                added_by_user_id: user.id,
+                added_by_user_name: user.name || 'User',
+            }));
+        },
+
+        isForeignJamTrack(track) {
+            const devices = Alpine.store('devices');
+            const jam = devices?.selectedJam?.();
+            const userId = Alpine.store('user')?.profile?.id;
+            if (!jam || !jam.is_member || !track?.added_by_user_id || !userId) return false;
+            return String(track.added_by_user_id) !== String(userId);
+        },
+
+        contributorTitle(track) {
+            return track?.added_by_user_name ? `Added by ${track.added_by_user_name}` : 'Added by another listener';
+        },
+
+        contributorStyle(track) {
+            return Alpine.store('devices')?.userColorStyle(track?.added_by_user_id, track?.added_by_user_name) || '';
         },
 
         _sendRemoteQueueCommand(command, payload = {}) {

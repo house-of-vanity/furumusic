@@ -1020,6 +1020,15 @@ button.user-stat:hover {
 
 .queue-track:hover { background: var(--bg-hover); }
 .queue-track.active { background: var(--bg-active); }
+.queue-track.foreign-jam-track {
+    background: linear-gradient(90deg, var(--jam-contributor-bg, rgba(82,145,255,0.12)), transparent 78%);
+}
+.queue-track.foreign-jam-track:hover {
+    background: linear-gradient(90deg, var(--jam-contributor-bg-active, rgba(82,145,255,0.18)), rgba(255,255,255,0.02) 78%);
+}
+.queue-track.foreign-jam-track.active {
+    background: linear-gradient(90deg, var(--jam-contributor-bg-active, rgba(82,145,255,0.2)), var(--bg-active) 82%);
+}
 
 .queue-track-cover {
     width: 40px;
@@ -1101,6 +1110,8 @@ button.user-stat:hover {
     align-items: center;
     flex-shrink: 0;
     opacity: 1;
+    touch-action: none;
+    user-select: none;
 }
 
 .queue-drag-handle:active { cursor: grabbing; }
@@ -1378,6 +1389,28 @@ button.user-stat:hover {
 .queue-toggle-btn.active { color: var(--accent); }
 .queue-toggle-btn svg { width: 18px; height: 18px; }
 
+.device-toggle-btn {
+    position: relative;
+}
+
+.jam-member-squares {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    display: grid;
+    grid-template-columns: repeat(4, 4px);
+    gap: 1px;
+    pointer-events: none;
+}
+
+.jam-member-square {
+    width: 4px;
+    height: 4px;
+    border-radius: 1px;
+    background: var(--jam-contributor-color, var(--accent));
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.32);
+}
+
 .device-picker {
     position: relative;
     display: flex;
@@ -1526,6 +1559,13 @@ button.user-stat:hover {
     border-radius: 6px;
 }
 
+.jam-panel-title {
+    margin-bottom: 7px;
+    color: #c9dcff;
+    font-size: 12px;
+    font-weight: 750;
+}
+
 .jam-selected-users {
     display: flex;
     flex-wrap: wrap;
@@ -1589,9 +1629,8 @@ button.user-stat:hover {
 }
 
 .jam-create-btn {
-    width: 100%;
+    flex: 1;
     height: 30px;
-    margin-top: 8px;
     border: 0;
     border-radius: 4px;
     background: rgba(82,145,255,0.14);
@@ -1599,6 +1638,33 @@ button.user-stat:hover {
     font-size: 13px;
     font-weight: 700;
     cursor: pointer;
+}
+
+.jam-create-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.jam-panel-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.jam-leave-btn {
+    height: 30px;
+    border: 0;
+    border-radius: 4px;
+    background: rgba(255,96,96,0.1);
+    color: #ffb2b2;
+    padding: 0 9px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.jam-leave-btn:hover {
+    background: rgba(255,96,96,0.18);
 }
 
 /* Loading */
@@ -4156,7 +4222,7 @@ button.user-stat:hover {
         background: transparent;
         color: var(--text-secondary);
         display: grid;
-        grid-template-columns: 42px minmax(0, 1fr) auto;
+        grid-template-columns: auto minmax(0, 1fr) auto;
         align-items: center;
         gap: 10px;
         padding: 6px 4px;
@@ -4165,6 +4231,14 @@ button.user-stat:hover {
 
     .mobile-expanded-queue-row:active {
         background: var(--bg-hover);
+    }
+
+    .mobile-expanded-queue-row.foreign-jam-track {
+        background: linear-gradient(90deg, var(--jam-contributor-bg, rgba(82,145,255,0.12)), transparent 82%);
+    }
+
+    .mobile-expanded-queue-row.foreign-jam-track:active {
+        background: linear-gradient(90deg, var(--jam-contributor-bg-active, rgba(82,145,255,0.18)), rgba(255,255,255,0.02) 82%);
     }
 
     .mobile-expanded-queue-cover {

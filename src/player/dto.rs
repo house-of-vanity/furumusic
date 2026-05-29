@@ -183,10 +183,28 @@ pub(super) struct PlayerJamDto {
     pub(super) member_count: i64,
     pub(super) host_last_seen_ms: i64,
     pub(super) host_device_online: bool,
+    pub(super) members: Vec<PlayerJamMemberDto>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub(super) struct PlayerJamMemberDto {
+    pub(super) user_id: i64,
+    pub(super) name: String,
+    pub(super) is_joined: bool,
+    pub(super) is_current_user: bool,
+    pub(super) last_seen_ms: i64,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(super) struct PlayerJamCreateRequest {
+    pub(super) device_id: String,
+    #[serde(default)]
+    pub(super) invitee_user_ids: Vec<i64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(super) struct PlayerJamInviteRequest {
+    pub(super) jam_id: String,
     pub(super) device_id: String,
     #[serde(default)]
     pub(super) invitee_user_ids: Vec<i64>,
@@ -286,6 +304,7 @@ pub(super) struct UserStats {
 
 #[derive(Debug, Serialize, JsonSchema)]
 pub(super) struct UserProfile {
+    pub(super) id: i64,
     pub(super) name: String,
     pub(super) role: String,
     pub(super) stats: UserStats,
