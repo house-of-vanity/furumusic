@@ -880,7 +880,7 @@ document.addEventListener('alpine:init', () => {
 
         _remotePlaybackPayload(track, overrides = {}) {
             const queue = Alpine.store('queue');
-            const tracks = queue?.tracks?.length ? queue.tracks : (track ? [track] : []);
+            const tracks = queue?.tracks?.length ? queue._tracksWithJamDefaults(queue.tracks) : (track ? queue?._tracksWithJamDefaults([track]) || [track] : []);
             let index = Number.isInteger(overrides.index) ? overrides.index : (queue?.currentIndex ?? 0);
             if (track && tracks[index]?.id !== track.id) {
                 const foundIndex = tracks.findIndex(item => item.id === track.id);
@@ -927,7 +927,7 @@ document.addEventListener('alpine:init', () => {
             const queue = Alpine.store('queue');
             const tracks = Array.isArray(state.tracks) ? state.tracks.filter(Boolean) : [];
             if (queue && tracks.length > 0) {
-                queue.tracks = tracks;
+                queue.tracks = queue._tracksWithJamDefaults(tracks);
                 queue.currentIndex = Math.max(0, Math.min(Number(state.index || 0), tracks.length - 1));
             }
             const track = state.track || queue?.tracks?.[queue.currentIndex] || null;
@@ -970,7 +970,7 @@ document.addEventListener('alpine:init', () => {
 
                 if (command.command === 'play_track' || command.command === 'play_from_index' || command.command === 'transfer_state') {
                     if (Array.isArray(payload.tracks) && payload.tracks.length > 0) {
-                        queue.tracks = payload.tracks;
+                        queue.tracks = queue._tracksWithJamDefaults(payload.tracks);
                         queue.currentIndex = Math.max(0, Math.min(Number(payload.index || 0), queue.tracks.length - 1));
                     }
                     const track = payload.track || queue.tracks[queue.currentIndex];
@@ -1311,6 +1311,21 @@ document.addEventListener('alpine:init', () => {
             return this.currentJamId ? this.jams.find(jam => jam.id === this.currentJamId) : null;
         },
 
+        currentJamUser(jam = this.selectedJam()) {
+            const profile = Alpine.store('user')?.profile;
+            if (profile?.id) {
+                return { id: profile.id, name: profile.name || 'User' };
+            }
+            const current = (jam?.members || []).find(member => member.is_current_user);
+            if (current?.user_id) {
+                return { id: current.user_id, name: current.name || 'User' };
+            }
+            if (jam?.is_owner && jam.host_user_id) {
+                return { id: jam.host_user_id, name: jam.host_name || 'User' };
+            }
+            return null;
+        },
+
         hasJoinedJam() {
             return this.jams.some(jam => jam.is_member);
         },
@@ -1498,6 +1513,7 @@ document.addEventListener('alpine:init', () => {
                 if (!res.ok) return;
                 const data = await res.json();
                 this._apply(data);
+                Alpine.store('queue')?._ensureCurrentJamAttribution();
                 this.jamPanelOpen = false;
                 this.jamQuery = '';
                 this.jamUsers = [];
@@ -1546,6 +1562,7 @@ document.addEventListener('alpine:init', () => {
                 this.currentJamId = jam.id;
                 sessionStorage.setItem('furu_player_jam_id', jam.id);
                 this._apply(data);
+                Alpine.store('queue')?._ensureCurrentJamAttribution();
                 this.open = false;
                 const player = Alpine.store('player');
                 if (player && this.isControllingRemoteJam() && data.playback_state) {
@@ -1623,7 +1640,7 @@ document.addEventListener('alpine:init', () => {
         },
 
         playRelease(tracks, startIndex) {
-            this.tracks = [...tracks];
+            this.tracks = this._tracksForQueueAdd(tracks);
             this.playFromIndex(startIndex || 0);
         },
 
@@ -1732,13 +1749,31 @@ document.addEventListener('alpine:init', () => {
             const items = this._trackList(tracks).map(track => ({ ...track }));
             const devices = Alpine.store('devices');
             const jam = devices?.selectedJam?.();
-            const user = Alpine.store('user')?.profile;
+            const user = devices?.currentJamUser?.(jam);
             if (!jam || !jam.is_member || !user?.id) return items;
             return items.map(track => ({
                 ...track,
                 added_by_user_id: user.id,
                 added_by_user_name: user.name || 'User',
             }));
+        },
+
+        _tracksWithJamDefaults(tracks) {
+            const items = this._trackList(tracks);
+            const jam = Alpine.store('devices')?.selectedJam?.();
+            if (!jam?.is_member || !jam.host_user_id) return items;
+            return items.map(track => {
+                if (track?.added_by_user_id) return track;
+                return {
+                    ...track,
+                    added_by_user_id: jam.host_user_id,
+                    added_by_user_name: jam.host_name || 'Host',
+                };
+            });
+        },
+
+        _ensureCurrentJamAttribution() {
+            this.tracks = this._tracksWithJamDefaults(this.tracks);
         },
 
         isForeignJamTrack(track) {
@@ -1765,13 +1800,13 @@ document.addEventListener('alpine:init', () => {
         },
 
         _addToEndLocal(tracks) {
-            const items = this._trackList(tracks);
+            const items = this._tracksWithJamDefaults(tracks);
             if (!items.length) return;
             this.tracks = [...this.tracks, ...items];
         },
 
         _addNextLocal(tracks) {
-            const items = this._trackList(tracks);
+            const items = this._tracksWithJamDefaults(tracks);
             if (!items.length) return;
             const insertAt = Math.min(this.currentIndex + 1, this.tracks.length);
             this.tracks.splice(insertAt, 0, ...items);
