@@ -185,7 +185,7 @@ button {
 
 .stats-strip {
     display: grid;
-    grid-template-columns: repeat(7, minmax(104px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
     gap: 8px;
     margin-bottom: 14px;
 }
@@ -201,12 +201,18 @@ button {
 .stat-value {
     font-size: 18px;
     font-weight: 800;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .stat-label {
     margin-top: 2px;
     color: var(--text-subdued);
     font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .panel {
@@ -1355,8 +1361,8 @@ tbody tr:hover {
         <div class="content" x-show="activeView === 'reviews'">
             <section class="stats-strip">
                 <template x-for="cell in statCells()" :key="cell.label">
-                    <div class="stat-cell">
-                        <div class="stat-value" x-text="fmt(cell.value)"></div>
+                    <div class="stat-cell" :title="cell.title || ''">
+                        <div class="stat-value" x-text="cell.display || fmt(cell.value)"></div>
                         <div class="stat-label" x-text="cell.label"></div>
                     </div>
                 </template>
@@ -2298,6 +2304,7 @@ function adminV2() {
         libraryLoading: false,
         toastMessage: '',
         stats: {},
+        runtime: { agent: {}, storage: [], node: {} },
         libraryOverview: {},
         reviews: { items: [], total: 0, limit: 80, offset: 0, status_counts: [] },
         reviewFilter: { status: null, search: '' },
@@ -2419,6 +2426,7 @@ function adminV2() {
             try {
                 const data = await this.request(`${this.apiBase}/dashboard`);
                 this.stats = data.stats || {};
+                this.runtime = data.runtime || this.runtime;
                 this.libraryOverview = data.library || {};
                 this.reviews = data.reviews || this.reviews;
                 this.jobs = data.jobs || [];
@@ -3406,15 +3414,54 @@ function adminV2() {
         },
 
         statCells() {
+            const agent = (this.runtime && this.runtime.agent) || {};
+            const storage = (this.runtime && this.runtime.storage) || [];
+            const node = (this.runtime && this.runtime.node) || {};
+            const inbox = storage.find(item => item.label === 'Inbox') || {};
+            const library = storage.find(item => item.label === 'Library') || {};
             return [
                 { label: 'Tracks', value: this.stats.tracks || 0 },
                 { label: 'Releases', value: this.stats.releases || 0 },
                 { label: 'Artists', value: this.stats.artists || 0 },
                 { label: 'Playlists', value: this.stats.playlists || 0 },
-                { label: 'Hidden tracks', value: this.stats.hidden_tracks || 0 },
-                { label: 'Hidden releases', value: this.stats.hidden_releases || 0 },
-                { label: 'Hidden artists', value: this.stats.hidden_artists || 0 }
+                {
+                    label: agent.model ? `AI agent · ${agent.model}` : 'AI agent',
+                    display: agent.status || 'unknown',
+                    title: `enabled: ${agent.enabled ? 'yes' : 'no'} · llm: ${agent.llm_configured ? 'configured' : 'missing'} · concurrency: ${agent.concurrency || 0}`
+                },
+                this.storageStatCell(inbox, 'Inbox disk'),
+                this.storageStatCell(library, 'Library disk'),
+                {
+                    label: `${node.hostname || 'node'} · pid ${node.pid || '?'}`,
+                    display: `${node.cpu_count || '?'} CPU`,
+                    title: `${node.os || 'unknown'} / ${node.arch || 'unknown'}`
+                }
             ];
+        },
+
+        storageStatCell(item, fallbackLabel) {
+            const free = item && item.free_bytes != null ? item.free_bytes : null;
+            const total = item && item.total_bytes != null ? item.total_bytes : null;
+            const suffix = item && item.exists === false ? ' · missing' : '';
+            return {
+                label: `${item.label || fallbackLabel}${suffix}`,
+                display: free != null ? `${this.formatBytes(free)} free` : 'n/a',
+                title: `${item.path || 'not configured'}${total != null ? ` · ${this.formatBytes(total)} total` : ''}`
+            };
+        },
+
+        formatBytes(bytes) {
+            const value = Number(bytes || 0);
+            if (!Number.isFinite(value) || value <= 0) return '0 B';
+            const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+            let size = value;
+            let unit = 0;
+            while (size >= 1024 && unit < units.length - 1) {
+                size /= 1024;
+                unit += 1;
+            }
+            const digits = size >= 10 || unit === 0 ? 0 : 1;
+            return `${size.toFixed(digits)} ${units[unit]}`;
         },
 
         pageTitle() {

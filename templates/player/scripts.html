@@ -168,18 +168,6 @@ document.addEventListener('alpine:init', () => {
     Alpine.store('mobile', {
         libraryOpen: false,
         playerExpanded: false,
-        playerDragging: false,
-        playerDragOffset: 0,
-        playerCloseOffset: 0,
-        _playerDragStartY: 0,
-        _playerDragStartX: 0,
-        _playerDragTracking: false,
-        _playerDragMode: null,
-        _playerDragPointerId: null,
-        _playerDragElement: null,
-        _playerDragMove: null,
-        _playerDragEnd: null,
-        _playerSuppressClickUntil: 0,
         toggleLibrary() {
             this.libraryOpen = !this.libraryOpen;
             if (this.libraryOpen) Alpine.store('user').menuOpen = false;
@@ -188,119 +176,30 @@ document.addEventListener('alpine:init', () => {
             this.libraryOpen = false;
         },
         isMobilePlayer() {
-            return window.matchMedia && window.matchMedia('(max-width: 720px)').matches;
+            if (!window.matchMedia) return false;
+            return window.matchMedia('(max-width: 900px)').matches
+                || window.matchMedia('(pointer: coarse) and (max-width: 1024px)').matches;
         },
         openPlayerFullscreen() {
             if (!this.isMobilePlayer() || !Alpine.store('player').currentTrack) return;
             this.playerExpanded = true;
-            this.playerDragging = false;
-            this.playerDragOffset = 0;
-            this.playerCloseOffset = 0;
             Alpine.store('queue').visible = false;
             Alpine.store('devices').open = false;
+            this.resetPlayerFullscreenScroll();
         },
         closePlayerFullscreen() {
             this.playerExpanded = false;
-            this.playerDragging = false;
-            this.playerDragOffset = 0;
-            this.playerCloseOffset = 0;
+            Alpine.store('queue').visible = false;
+            Alpine.store('devices').open = false;
         },
-        playerDragStyle() {
-            return `--mobile-player-drag:${this.playerDragOffset}px; --mobile-player-close-drag:${this.playerCloseOffset}px;`;
-        },
-        handlePlayerClick(event) {
-            if (Date.now() <= this._playerSuppressClickUntil) {
-                event.preventDefault();
-                event.stopPropagation();
-                this._playerSuppressClickUntil = 0;
-            }
-        },
-        startPlayerDrag(event, force = false) {
-            if (!this.isMobilePlayer() || !Alpine.store('player').currentTrack) return;
-            if (event.button && event.button !== 0) return;
-            const target = event.target;
-            const isDragBlocked = target.closest('input, select, textarea, .volume-slider, .device-popover, .mobile-expanded-queue');
-            if (!force) {
-                if (this.playerExpanded) {
-                    const isCloseHandle = target.closest('.player-now-playing');
-                    const scroller = event.currentTarget?.classList?.contains('player-bar') ? event.currentTarget : null;
-                    if (!isCloseHandle || isDragBlocked || (scroller && scroller.scrollTop > 4)) return;
-                } else if (isDragBlocked) {
-                    return;
+        resetPlayerFullscreenScroll() {
+            requestAnimationFrame(() => {
+                const full = document.querySelector('.player-bar .mobile-full-player');
+                if (full) {
+                    full.scrollTop = 0;
+                    full.scrollLeft = 0;
                 }
-            }
-            if (this._playerDragTracking) this.endPlayerDrag({ type: 'pointercancel' });
-            this.playerDragging = false;
-            this._playerDragTracking = true;
-            this._playerDragMode = this.playerExpanded ? 'close' : 'open';
-            this._playerDragStartY = event.clientY;
-            this._playerDragStartX = event.clientX;
-            this._playerDragPointerId = event.pointerId;
-            this._playerDragElement = event.currentTarget;
-            this.playerDragOffset = 0;
-            this.playerCloseOffset = 0;
-            this._playerDragMove = e => this.movePlayerDrag(e);
-            this._playerDragEnd = e => this.endPlayerDrag(e);
-            window.addEventListener('pointermove', this._playerDragMove, { passive: false });
-            window.addEventListener('pointerup', this._playerDragEnd, { passive: false });
-            window.addEventListener('pointercancel', this._playerDragEnd, { passive: false });
-        },
-        movePlayerDrag(event) {
-            if (!this._playerDragTracking) return;
-            const delta = this._playerDragStartY - event.clientY;
-            const absDelta = Math.abs(delta);
-            if (!this.playerDragging) {
-                const horizontalDelta = Math.abs(event.clientX - this._playerDragStartX);
-                const wantsOpen = this._playerDragMode === 'open' && delta > 0;
-                const wantsClose = this._playerDragMode === 'close' && delta < 0;
-                if (absDelta < 8 || absDelta < horizontalDelta * 1.15 || (!wantsOpen && !wantsClose)) return;
-                this.playerDragging = true;
-                try {
-                    this._playerDragElement?.setPointerCapture?.(this._playerDragPointerId);
-                } catch (_) {}
-            }
-            event.preventDefault();
-            if (this._playerDragMode === 'close') {
-                this.playerCloseOffset = Math.max(0, Math.min(window.innerHeight, -delta));
-            } else {
-                const max = Math.max(0, window.innerHeight - 132);
-                this.playerDragOffset = Math.max(0, Math.min(max, delta));
-            }
-        },
-        endPlayerDrag(event) {
-            const openThreshold = Math.min(180, Math.max(90, window.innerHeight * 0.18));
-            const closeThreshold = Math.min(110, Math.max(64, window.innerHeight * 0.1));
-            const wasCancelled = event?.type === 'pointercancel';
-            const wasDragging = this.playerDragging;
-            if (wasDragging) this._playerSuppressClickUntil = Date.now() + 450;
-            if (this._playerDragMode === 'close') {
-                if (!wasCancelled && this.playerCloseOffset > closeThreshold) this.closePlayerFullscreen();
-                else {
-                    this.playerCloseOffset = 0;
-                    this.playerDragging = false;
-                }
-            } else if (this._playerDragMode === 'open' && !wasCancelled && this.playerDragOffset > openThreshold) {
-                this.openPlayerFullscreen();
-            } else {
-                this.playerDragOffset = 0;
-                this.playerDragging = false;
-            }
-            try {
-                if (this._playerDragPointerId !== null && this._playerDragElement?.hasPointerCapture?.(this._playerDragPointerId)) {
-                    this._playerDragElement.releasePointerCapture(this._playerDragPointerId);
-                }
-            } catch (_) {}
-            if (this._playerDragMove) window.removeEventListener('pointermove', this._playerDragMove);
-            if (this._playerDragEnd) {
-                window.removeEventListener('pointerup', this._playerDragEnd);
-                window.removeEventListener('pointercancel', this._playerDragEnd);
-            }
-            this._playerDragTracking = false;
-            this._playerDragMode = null;
-            this._playerDragPointerId = null;
-            this._playerDragElement = null;
-            this._playerDragMove = null;
-            this._playerDragEnd = null;
+            });
         },
     });
 

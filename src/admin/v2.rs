@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 use cot::db::{Database, Model};
 use cot::html::Html;
@@ -150,6 +151,7 @@ struct AdminDashboardDto {
     user: AdminUserDto,
     build: BuildDto,
     stats: OverviewStatsDto,
+    runtime: RuntimeOverviewDto,
     reviews: ReviewPageDto,
     jobs: Vec<JobDto>,
     recent_runs: Vec<JobRunDto>,
@@ -165,6 +167,40 @@ struct OverviewStatsDto {
     hidden_tracks: i64,
     hidden_releases: i64,
     hidden_artists: i64,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct RuntimeOverviewDto {
+    agent: AgentStatusDto,
+    storage: Vec<StoragePathDto>,
+    node: NodeStatsDto,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct AgentStatusDto {
+    status: String,
+    enabled: bool,
+    llm_configured: bool,
+    model: String,
+    concurrency: u64,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct StoragePathDto {
+    label: String,
+    path: String,
+    exists: bool,
+    free_bytes: Option<u64>,
+    total_bytes: Option<u64>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct NodeStatsDto {
+    hostname: String,
+    os: &'static str,
+    arch: &'static str,
+    pid: u32,
+    cpu_count: usize,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -565,6 +601,8 @@ pub async fn dashboard(
         limit: Some(80),
         offset: Some(0),
     };
+    let (config, _) = AppConfig::load_with_db(&db).await;
+    let runtime = load_runtime_overview(&config);
     let (reviews, stats, jobs, recent_runs, library) = tokio::try_join!(
         load_review_page(pool, reviews_query),
         load_overview_stats(pool),
@@ -582,6 +620,7 @@ pub async fn dashboard(
         },
         build: build_dto(),
         stats,
+        runtime,
         reviews,
         jobs,
         recent_runs,
@@ -965,7 +1004,9 @@ pub async fn run_metadata_backfill(
         let duration_ms = start.elapsed().as_millis() as i64;
         match result {
             Ok(()) => {
-                let _ = run.set_completed(&db_for_task, duration_ms, &log.output()).await;
+                let _ = run
+                    .set_completed(&db_for_task, duration_ms, &log.output())
+                    .await;
             }
             Err(err) => {
                 let _ = run
@@ -1233,11 +1274,13 @@ pub async fn update_library_item(
                     .map_err(|e| cot::Error::internal(e.to_string()))?;
                 }
             } else {
-                sqlx::query("DELETE FROM furumusic__track_artist WHERE track_id = $1 AND role = 'main'")
-                    .bind(body.id)
-                    .execute(pool)
-                    .await
-                    .map_err(|e| cot::Error::internal(e.to_string()))?;
+                sqlx::query(
+                    "DELETE FROM furumusic__track_artist WHERE track_id = $1 AND role = 'main'",
+                )
+                .bind(body.id)
+                .execute(pool)
+                .await
+                .map_err(|e| cot::Error::internal(e.to_string()))?;
                 for (position, artist_id) in artist_ids.iter().enumerate() {
                     sqlx::query(
                         "INSERT INTO furumusic__track_artist (track_id, artist_id, role, position) VALUES ($1, $2, 'main', $3)",
@@ -1509,6 +1552,158 @@ async fn load_overview_stats(pool: &PgPool) -> anyhow::Result<OverviewStatsDto> 
         hidden_releases,
         hidden_artists,
     })
+}
+
+fn load_runtime_overview(config: &AppConfig) -> RuntimeOverviewDto {
+    let llm_configured = !config.agent_llm_url.trim().is_empty();
+    let agent_status = if !config.agent_enabled {
+        "disabled"
+    } else if !llm_configured {
+        "not_configured"
+    } else {
+        "enabled"
+    };
+
+    RuntimeOverviewDto {
+        agent: AgentStatusDto {
+            status: agent_status.to_owned(),
+            enabled: config.agent_enabled,
+            llm_configured,
+            model: config.agent_llm_model.clone(),
+            concurrency: config.agent_concurrency,
+        },
+        storage: vec![
+            storage_path_dto("Inbox", &config.agent_inbox_dir),
+            storage_path_dto("Library", &config.agent_storage_dir),
+        ],
+        node: NodeStatsDto {
+            hostname: node_hostname(),
+            os: std::env::consts::OS,
+            arch: std::env::consts::ARCH,
+            pid: std::process::id(),
+            cpu_count: std::thread::available_parallelism()
+                .map(|count| count.get())
+                .unwrap_or(1),
+        },
+    }
+}
+
+fn storage_path_dto(label: &str, raw_path: &str) -> StoragePathDto {
+    let path = raw_path.trim();
+    let path_ref = Path::new(path);
+    let usage = if path.is_empty() {
+        None
+    } else {
+        disk_usage(path_ref).or_else(|| {
+            path_ref
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .and_then(disk_usage)
+        })
+    };
+
+    StoragePathDto {
+        label: label.to_owned(),
+        path: path.to_owned(),
+        exists: !path.is_empty() && path_ref.exists(),
+        free_bytes: usage.map(|value| value.free_bytes),
+        total_bytes: usage.map(|value| value.total_bytes),
+    }
+}
+
+fn node_hostname() -> String {
+    std::env::var("HOSTNAME")
+        .or_else(|_| std::env::var("COMPUTERNAME"))
+        .unwrap_or_else(|_| "unknown".to_owned())
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DiskUsage {
+    free_bytes: u64,
+    total_bytes: u64,
+}
+
+#[cfg(windows)]
+fn disk_usage(path: &Path) -> Option<DiskUsage> {
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetDiskFreeSpaceExW(
+            lpDirectoryName: *const u16,
+            lpFreeBytesAvailableToCaller: *mut u64,
+            lpTotalNumberOfBytes: *mut u64,
+            lpTotalNumberOfFreeBytes: *mut u64,
+        ) -> i32;
+    }
+
+    let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+    wide.push(0);
+
+    let mut free_available = 0_u64;
+    let mut total = 0_u64;
+    let mut total_free = 0_u64;
+    let ok = unsafe {
+        GetDiskFreeSpaceExW(
+            wide.as_ptr(),
+            &mut free_available,
+            &mut total,
+            &mut total_free,
+        )
+    };
+    (ok != 0).then_some(DiskUsage {
+        free_bytes: free_available,
+        total_bytes: total,
+    })
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn disk_usage(path: &Path) -> Option<DiskUsage> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    #[repr(C)]
+    struct Statvfs {
+        f_bsize: std::ffi::c_ulong,
+        f_frsize: std::ffi::c_ulong,
+        f_blocks: std::ffi::c_ulong,
+        f_bfree: std::ffi::c_ulong,
+        f_bavail: std::ffi::c_ulong,
+        f_files: std::ffi::c_ulong,
+        f_ffree: std::ffi::c_ulong,
+        f_favail: std::ffi::c_ulong,
+        f_fsid: std::ffi::c_ulong,
+        f_flag: std::ffi::c_ulong,
+        f_namemax: std::ffi::c_ulong,
+        __f_spare: [std::ffi::c_int; 6],
+    }
+
+    unsafe extern "C" {
+        fn statvfs(path: *const std::ffi::c_char, buf: *mut Statvfs) -> std::ffi::c_int;
+    }
+
+    let c_path = CString::new(path.as_os_str().as_bytes()).ok()?;
+    let mut stat = std::mem::MaybeUninit::<Statvfs>::uninit();
+    let ok = unsafe { statvfs(c_path.as_ptr(), stat.as_mut_ptr()) };
+    if ok != 0 {
+        return None;
+    }
+    let stat = unsafe { stat.assume_init() };
+    let fragment_size = if stat.f_frsize > 0 {
+        stat.f_frsize as u64
+    } else {
+        stat.f_bsize as u64
+    };
+
+    Some(DiskUsage {
+        free_bytes: stat.f_bavail as u64 * fragment_size,
+        total_bytes: stat.f_blocks as u64 * fragment_size,
+    })
+}
+
+#[cfg(not(any(windows, target_os = "linux", target_os = "android")))]
+fn disk_usage(_path: &Path) -> Option<DiskUsage> {
+    None
 }
 
 async fn load_library_overview(pool: &PgPool) -> anyhow::Result<LibraryOverviewDto> {

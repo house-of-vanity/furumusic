@@ -958,16 +958,14 @@
 
     <!-- Player Bar -->
     <div class="player-bar"
-         :class="{ 'mobile-expanded': $store.mobile.playerExpanded, 'mobile-dragging': $store.mobile.playerDragging }"
-         :style="$store.mobile.playerDragStyle()"
-         @click.capture="$store.mobile.handlePlayerClick($event)"
-         @pointerdown="$store.mobile.startPlayerDrag($event)">
-        <button class="mobile-player-collapse-btn" type="button" @click.stop="$store.mobile.closePlayerFullscreen()" title="{{ t.player_close }}" aria-label="{{ t.player_close }}">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
-                <path d="M6 9l6 6 6-6"/>
-            </svg>
-        </button>
-        <div class="player-now-playing">
+         :class="{ 'mobile-expanded': $store.mobile.playerExpanded }">
+        <div class="mobile-full-player">
+            <button class="mobile-player-collapse-btn" type="button" @click.stop="$store.mobile.closePlayerFullscreen()" title="{{ t.player_close }}" aria-label="{{ t.player_close }}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+                    <path d="M6 9l6 6 6-6"/>
+                </svg>
+            </button>
+            <div class="player-now-playing">
             <template x-if="$store.player.currentTrack">
                 <div style="display:flex;align-items:center;gap:12px;overflow:hidden">
                     <div class="player-cover"
@@ -1007,9 +1005,9 @@
                     </div>
                 </div>
             </template>
-        </div>
+            </div>
 
-        <div class="player-controls">
+            <div class="player-controls">
             <div class="player-buttons">
                 <button class="player-btn" :class="{ active: $store.player.shuffle }" @click="$store.player.toggleShuffle()" title="{{ t.player_shuffle }}">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
@@ -1049,9 +1047,9 @@
                 <span class="player-time" x-text="formatTime($store.player.duration)"></span>
             </div>
             <div class="player-version-chip">v{{ t.app_version() }}</div>
-        </div>
+            </div>
 
-        <div class="player-right">
+            <div class="player-right">
             <div class="volume-control">
                 <button class="volume-btn" @click="$store.player.toggleMute()">
                     <template x-if="$store.player.volume === 0">
@@ -1199,8 +1197,8 @@
                     </div>
                 </div>
             </div>
-        </div>
-        <div class="mobile-expanded-queue">
+            </div>
+            <div class="mobile-expanded-queue">
             <div class="mobile-expanded-queue-title">{{ t.player_queue }}</div>
             <template x-if="$store.queue.upcoming().length === 0">
                 <div class="mobile-expanded-queue-empty">{{ t.player_queue_empty }}</div>
@@ -1233,5 +1231,6 @@
                     <span class="mobile-expanded-queue-time" x-text="formatTime(track.duration_seconds)"></span>
                 </button>
             </template>
+            </div>
         </div>
     </div>
