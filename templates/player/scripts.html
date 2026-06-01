@@ -47,6 +47,36 @@ const T = {
     connectionLost: "{{ t.player_connection_lost }}",
     connectionLostDetail: "{{ t.player_connection_lost_detail }}",
     trackWord: "{{ t.player_tracks_count }}",
+    releaseWord: "{{ t.player_releases_count }}",
+    ofWord: "{{ t.player_of }}",
+    needsApproval: "{{ t.player_needs_approval }}",
+    showing: "{{ t.player_showing }}",
+    statusLabelText: "{{ t.player_status }}",
+    fileLabel: "{{ t.player_file }}",
+    createdLabel: "{{ t.player_created }}",
+    updatedLabel: "{{ t.player_updated }}",
+    errorLabel: "{{ t.player_error }}",
+    pending: "{{ t.player_pending }}",
+    featuredShort: "{{ t.player_featured_short }}",
+    noYear: "{{ t.player_no_year }}",
+    loadUploadsFailed: "{{ t.player_failed_load_uploaded_tracks }}",
+    releaseMetadata: "{{ t.player_release_metadata }}",
+    trackMetadata: "{{ t.player_track_metadata }}",
+    metadata: "{{ t.player_metadata }}",
+    approveMetadata: "{{ t.player_approve_metadata }}",
+    editRelease: "{{ t.player_edit_release }}",
+    editTrack: "{{ t.player_edit_track }}",
+    editMetadata: "{{ t.player_edit_metadata }}",
+    failedSaveTrack: "{{ t.player_failed_save_track }}",
+    trackMetadataSaved: "{{ t.player_track_metadata_saved }}",
+    failedSaveRelease: "{{ t.player_failed_save_release }}",
+    releaseMetadataSaved: "{{ t.player_release_metadata_saved }}",
+    failedDeleteReview: "{{ t.player_failed_delete_review }}",
+    reviewDeleted: "{{ t.player_review_deleted }}",
+    failedApproveReview: "{{ t.player_failed_approve_review }}",
+    trackApprovedImported: "{{ t.player_track_approved_imported }}",
+    failedUpdateSelectedTracks: "{{ t.player_failed_update_selected_tracks }}",
+    selectedTracksUpdated: "{{ t.player_selected_tracks_updated }}",
     clientIdle: "{{ t.player_client_idle }}",
     active: "{{ t.player_active }}",
     aiIdle: "{{ t.player_ai_idle }}",
@@ -2475,6 +2505,8 @@ document.addEventListener('alpine:init', () => {
         uploadQueued: [],
         uploadPendingTotal: 0,
         uploadQueuedTotal: 0,
+        uploadQueueOffset: 0,
+        uploadQueuePageSize: 6,
         uploadLoaded: false,
         uploadLoading: false,
         uploadEditId: null,
@@ -2745,7 +2777,7 @@ document.addEventListener('alpine:init', () => {
             try {
                 const res = await fetch('/api/player/uploads/tracks');
                 const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Failed to load uploaded tracks');
+                if (!res.ok) throw new Error(data.error || T.loadUploadsFailed);
                 this.applyUploadPage(data);
                 this.uploadLoaded = true;
                 if (this.uploadEditId && !this.uploadTracks.some(item => item.track.id === this.uploadEditId)) {
@@ -2769,9 +2801,9 @@ document.addEventListener('alpine:init', () => {
         uploadSummary() {
             const trackCount = this.uploadTracks.length;
             const releaseCount = this.uploadReleases.length;
-            const parts = [trackCount + ' tracks', releaseCount + ' releases'];
-            if (this.uploadPendingTotal > 0) parts.push(this.uploadPendingTotal + ' need approval');
-            if (this.uploadQueuedTotal > 0) parts.push(this.uploadQueuedTotal + ' queued');
+            const parts = [trackCount + ' ' + T.trackWord, releaseCount + ' ' + T.releaseWord];
+            if (this.uploadPendingTotal > 0) parts.push(this.uploadPendingTotal + ' ' + T.needsApproval);
+            if (this.uploadQueuedTotal > 0) parts.push(this.uploadQueuedTotal + ' ' + T.queued);
             return parts.join(' / ');
         },
 
@@ -2779,7 +2811,7 @@ document.addEventListener('alpine:init', () => {
             const track = item?.track || item;
             const names = [
                 ...((track?.artists || []).map(artist => artist.name)),
-                ...((track?.featured_artists || []).map(artist => 'ft. ' + artist.name)),
+                ...((track?.featured_artists || []).map(artist => T.featuredShort + ' ' + artist.name)),
             ];
             return names.join(', ') || T.unknown;
         },
@@ -2789,13 +2821,99 @@ document.addEventListener('alpine:init', () => {
             return names.join(', ') || T.unknown;
         },
 
+        uploadArtistGroups() {
+            const collator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true });
+            const groups = new Map();
+            for (const release of this.uploadReleases) {
+                const artists = Array.isArray(release?.artists) ? release.artists : [];
+                const artistKey = artists
+                    .map(artist => artist?.id != null ? 'id:' + artist.id : 'name:' + String(artist?.name || '').trim().toLowerCase())
+                    .filter(Boolean)
+                    .join('|') || 'unknown';
+                if (!groups.has(artistKey)) {
+                    groups.set(artistKey, {
+                        key: artistKey,
+                        name: this.uploadReleaseArtistsText(release),
+                        releases: [],
+                        trackCount: 0,
+                    });
+                }
+                const group = groups.get(artistKey);
+                group.releases.push(release);
+                group.trackCount += Array.isArray(release?.tracks) ? release.tracks.length : 0;
+            }
+            return [...groups.values()]
+                .map(group => ({
+                    ...group,
+                    releases: group.releases.slice().sort((a, b) => {
+                        const aDate = String(a?.tracks?.[0]?.uploaded_at || '');
+                        const bDate = String(b?.tracks?.[0]?.uploaded_at || '');
+                        return bDate.localeCompare(aDate) || collator.compare(a?.title || '', b?.title || '');
+                    }),
+                }))
+                .sort((a, b) => collator.compare(a.name, b.name));
+        },
+
         uploadFeaturedArtistsText(item) {
             const track = item?.track || item;
             return (track?.featured_artists || []).map(artist => artist.name).join(', ');
         },
 
         compactQueuedUploads() {
-            return this.uploadQueued.slice(0, 6);
+            const maxOffset = Math.max(0, this.uploadQueued.length - this.uploadQueuePageSize);
+            this.uploadQueueOffset = Math.max(0, Math.min(this.uploadQueueOffset, maxOffset));
+            return this.uploadQueued.slice(this.uploadQueueOffset, this.uploadQueueOffset + this.uploadQueuePageSize);
+        },
+
+        uploadQueueCanPrev() {
+            return this.uploadQueueOffset > 0;
+        },
+
+        uploadQueueCanNext() {
+            return this.uploadQueueOffset + this.uploadQueuePageSize < this.uploadQueued.length;
+        },
+
+        uploadQueuePrev() {
+            this.uploadQueueOffset = Math.max(0, this.uploadQueueOffset - this.uploadQueuePageSize);
+        },
+
+        uploadQueueNext() {
+            const maxOffset = Math.max(0, this.uploadQueued.length - this.uploadQueuePageSize);
+            this.uploadQueueOffset = Math.min(maxOffset, this.uploadQueueOffset + this.uploadQueuePageSize);
+        },
+
+        uploadQueueRangeText() {
+            if (this.uploadQueued.length === 0) return '';
+            const start = this.uploadQueueOffset + 1;
+            const end = Math.min(this.uploadQueueOffset + this.uploadQueuePageSize, this.uploadQueued.length);
+            const total = Math.max(this.uploadQueuedTotal || 0, this.uploadQueued.length);
+            return start + '-' + end + ' / ' + total;
+        },
+
+        uploadQueueOverflowText() {
+            const total = Math.max(this.uploadQueuedTotal || 0, this.uploadQueued.length);
+            return T.showing + ' ' + this.uploadQueued.length + ' ' + T.ofWord + ' ' + total;
+        },
+
+        uploadQueueTooltip(item) {
+            if (!item) return '';
+            const lines = [];
+            if (item.filename) lines.push(T.fileLabel + ': ' + item.filename);
+            if (item.status) lines.push(T.statusLabelText + ': ' + item.status);
+            if (item.created_at) lines.push(T.createdLabel + ': ' + item.created_at);
+            if (item.updated_at) lines.push(T.updatedLabel + ': ' + item.updated_at);
+            if (item.error_message) lines.push(T.errorLabel + ': ' + item.error_message);
+            return lines.join('\n');
+        },
+
+        uploadStatusLabel(status) {
+            const labels = {
+                pending: T.pending,
+                queued: T.queued,
+                processing: T.processing,
+                failed: T.failed,
+            };
+            return labels[String(status || '').toLowerCase()] || status || T.unknown;
         },
 
         uploadHasEditorOpen() {
@@ -2803,17 +2921,17 @@ document.addEventListener('alpine:init', () => {
         },
 
         uploadEditorKicker() {
-            if (this.uploadReviewDraft) return 'Needs approval';
-            if (this.uploadReleaseDraft) return 'Release metadata';
-            if (this.uploadDraft) return 'Track metadata';
-            return 'Metadata';
+            if (this.uploadReviewDraft) return T.needsApproval;
+            if (this.uploadReleaseDraft) return T.releaseMetadata;
+            if (this.uploadDraft) return T.trackMetadata;
+            return T.metadata;
         },
 
         uploadEditorTitle() {
-            if (this.uploadReviewDraft) return 'Approve metadata';
-            if (this.uploadReleaseDraft) return this.uploadReleaseDraft.title || 'Edit release';
-            if (this.uploadDraft) return this.uploadDraft.title || 'Edit track';
-            return 'Edit metadata';
+            if (this.uploadReviewDraft) return T.approveMetadata;
+            if (this.uploadReleaseDraft) return this.uploadReleaseDraft.title || T.editRelease;
+            if (this.uploadDraft) return this.uploadDraft.title || T.editTrack;
+            return T.editMetadata;
         },
 
         closeUploadEditor() {
@@ -2927,11 +3045,11 @@ document.addEventListener('alpine:init', () => {
                     }),
                 });
                 const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Failed to save track');
+                if (!res.ok) throw new Error(data.error || T.failedSaveTrack);
                 this.uploadTracks = this.uploadTracks.map(item => item.track.id === id ? data : item);
                 this.cancelUploadEdit();
                 this.loadUploads({ silent: true, preserveEditor: false });
-                this._setMessage('Track metadata saved');
+                this._setMessage(T.trackMetadataSaved);
             } catch (err) {
                 this._setMessage(err.message || String(err), true);
             } finally {
@@ -2977,10 +3095,10 @@ document.addEventListener('alpine:init', () => {
                     }),
                 });
                 const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Failed to save release');
+                if (!res.ok) throw new Error(data.error || T.failedSaveRelease);
                 this.applyUploadPage(data);
                 this.cancelUploadReleaseEdit();
-                this._setMessage('Release metadata saved');
+                this._setMessage(T.releaseMetadataSaved);
             } catch (err) {
                 this._setMessage(err.message || String(err), true);
             } finally {
@@ -3036,10 +3154,10 @@ document.addEventListener('alpine:init', () => {
                     method: 'DELETE',
                 });
                 const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Failed to delete review');
+                if (!res.ok) throw new Error(data.error || T.failedDeleteReview);
                 this.applyUploadPage(data);
                 this.cancelUploadReviewEdit();
-                this._setMessage('Review deleted');
+                this._setMessage(T.reviewDeleted);
             } catch (err) {
                 this._setMessage(err.message || String(err), true);
             } finally {
@@ -3058,10 +3176,10 @@ document.addEventListener('alpine:init', () => {
                     body: JSON.stringify(this.uploadReviewPayload()),
                 });
                 const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Failed to approve review');
+                if (!res.ok) throw new Error(data.error || T.failedApproveReview);
                 this.applyUploadPage(data);
                 this.cancelUploadReviewEdit();
-                this._setMessage('Track approved and imported');
+                this._setMessage(T.trackApprovedImported);
             } catch (err) {
                 this._setMessage(err.message || String(err), true);
             } finally {
@@ -3092,10 +3210,10 @@ document.addEventListener('alpine:init', () => {
                     }),
                 });
                 const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Failed to update selected tracks');
+                if (!res.ok) throw new Error(data.error || T.failedUpdateSelectedTracks);
                 this.applyUploadPage(data);
                 this.clearUploadSelection();
-                this._setMessage('Selected tracks updated');
+                this._setMessage(T.selectedTracksUpdated);
             } catch (err) {
                 this._setMessage(err.message || String(err), true);
             } finally {
@@ -3110,6 +3228,8 @@ document.addEventListener('alpine:init', () => {
             this.uploadQueued = Array.isArray(data.queued) ? data.queued : [];
             this.uploadPendingTotal = Number(data.pending_total || this.uploadPending.length || 0);
             this.uploadQueuedTotal = Number(data.queued_total || this.uploadQueued.length || 0);
+            const maxQueueOffset = Math.max(0, this.uploadQueued.length - this.uploadQueuePageSize);
+            this.uploadQueueOffset = Math.max(0, Math.min(this.uploadQueueOffset, maxQueueOffset));
             this.pruneUploadSelection();
         },
 

@@ -3239,7 +3239,40 @@ button.user-stat:hover {
 
 .upload-release-tree {
     display: grid;
-    gap: 8px;
+    gap: 12px;
+}
+
+.upload-artist-group {
+    display: grid;
+    gap: 7px;
+    min-width: 0;
+}
+
+.upload-artist-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    min-width: 0;
+    padding: 2px 2px 0;
+}
+
+.upload-artist-name {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 950;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.upload-artist-meta {
+    flex: 0 0 auto;
+    color: var(--text-subdued);
+    font-size: 11px;
+    font-weight: 750;
+    white-space: nowrap;
 }
 
 .upload-release-node {
@@ -3331,6 +3364,60 @@ button.user-stat:hover {
     font-size: 12px;
     font-weight: 900;
     text-transform: uppercase;
+}
+
+.upload-panel-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+}
+
+.upload-queue-nav {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: auto;
+}
+
+.upload-queue-range {
+    color: var(--text-subdued);
+    font-size: 11px;
+    font-weight: 850;
+    text-transform: none;
+    white-space: nowrap;
+}
+
+.upload-queue-nav-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.upload-queue-nav-btn:hover:not(:disabled) {
+    border-color: var(--text-subdued);
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+}
+
+.upload-queue-nav-btn:disabled {
+    cursor: default;
+    opacity: 0.42;
+}
+
+.upload-queue-nav-btn svg {
+    width: 14px;
+    height: 14px;
 }
 
 .upload-queue-row {

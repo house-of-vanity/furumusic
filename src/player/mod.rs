@@ -2360,7 +2360,7 @@ async fn load_user_upload_queue(
            ORDER BY
              CASE status WHEN 'processing' THEN 0 ELSE 1 END,
              created_at DESC
-           LIMIT 20"#,
+           LIMIT 100"#,
     )
     .bind(uploaded_by_pattern)
     .fetch_all(pool)
