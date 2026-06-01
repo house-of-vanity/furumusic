@@ -74,6 +74,7 @@ fn generate_missing_variants_sync(
 
     let mut created = 0usize;
     for variant in variants {
+        let start = std::time::Instant::now();
         let path = variant_path(original_path, *variant);
         if path.exists() {
             continue;
@@ -88,12 +89,27 @@ fn generate_missing_variants_sync(
             .to_rgb8();
         let mut output = Vec::new();
         let mut encoder = JpegEncoder::new_with_quality(&mut output, variant.quality);
-        encoder.encode(
+        let result = encoder.encode(
             &resized,
             resized.width(),
             resized.height(),
             image::ExtendedColorType::Rgb8,
-        )?;
+        );
+        match result {
+            Ok(()) => crate::metrics::record_agent_cover_variant(
+                variant.name,
+                "ok",
+                start.elapsed(),
+            ),
+            Err(err) => {
+                crate::metrics::record_agent_cover_variant(
+                    variant.name,
+                    "error",
+                    start.elapsed(),
+                );
+                return Err(err.into());
+            }
+        }
         std::fs::write(path, output)?;
         created += 1;
     }

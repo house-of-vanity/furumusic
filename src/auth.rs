@@ -61,6 +61,7 @@ pub async fn get_session_user(session: &Session, db: &Database) -> Option<Authen
             display
         }
     };
+    crate::metrics::record_active_user(user.id_val());
     Some(AuthenticatedUser {
         id: user.id_val(),
         name,
@@ -75,9 +76,11 @@ pub async fn require_admin_or_redirect(
     db: &Database,
 ) -> Result<AuthenticatedUser, cot::response::Response> {
     let Some(user) = get_session_user(session, db).await else {
+        crate::metrics::record_authorization_denied("unauthenticated");
         return Err(redirect("/login"));
     };
     if user.role != Role::Admin {
+        crate::metrics::record_authorization_denied("forbidden");
         return Err("Forbidden"
             .with_status(cot::http::StatusCode::FORBIDDEN)
             .into_response()
@@ -96,6 +99,7 @@ pub async fn login(session: &Session, user_id: i64) -> cot::Result<()> {
         .insert(SESSION_USER_ID, user_id)
         .await
         .map_err(|e| cot::Error::internal(e.to_string()))?;
+    crate::metrics::record_active_user(user_id);
     Ok(())
 }
 

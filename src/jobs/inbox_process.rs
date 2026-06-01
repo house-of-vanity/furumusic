@@ -307,12 +307,18 @@ async fn process_folder_batch(
 
         // Extract metadata (with 60s timeout)
         let path_for_meta = file_path.to_path_buf();
+        let metadata_start = std::time::Instant::now();
         let meta_future =
             tokio::task::spawn_blocking(move || crate::agent::metadata::extract(&path_for_meta));
         let raw_meta =
             match tokio::time::timeout(std::time::Duration::from_secs(60), meta_future).await {
-                Ok(Ok(Ok(m))) => m,
+                Ok(Ok(Ok(m))) => {
+                    crate::metrics::record_agent_metadata(metadata_start.elapsed(), "ok");
+                    m
+                }
                 Ok(Ok(Err(e))) => {
+                    crate::metrics::record_agent_metadata(metadata_start.elapsed(), "error");
+                    crate::metrics::record_agent_failed("metadata");
                     let msg = format!("{filename}: metadata error: {e}");
                     log.error(&msg);
                     let _ = review.set_failed(db, &msg).await;
@@ -320,6 +326,8 @@ async fn process_folder_batch(
                     continue;
                 }
                 Ok(Err(e)) => {
+                    crate::metrics::record_agent_metadata(metadata_start.elapsed(), "panic");
+                    crate::metrics::record_agent_failed("metadata");
                     let msg = format!("{filename}: metadata panic: {e}");
                     log.error(&msg);
                     let _ = review.set_failed(db, &msg).await;
@@ -327,6 +335,8 @@ async fn process_folder_batch(
                     continue;
                 }
                 Err(_) => {
+                    crate::metrics::record_agent_metadata(metadata_start.elapsed(), "timeout");
+                    crate::metrics::record_agent_failed("metadata");
                     let msg = format!("{filename}: metadata timeout (60s)");
                     log.error(&msg);
                     let _ = review.set_failed(db, &msg).await;
@@ -416,6 +426,7 @@ async fn process_folder_batch(
     // Lookup all unique artist queries
     let mut all_similar_artists = Vec::new();
     for q in &artist_queries {
+        let rag_start = std::time::Instant::now();
         match tokio::time::timeout(
             std::time::Duration::from_secs(30),
             crate::agent::rag::find_similar_artists(pool, q, 5),
@@ -423,6 +434,7 @@ async fn process_folder_batch(
         .await
         {
             Ok(Ok(results)) => {
+                crate::metrics::record_agent_rag("artist", "ok", rag_start.elapsed(), results.len());
                 for a in results {
                     if !all_similar_artists
                         .iter()
@@ -432,13 +444,20 @@ async fn process_folder_batch(
                     }
                 }
             }
-            Ok(Err(e)) => log.warn(&format!("RAG artist lookup failed for \"{q}\": {e}")),
-            Err(_) => log.warn(&format!("RAG artist lookup timed out for \"{q}\"")),
+            Ok(Err(e)) => {
+                crate::metrics::record_agent_rag("artist", "error", rag_start.elapsed(), 0);
+                log.warn(&format!("RAG artist lookup failed for \"{q}\": {e}"))
+            }
+            Err(_) => {
+                crate::metrics::record_agent_rag("artist", "timeout", rag_start.elapsed(), 0);
+                log.warn(&format!("RAG artist lookup timed out for \"{q}\""))
+            }
         }
     }
 
     let mut all_similar_releases = Vec::new();
     for q in &album_queries {
+        let rag_start = std::time::Instant::now();
         match tokio::time::timeout(
             std::time::Duration::from_secs(30),
             crate::agent::rag::find_similar_releases(pool, q, 5),
@@ -446,6 +465,7 @@ async fn process_folder_batch(
         .await
         {
             Ok(Ok(results)) => {
+                crate::metrics::record_agent_rag("release", "ok", rag_start.elapsed(), results.len());
                 for r in results {
                     if !all_similar_releases
                         .iter()
@@ -455,8 +475,14 @@ async fn process_folder_batch(
                     }
                 }
             }
-            Ok(Err(e)) => log.warn(&format!("RAG release lookup failed for \"{q}\": {e}")),
-            Err(_) => log.warn(&format!("RAG release lookup timed out for \"{q}\"")),
+            Ok(Err(e)) => {
+                crate::metrics::record_agent_rag("release", "error", rag_start.elapsed(), 0);
+                log.warn(&format!("RAG release lookup failed for \"{q}\": {e}"))
+            }
+            Err(_) => {
+                crate::metrics::record_agent_rag("release", "timeout", rag_start.elapsed(), 0);
+                log.warn(&format!("RAG release lookup timed out for \"{q}\""))
+            }
         }
     }
 
@@ -547,11 +573,14 @@ async fn process_folder_batch(
     let batch_result = match llm_result {
         Ok(r) => r,
         Err(e) => {
+            crate::metrics::record_agent_failed("llm");
+            crate::metrics::record_agent_folder_batch("failed", file_count, batch_start.elapsed());
             let err_msg = format!("Batch LLM call failed: {e}");
             log.error(&err_msg);
             // Mark all files as failed
             for mut p in prepared {
                 let _ = p.review.set_failed(db, &err_msg).await;
+                crate::metrics::record_agent_file_processed("failed", "failed");
             }
             let total_fail_count = failed_reviews.len() as u64 + file_count as u64;
             let duration_ms = batch_start.elapsed().as_millis() as i64;
@@ -612,6 +641,7 @@ async fn process_folder_batch(
 
         let result_json = serde_json::to_string(normalized).unwrap_or_default();
         let confidence = normalized.confidence.unwrap_or(0.0);
+        crate::metrics::observe_agent_confidence(confidence);
 
         let feat = if normalized.featured_artists.is_empty() {
             String::new()
@@ -655,9 +685,12 @@ async fn process_folder_batch(
             {
                 Ok(()) => {
                     let _ = p.review.set_auto_approved(db).await;
+                    crate::metrics::record_agent_file_processed("ok", "auto_approved");
                     ok_count += 1;
                 }
                 Err(e) => {
+                    crate::metrics::record_agent_failed("finalize");
+                    crate::metrics::record_agent_file_processed("failed", "failed");
                     let msg = format!("{filename}: finalize failed: {e}");
                     log.error(&msg);
                     let _ = p.review.set_failed(db, &msg).await;
@@ -671,6 +704,7 @@ async fn process_folder_batch(
             )
             .unwrap();
             let _ = p.review.save(db).await;
+            crate::metrics::record_agent_file_processed("ok", "pending_review");
             log.info(&format!(
                 "{filename}: manual review (confidence {confidence} < {})",
                 config.agent_confidence_threshold,
@@ -682,9 +716,11 @@ async fn process_folder_batch(
     let duration_ms = batch_start.elapsed().as_millis() as i64;
     if fail_count == 0 {
         let _ = run.set_completed(db, duration_ms, &log.output()).await;
+        crate::metrics::record_agent_folder_batch("completed", file_count, batch_start.elapsed());
     } else {
         let msg = format!("{fail_count} file(s) failed");
         let _ = run.set_failed(db, duration_ms, &log.output(), &msg).await;
+        crate::metrics::record_agent_folder_batch("failed", file_count, batch_start.elapsed());
     }
 
     (ok_count, fail_count)

@@ -200,6 +200,12 @@ impl JobRun {
         duration_ms: i64,
         log: &str,
     ) -> cot::db::Result<()> {
+        crate::metrics::record_scheduler_job(
+            self.job_name.as_str(),
+            self.trigger.as_str(),
+            "completed",
+            duration_ms,
+        );
         self.status = LimitedString::new("completed").unwrap();
         self.finished_at = Some(now_iso().to_string());
         self.duration_ms = Some(duration_ms);
@@ -214,6 +220,12 @@ impl JobRun {
         log: &str,
         error: &str,
     ) -> cot::db::Result<()> {
+        crate::metrics::record_scheduler_job(
+            self.job_name.as_str(),
+            self.trigger.as_str(),
+            "failed",
+            duration_ms,
+        );
         self.status = LimitedString::new("failed").unwrap();
         self.finished_at = Some(now_iso().to_string());
         self.duration_ms = Some(duration_ms);

@@ -29,6 +29,8 @@ impl Job for InboxDiscoverJob {
     }
 
     async fn run(&self, ctx: &JobContext, log: &mut JobLog) -> anyhow::Result<()> {
+        let run_start = std::time::Instant::now();
+        let run_outcome = "completed";
         // Prevent overlapping discover runs
         if DISCOVER_RUNNING
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -44,6 +46,19 @@ impl Job for InboxDiscoverJob {
             }
         }
         let _guard = Guard;
+        struct MetricsGuard {
+            start: std::time::Instant,
+            outcome: &'static str,
+        }
+        impl Drop for MetricsGuard {
+            fn drop(&mut self) {
+                crate::metrics::record_agent_discover_run(self.outcome, self.start.elapsed());
+            }
+        }
+        let mut metrics_guard = MetricsGuard {
+            start: run_start,
+            outcome: run_outcome,
+        };
 
         let config = &ctx.config;
 
@@ -97,6 +112,7 @@ impl Job for InboxDiscoverJob {
 
                 // Compute SHA-256 hash
                 let path_clone = file_path.to_path_buf();
+                let hash_start = std::time::Instant::now();
                 let (hash, file_size) =
                     match tokio::task::spawn_blocking(move || -> anyhow::Result<(String, i64)> {
                         let data = std::fs::read(&path_clone)?;
@@ -107,8 +123,12 @@ impl Job for InboxDiscoverJob {
                     })
                     .await?
                     {
-                        Ok(v) => v,
+                        Ok(v) => {
+                            crate::metrics::record_agent_file_hash(hash_start.elapsed(), v.1, "ok");
+                            v
+                        }
                         Err(e) => {
+                            crate::metrics::record_agent_file_hash(hash_start.elapsed(), 0, "error");
                             log.warn(&format!("Failed to hash {}: {e}", file_path.display()));
                             continue;
                         }
@@ -125,13 +145,18 @@ impl Job for InboxDiscoverJob {
 
                 // Extract raw metadata
                 let path_for_meta = file_path.to_path_buf();
+                let metadata_start = std::time::Instant::now();
                 let raw_meta = match tokio::task::spawn_blocking(move || {
                     crate::agent::metadata::extract(&path_for_meta)
                 })
                 .await?
                 {
-                    Ok(m) => m,
+                    Ok(m) => {
+                        crate::metrics::record_agent_metadata(metadata_start.elapsed(), "ok");
+                        m
+                    }
                     Err(e) => {
+                        crate::metrics::record_agent_metadata(metadata_start.elapsed(), "error");
                         log.warn(&format!(
                             "Failed to extract metadata from {}: {e}",
                             file_path.display()
@@ -189,6 +214,12 @@ impl Job for InboxDiscoverJob {
             "Discovered {} new files, skipped {} (hash known), skipped {} (already queued)",
             discovered, skipped_hash, skipped_existing
         ));
+        crate::metrics::record_agent_discover_files(
+            audio_files.len() as u64,
+            discovered,
+            skipped_hash,
+            skipped_existing,
+        );
 
         // Trigger inbox_process in background if new files were discovered
         // and no orchestrator is already running
@@ -219,6 +250,7 @@ impl Job for InboxDiscoverJob {
             }
         }
 
+        metrics_guard.outcome = run_outcome;
         Ok(())
     }
 }

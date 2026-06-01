@@ -128,13 +128,21 @@ pub async fn find_best_cover(folder: &Path, audio_files: &[PathBuf]) -> Option<C
         match tokio::fs::read(img_path).await {
             Ok(data) if !data.is_empty() => {
                 let mime = mime_for_image(img_path);
+                crate::metrics::record_agent_cover_lookup("folder", "ok", data.len());
                 return Some(CoverImage {
                     data,
                     mime_type: mime,
                     source: CoverSource::FolderFile(img_path.clone()),
                 });
             }
-            _ => continue,
+            Ok(_) => {
+                crate::metrics::record_agent_cover_lookup("folder", "empty", 0);
+                continue;
+            }
+            Err(_) => {
+                crate::metrics::record_agent_cover_lookup("folder", "error", 0);
+                continue;
+            }
         }
     }
 
@@ -143,10 +151,12 @@ pub async fn find_best_cover(folder: &Path, audio_files: &[PathBuf]) -> Option<C
         let path = audio_path.to_path_buf();
         let result = tokio::task::spawn_blocking(move || extract_embedded_cover(&path)).await;
         if let Ok(Some(cover)) = result {
+            crate::metrics::record_agent_cover_lookup("embedded", "ok", cover.data.len());
             return Some(cover);
         }
     }
 
+    crate::metrics::record_agent_cover_lookup("none", "not_found", 0);
     None
 }
 

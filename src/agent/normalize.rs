@@ -330,6 +330,7 @@ pub async fn normalize_batch(
     // If over 80% of context limit and more than 1 file, split
     let limit_80 = context_limit * 80 / 100;
     if estimated > limit_80 && files.len() > 1 {
+        crate::metrics::record_agent_llm_split("estimated_context");
         tracing::info!(
             estimated_tokens = estimated,
             context_limit,
@@ -419,6 +420,7 @@ pub async fn normalize_batch(
                 || err_str.contains("length")
                 || err_str.contains("token");
             if is_context_error {
+                crate::metrics::record_agent_llm_split("context_error");
                 tracing::warn!(
                     file_count = files.len(),
                     "LLM error suggests context overflow, splitting batch: {e}"
@@ -466,14 +468,40 @@ pub async fn normalize_batch(
             }
             return Err(e);
         }
-        Err(e) => return Err(e),
+        Err(e) => {
+            crate::metrics::record_agent_llm(
+                llm_model,
+                "error",
+                std::time::Duration::from_millis(duration_ms),
+                0,
+                0,
+                files.len(),
+                Some(estimated),
+            );
+            return Err(e);
+        }
     };
 
     let prompt_tokens = usage.prompt_tokens.unwrap_or(0) as u64;
     let completion_tokens = usage.completion_tokens.unwrap_or(0) as u64;
+    crate::metrics::record_agent_llm(
+        &resp_model,
+        "ok",
+        std::time::Duration::from_millis(duration_ms),
+        prompt_tokens,
+        completion_tokens,
+        files.len(),
+        Some(estimated),
+    );
 
     // Parse batch response
-    let results = parse_batch_response(&response_text, &files)?;
+    let results = match parse_batch_response(&response_text, &files) {
+        Ok(results) => results,
+        Err(error) => {
+            crate::metrics::record_agent_llm_parse_failure(&resp_model);
+            return Err(error);
+        }
+    };
 
     Ok(BatchNormalizeResult {
         results,

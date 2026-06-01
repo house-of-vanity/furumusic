@@ -172,6 +172,7 @@ pub async fn oidc_start_handler(
         || config.oidc_client_secret.is_empty()
     {
         tracing::warn!("OIDC start requested but SSO is not configured");
+        crate::metrics::record_auth_attempt("oidc", "failure", "not_configured");
         return redirect_login_with_error(i18n.t.login_sso_disabled);
     }
 
@@ -180,6 +181,7 @@ pub async fn oidc_start_handler(
         Ok(c) => c,
         Err(e) => {
             tracing::error!("OIDC provider error: {e}");
+            crate::metrics::record_auth_attempt("oidc", "failure", "provider_error");
             return redirect_login_with_error(i18n.t.login_oidc_error);
         }
     };
@@ -276,19 +278,23 @@ pub async fn oidc_callback_handler(
     // Validate CSRF state.
     let Some(saved_csrf) = saved_csrf else {
         tracing::warn!("OIDC callback: no CSRF state in session");
+        crate::metrics::record_auth_attempt("oidc", "failure", "missing_state");
         return redirect_login_with_error(i18n.t.login_oidc_error);
     };
     if query.state != saved_csrf {
         tracing::warn!("OIDC callback: CSRF state mismatch");
+        crate::metrics::record_auth_attempt("oidc", "failure", "csrf");
         return redirect_login_with_error(i18n.t.login_oidc_error);
     }
 
     let Some(nonce_str) = saved_nonce else {
         tracing::warn!("OIDC callback: no nonce in session");
+        crate::metrics::record_auth_attempt("oidc", "failure", "missing_nonce");
         return redirect_login_with_error(i18n.t.login_oidc_error);
     };
     let Some(pkce_str) = saved_pkce else {
         tracing::warn!("OIDC callback: no PKCE verifier in session");
+        crate::metrics::record_auth_attempt("oidc", "failure", "missing_pkce");
         return redirect_login_with_error(i18n.t.login_oidc_error);
     };
 
@@ -300,6 +306,7 @@ pub async fn oidc_callback_handler(
         Ok(c) => c,
         Err(e) => {
             tracing::error!("OIDC provider error during callback: {e}");
+            crate::metrics::record_auth_attempt("oidc", "failure", "provider_error");
             return redirect_login_with_error(i18n.t.login_oidc_error);
         }
     };
@@ -318,6 +325,7 @@ pub async fn oidc_callback_handler(
         Ok(req) => req,
         Err(e) => {
             tracing::error!("OIDC token endpoint not configured: {e}");
+            crate::metrics::record_auth_attempt("oidc", "failure", "token_config");
             return redirect_login_with_error(i18n.t.login_oidc_error);
         }
     };
@@ -330,6 +338,7 @@ pub async fn oidc_callback_handler(
         Ok(t) => t,
         Err(e) => {
             tracing::error!("OIDC token exchange failed: {e}");
+            crate::metrics::record_auth_attempt("oidc", "failure", "token_exchange");
             return redirect_login_with_error(i18n.t.login_oidc_error);
         }
     };
@@ -340,6 +349,7 @@ pub async fn oidc_callback_handler(
         Some(t) => t,
         None => {
             tracing::error!("OIDC response missing ID token");
+            crate::metrics::record_auth_attempt("oidc", "failure", "missing_id_token");
             return redirect_login_with_error(i18n.t.login_oidc_error);
         }
     };
@@ -348,6 +358,7 @@ pub async fn oidc_callback_handler(
         Ok(c) => c,
         Err(e) => {
             tracing::error!("OIDC ID token verification failed: {e}");
+            crate::metrics::record_auth_attempt("oidc", "failure", "id_token_verify");
             return redirect_login_with_error(i18n.t.login_oidc_error);
         }
     };
@@ -395,6 +406,7 @@ pub async fn oidc_callback_handler(
             config.oidc_user_groups,
             config.oidc_admin_groups,
         );
+        crate::metrics::record_auth_attempt("oidc", "failure", "not_in_group");
         return redirect_login_with_error(i18n.t.login_access_denied);
     }
 
@@ -413,12 +425,15 @@ pub async fn oidc_callback_handler(
         Ok(u) => u,
         Err(e) => {
             tracing::error!("OIDC user provisioning failed: {e}");
+            crate::metrics::record_auth_attempt("oidc", "failure", "provisioning");
             return redirect_login_with_error(i18n.t.login_oidc_error);
         }
     };
 
     // Log the user in.
     auth::login(&session, user.id_val()).await?;
+    crate::metrics::record_auth_attempt("oidc", "success", "ok");
+    crate::metrics::record_session_created("oidc");
 
     // Clear OIDC session keys.
     let _: Option<String> = session

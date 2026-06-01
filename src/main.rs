@@ -7,6 +7,7 @@ mod i18n;
 mod jobs;
 mod lastfm;
 mod media_paths;
+mod metrics;
 mod music;
 mod oidc;
 mod player;
@@ -139,12 +140,41 @@ async fn logout_handler(session: Session) -> cot::Result<cot::response::Response
     Ok(auth::redirect("/login"))
 }
 
+async fn metrics_handler(
+    config: Arc<AppConfig>,
+    pool: Arc<tokio::sync::OnceCell<sqlx::PgPool>>,
+) -> cot::Result<cot::http::Response<Body>> {
+    if config.database_url.is_empty() {
+        return Ok(cot::http::Response::builder()
+            .status(cot::http::StatusCode::SERVICE_UNAVAILABLE)
+            .header(cot::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")
+            .body(Body::fixed("furumusic_metrics_unavailable 1\n"))
+            .expect("valid response"));
+    }
+    let pg_pool = pool
+        .get_or_init(|| async {
+            sqlx::postgres::PgPoolOptions::new()
+                .max_connections(2)
+                .connect(&config.database_url)
+                .await
+                .expect("metrics pool")
+        })
+        .await;
+    let body = metrics::render(pg_pool, &config).await;
+    Ok(cot::http::Response::builder()
+        .status(cot::http::StatusCode::OK)
+        .header(cot::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")
+        .body(Body::fixed(body))
+        .expect("valid response"))
+}
+
 // ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
 
 struct FuruApp {
     config: Arc<AppConfig>,
+    pool: Arc<tokio::sync::OnceCell<sqlx::PgPool>>,
 }
 
 impl App for FuruApp {
@@ -170,6 +200,19 @@ impl App for FuruApp {
                     index(session, db, i18n).await
                 },
                 "index",
+            ),
+            Route::with_handler_and_name(
+                "/metrics",
+                get({
+                    let config = Arc::clone(&self.config);
+                    let pool = Arc::clone(&self.pool);
+                    move || {
+                        let config = Arc::clone(&config);
+                        let pool = Arc::clone(&pool);
+                        async move { metrics_handler(config, pool).await }
+                    }
+                }),
+                "metrics",
             ),
             Route::with_handler_and_name(
                 "/login",
@@ -200,6 +243,11 @@ impl App for FuruApp {
                             let data = match result {
                                 FormResult::Ok(data) => data,
                                 FormResult::ValidationError(_) => {
+                                    metrics::record_auth_attempt(
+                                        "password",
+                                        "failure",
+                                        "validation_error",
+                                    );
                                     let msg = i18n.t.login_invalid.to_owned();
                                     return login_page_handler(i18n, &config, db, msg)
                                         .await?
@@ -216,6 +264,10 @@ impl App for FuruApp {
                                         PasswordVerificationResult::Ok
                                         | PasswordVerificationResult::OkObsolete(_) => {
                                             auth::login(&session, user.id_val()).await?;
+                                            metrics::record_auth_attempt(
+                                                "password", "success", "ok",
+                                            );
+                                            metrics::record_session_created("password");
                                             return Ok(auth::redirect("/"));
                                         }
                                         PasswordVerificationResult::Invalid => {}
@@ -223,6 +275,11 @@ impl App for FuruApp {
                                 }
                             }
 
+                            metrics::record_auth_attempt(
+                                "password",
+                                "failure",
+                                "bad_credentials",
+                            );
                             let msg = i18n.t.login_invalid.to_owned();
                             login_page_handler(i18n, &config, db, msg)
                                 .await?
@@ -332,6 +389,7 @@ impl Project for FuruProject {
         context: &cot::project::MiddlewareContext,
     ) -> cot::project::RootHandler {
         handler
+            .middleware(metrics::MetricsLayer)
             .middleware(StaticFilesMiddleware::from_context(context))
             .middleware(SessionMiddleware::from_context(context))
             .build()
@@ -361,6 +419,7 @@ impl Project for FuruProject {
         apps.register_with_views(
             FuruApp {
                 config: Arc::clone(&self.app_config),
+                pool: Arc::new(tokio::sync::OnceCell::new()),
             },
             "",
         );

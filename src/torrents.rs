@@ -777,7 +777,7 @@ impl TorrentService {
 
         self.ensure_memory_job(pool, uploader_user_id, id).await?;
 
-        let (torrent_bytes, output_dir) = {
+        let (torrent_bytes, output_dir, selected_size) = {
             let mut jobs = self.jobs.lock().await;
             let job = jobs.get_mut(id).context("torrent job not found")?;
             if job.user_id != uploader_user_id {
@@ -800,7 +800,11 @@ impl TorrentService {
             job.error = None;
             job.completed_at = None;
             job.updated_at = now_string();
-            (job.torrent_bytes.clone(), job.output_dir.clone())
+            (
+                job.torrent_bytes.clone(),
+                job.output_dir.clone(),
+                job.selected_size(),
+            )
         };
 
         tokio::fs::create_dir_all(&output_dir).await?;
@@ -846,6 +850,7 @@ impl TorrentService {
         let service = Arc::clone(self);
         let pool = pool.clone();
         let id = id.to_string();
+        let download_start = std::time::Instant::now();
         tokio::spawn(async move {
             if let Err(err) = handle.wait_until_completed().await {
                 if service.is_paused(&id).await {
@@ -853,6 +858,11 @@ impl TorrentService {
                 }
                 service.stop_torrent(&handle).await;
                 service.fail_job(&pool, &id, err.to_string()).await;
+                crate::metrics::record_torrent_download(
+                    "failed",
+                    selected_size,
+                    download_start.elapsed(),
+                );
                 return;
             }
             service.stop_torrent(&handle).await;
@@ -861,6 +871,17 @@ impl TorrentService {
                 .await
             {
                 service.fail_job(&pool, &id, err.to_string()).await;
+                crate::metrics::record_torrent_download(
+                    "failed",
+                    selected_size,
+                    download_start.elapsed(),
+                );
+            } else {
+                crate::metrics::record_torrent_download(
+                    "completed",
+                    selected_size,
+                    download_start.elapsed(),
+                );
             }
         });
 

@@ -3571,6 +3571,7 @@ async fn stream_handler(
             let chunk_size = end - start + 1;
 
             let data = read_file_range(&full_path, start, chunk_size).await?;
+            crate::metrics::record_stream_request(true, chunk_size);
 
             let response = cot::http::Response::builder()
                 .status(StatusCode::PARTIAL_CONTENT)
@@ -3589,6 +3590,7 @@ async fn stream_handler(
     let data = tokio::fs::read(&full_path)
         .await
         .map_err(|e| cot::Error::internal(e.to_string()))?;
+    crate::metrics::record_stream_request(false, file_size);
 
     let response = cot::http::Response::builder()
         .status(StatusCode::OK)
@@ -4491,6 +4493,7 @@ async fn history_handler(
     .execute(pool)
     .await
     .map_err(|e| cot::Error::internal(e.to_string()))?;
+    crate::metrics::record_play_history(entry.duration_listened, entry.completed);
 
     if let Some(listened_seconds) = entry.duration_listened {
         let (config, _) = AppConfig::load_with_db(&db).await;
