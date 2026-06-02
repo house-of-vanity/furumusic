@@ -1847,11 +1847,13 @@ document.addEventListener('alpine:init', () => {
     // -----------------------------------------------------------------------
     Alpine.store('library', {
         view: 'artists',
+        artistFilter: 'all',
         artists: [],
         artistsPage: 0,
         artistsTotal: 0,
         loading: false,
         _allLoaded: false,
+        _artistsLoadToken: 0,
         currentArtist: null,
         currentRelease: null,
         currentPlaylist: null,
@@ -1866,7 +1868,6 @@ document.addEventListener('alpine:init', () => {
         _hashNav: false, // guard against circular hash updates
 
         init() {
-            this.loadArtists(1);
             this._setupScroll();
 
             // Listen for browser back/forward
@@ -1903,7 +1904,10 @@ document.addEventListener('alpine:init', () => {
             const params = match[3] || '';
 
             if (view === 'artists' && !id) {
-                if (this.view !== 'artists') this.goArtists(options);
+                if (this.view !== 'artists' || this.artistsPage === 0) this.goArtists(options);
+                else if (options.restoreScroll) this._restoreScrollPosition(hash);
+            } else if (view === 'uploads' && !id) {
+                if (this.view !== 'my_uploads' || this.artistsPage === 0) this.goMyUploads(options);
                 else if (options.restoreScroll) this._restoreScrollPosition(hash);
             } else if (view === 'artist' && id) {
                 this.openArtist(id, options);
@@ -1969,8 +1973,22 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        _resetArtistList(filter) {
+            this.artistFilter = filter;
+            this.artists = [];
+            this.artistsPage = 0;
+            this.artistsTotal = 0;
+            this._allLoaded = false;
+            this.loading = false;
+            this._artistsLoadToken += 1;
+        },
+
         goArtists(options = {}) {
             this._beginNavigation('#artists', options);
+            if (this.artistFilter !== 'all' || this.artistsPage === 0) {
+                this._resetArtistList('all');
+                this.loadArtists(1);
+            }
             this.view = 'artists';
             this.currentArtist = null;
             this.currentRelease = null;
@@ -1982,13 +2000,35 @@ document.addEventListener('alpine:init', () => {
             this._afterNavigation(options);
         },
 
+        goMyUploads(options = {}) {
+            this._beginNavigation('#uploads', options);
+            if (this.artistFilter !== 'uploads' || this.artistsPage === 0) {
+                this._resetArtistList('uploads');
+                this.loadArtists(1);
+            }
+            this.view = 'my_uploads';
+            this.currentArtist = null;
+            this.currentRelease = null;
+            this.currentPlaylist = null;
+            this.searchQuery = '';
+            this.searchResults = null;
+            this._previousView = 'my_uploads';
+            this.$nextTick(() => { this._setupScroll(); });
+            this._afterNavigation(options);
+        },
+
         async loadArtists(page) {
             if (this.loading || this._allLoaded) return;
             this.loading = true;
+            const filter = this.artistFilter;
+            const token = this._artistsLoadToken + 1;
+            this._artistsLoadToken = token;
             try {
-                const res = await fetch(`/api/player/artists?page=${page}&limit=60`);
+                const mine = filter === 'uploads' ? '&mine=true' : '';
+                const res = await fetch(`/api/player/artists?page=${page}&limit=60${mine}`);
                 if (!res.ok) throw new Error('failed');
                 const data = await res.json();
+                if (token !== this._artistsLoadToken || filter !== this.artistFilter) return;
                 if (page === 1) {
                     this.artists = data.items;
                 } else {
@@ -2000,7 +2040,9 @@ document.addEventListener('alpine:init', () => {
                     this._allLoaded = true;
                 }
             } catch {}
-            this.loading = false;
+            if (token === this._artistsLoadToken) {
+                this.loading = false;
+            }
         },
 
         async openArtist(id, options = {}) {
@@ -2337,8 +2379,8 @@ document.addEventListener('alpine:init', () => {
             this.searchLoading = false;
             if (this.view === 'search') {
                 this.view = this._previousView || 'artists';
-                this._setHash('#artists');
-                if (this.view === 'artists') {
+                this._setHash(this.view === 'my_uploads' ? '#uploads' : '#artists');
+                if (this.view === 'artists' || this.view === 'my_uploads') {
                     this.$nextTick(() => { this._setupScroll(); });
                 }
             }

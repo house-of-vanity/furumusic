@@ -62,6 +62,12 @@
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 10-16 0"/></svg>
                     {{ t.player_artists }}
                 </div>
+                <div class="sidebar-nav-item"
+                     :class="{ active: $store.library.view === 'my_uploads' }"
+                     @click="$store.library.goMyUploads()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
+                    {{ t.player_my_uploads }}
+                </div>
             </div>
             <div class="sidebar-section">
                 <div class="sidebar-section-title">
@@ -169,6 +175,12 @@
                                  @click="$store.library.goArtists(); $store.mobile.closeLibrary()">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 10-16 0"/></svg>
                                 {{ t.player_artists }}
+                            </div>
+                            <div class="sidebar-nav-item"
+                                 :class="{ active: $store.library.view === 'my_uploads' }"
+                                 @click="$store.library.goMyUploads(); $store.mobile.closeLibrary()">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
+                                {{ t.player_my_uploads }}
                             </div>
                         </div>
 
@@ -507,9 +519,9 @@
             </template>
 
             <!-- Artists Grid -->
-            <template x-if="$store.library.view === 'artists'">
+            <template x-if="$store.library.view === 'artists' || $store.library.view === 'my_uploads'">
                 <div>
-                    <h1 class="section-title">{{ t.player_artists }}</h1>
+                    <h1 class="section-title" x-text="$store.library.view === 'my_uploads' ? '{{ t.player_my_uploads }}' : '{{ t.player_artists }}'"></h1>
                     <div class="card-grid">
                         <template x-for="artist in $store.library.artists" :key="artist.id">
                             <div class="card" @click="$store.library.openArtist(artist.id)">
@@ -537,6 +549,11 @@
                             </div>
                         </template>
                     </div>
+                    <template x-if="!$store.library.loading && $store.library.artists.length === 0">
+                        <div class="empty-state">
+                            <p x-text="$store.library.view === 'my_uploads' ? '{{ t.player_no_uploaded_tracks }}' : '{{ t.artists_empty }}'"></p>
+                        </div>
+                    </template>
                     <template x-if="$store.library.loading">
                         <div class="loading-spinner"><div class="spinner"></div></div>
                     </template>
@@ -548,7 +565,8 @@
             <template x-if="$store.library.view === 'artist_detail' && $store.library.currentArtist">
                 <div>
                     <div class="breadcrumb">
-                        <a @click="$store.library.goArtists()">{{ t.player_artists }}</a>
+                        <a @click="$store.library.artistFilter === 'uploads' ? $store.library.goMyUploads() : $store.library.goArtists()"
+                           x-text="$store.library.artistFilter === 'uploads' ? '{{ t.player_my_uploads }}' : '{{ t.player_artists }}'"></a>
                         <span>/</span>
                         <span x-text="$store.library.currentArtist.name"></span>
                     </div>
@@ -708,7 +726,8 @@
             <template x-if="$store.library.view === 'release_detail' && $store.library.currentRelease">
                 <div>
                     <div class="breadcrumb">
-                        <a @click="$store.library.goArtists()">{{ t.player_artists }}</a>
+                        <a @click="$store.library.artistFilter === 'uploads' ? $store.library.goMyUploads() : $store.library.goArtists()"
+                           x-text="$store.library.artistFilter === 'uploads' ? '{{ t.player_my_uploads }}' : '{{ t.player_artists }}'"></a>
                         <span>/</span>
                         <template x-if="$store.library.currentRelease.artists.length > 0">
                             <a @click="$store.library.openArtist($store.library.currentRelease.artists[0].id)" x-text="$store.library.currentRelease.artists[0].name"></a>

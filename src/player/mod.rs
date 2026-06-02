@@ -2774,13 +2774,72 @@ async fn artists_handler(
     pool: &sqlx::PgPool,
     query: cot::request::extractors::UrlQuery<PaginationQuery>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(_user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
 
     let page = query.0.page.unwrap_or(1).max(1);
     let per_page = query.0.limit.unwrap_or(60).clamp(1, 200);
     let offset = (page - 1) as i64 * per_page as i64;
+    let mine = query.0.mine.unwrap_or(false);
+
+    if mine {
+        let total_row = sqlx::query_as::<_, CountRow>(
+            r#"SELECT COUNT(DISTINCT a.id) AS count
+               FROM furumusic__artist a
+               JOIN furumusic__track_artist ta ON ta.artist_id = a.id AND ta.role <> 'featuring'
+               JOIN furumusic__track t ON t.id = ta.track_id AND t.is_hidden = false
+               JOIN furumusic__release r ON r.id = t.release_id AND r.is_hidden = false
+               JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
+              WHERE a.is_hidden = false
+                AND mf.uploaded_by_user_id = $1"#,
+        )
+        .bind(user.id)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+        let rows = sqlx::query_as::<_, ArtistRow>(
+            r#"SELECT a.id, a.name::text as name, a.image_file_id,
+                      COUNT(DISTINCT r.id) AS release_count,
+                      COUNT(DISTINCT t.id) AS track_count
+               FROM furumusic__artist a
+               JOIN furumusic__track_artist ta ON ta.artist_id = a.id AND ta.role <> 'featuring'
+               JOIN furumusic__track t ON t.id = ta.track_id AND t.is_hidden = false
+               JOIN furumusic__release r ON r.id = t.release_id AND r.is_hidden = false
+               JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
+              WHERE a.is_hidden = false
+                AND mf.uploaded_by_user_id = $1
+              GROUP BY a.id, a.name, a.name_sort, a.image_file_id
+              ORDER BY release_count DESC, track_count DESC, a.name_sort
+              LIMIT $2 OFFSET $3"#,
+        )
+        .bind(user.id)
+        .bind(per_page as i64)
+        .bind(offset)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+        let items: Vec<ArtistCard> = rows
+            .into_iter()
+            .map(|r| ArtistCard {
+                id: r.id,
+                name: r.name,
+                image_url: cover_variant_url(r.image_file_id, "medium"),
+                release_count: r.release_count,
+                track_count: r.track_count,
+            })
+            .collect();
+
+        return Json(Paginated {
+            items,
+            total: total_row.count,
+            page,
+            per_page,
+        })
+        .into_response();
+    }
 
     let total_row = sqlx::query_as::<_, CountRow>(
         r#"SELECT COUNT(DISTINCT a.id) AS count

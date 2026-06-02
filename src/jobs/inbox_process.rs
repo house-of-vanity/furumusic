@@ -17,28 +17,99 @@ pub fn is_orchestrator_running() -> bool {
     ORCHESTRATOR_RUNNING.load(Ordering::SeqCst)
 }
 
-/// Try to acquire the PostgreSQL advisory lock for the orchestrator.
-/// Returns true if the lock was acquired (no other orchestrator is running).
-async fn try_acquire_orchestrator_lock(pool: &sqlx::PgPool) -> bool {
-    match sqlx::query_scalar::<_, bool>("SELECT pg_try_advisory_lock($1)")
-        .bind(ORCHESTRATOR_ADVISORY_LOCK_ID)
-        .fetch_one(pool)
-        .await
-    {
-        Ok(acquired) => acquired,
-        Err(e) => {
-            tracing::error!("Failed to acquire advisory lock: {e}");
-            false
-        }
+struct OrchestratorAdvisoryGuard {
+    conn: Option<sqlx::pool::PoolConnection<sqlx::Postgres>>,
+}
+
+impl Drop for OrchestratorAdvisoryGuard {
+    fn drop(&mut self) {
+        let Some(mut conn) = self.conn.take() else {
+            return;
+        };
+
+        tokio::spawn(async move {
+            match sqlx::query_scalar::<_, bool>("SELECT pg_advisory_unlock($1)")
+                .bind(ORCHESTRATOR_ADVISORY_LOCK_ID)
+                .fetch_one(&mut *conn)
+                .await
+            {
+                Ok(true) => tracing::info!("inbox_process: advisory lock released"),
+                Ok(false) => tracing::warn!(
+                    "inbox_process: advisory lock was not held by the guard connection"
+                ),
+                Err(e) => tracing::error!("inbox_process: failed to release advisory lock: {e}"),
+            }
+        });
     }
 }
 
-/// Release the PostgreSQL advisory lock for the orchestrator.
-async fn release_orchestrator_lock(pool: &sqlx::PgPool) {
-    let _ = sqlx::query("SELECT pg_advisory_unlock($1)")
+async fn connection_holds_orchestrator_lock(
+    conn: &mut sqlx::pool::PoolConnection<sqlx::Postgres>,
+) -> anyhow::Result<bool> {
+    let holds_lock = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM pg_locks
+            WHERE locktype = 'advisory'
+              AND pid = pg_backend_pid()
+              AND mode = 'ExclusiveLock'
+              AND granted
+              AND objsubid = 1
+              AND classid::bigint = (($1::bigint >> 32) & 4294967295::bigint)
+              AND objid::bigint = ($1::bigint & 4294967295::bigint)
+        )
+        "#,
+    )
+    .bind(ORCHESTRATOR_ADVISORY_LOCK_ID)
+    .fetch_one(&mut **conn)
+    .await?;
+
+    Ok(holds_lock)
+}
+
+/// Try to acquire the PostgreSQL advisory lock for the orchestrator.
+///
+/// The guard owns the same pooled connection that acquired the session-level
+/// lock. This matters because PostgreSQL session advisory locks must be
+/// released on the same connection, not just through the same pool.
+async fn try_acquire_orchestrator_lock(
+    pool: &sqlx::PgPool,
+) -> anyhow::Result<Option<OrchestratorAdvisoryGuard>> {
+    let mut conn = pool.acquire().await?;
+
+    // Older versions acquired the lock through the pool and could return a
+    // locked idle connection. If we get such a connection, drain that stale
+    // re-entrant lock before taking the new guarded lock.
+    let mut cleaned_stale_locks = 0u8;
+    while connection_holds_orchestrator_lock(&mut conn).await? {
+        let unlocked = sqlx::query_scalar::<_, bool>("SELECT pg_advisory_unlock($1)")
+            .bind(ORCHESTRATOR_ADVISORY_LOCK_ID)
+            .fetch_one(&mut *conn)
+            .await?;
+
+        cleaned_stale_locks = cleaned_stale_locks.saturating_add(u8::from(unlocked));
+        if cleaned_stale_locks >= 8 {
+            break;
+        }
+    }
+    if cleaned_stale_locks > 0 {
+        tracing::warn!(
+            count = cleaned_stale_locks,
+            "inbox_process: released stale advisory lock(s) from an idle pooled connection"
+        );
+    }
+
+    let acquired = sqlx::query_scalar::<_, bool>("SELECT pg_try_advisory_lock($1)")
         .bind(ORCHESTRATOR_ADVISORY_LOCK_ID)
-        .execute(pool)
-        .await;
+        .fetch_one(&mut *conn)
+        .await?;
+
+    if acquired {
+        Ok(Some(OrchestratorAdvisoryGuard { conn: Some(conn) }))
+    } else {
+        Ok(None)
+    }
 }
 
 use crate::agent::dto::{FolderContext, NormalizedFields, PathHints, RawMetadata};
@@ -83,10 +154,10 @@ impl Job for InboxProcessJob {
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_err()
         {
-            log.info(
+            log.warn(
                 "Another inbox_process orchestrator is already running (AtomicBool), skipping",
             );
-            return Ok(());
+            anyhow::bail!("another inbox_process orchestrator is already running in this process");
         }
         struct AtomicGuard;
         impl Drop for AtomicGuard {
@@ -98,27 +169,16 @@ impl Job for InboxProcessJob {
         let _atomic_guard = AtomicGuard;
 
         // --- Guard 2: PostgreSQL advisory lock (cross-process/binary safe) ---
-        if !try_acquire_orchestrator_lock(&ctx.pool).await {
-            log.info("Another inbox_process orchestrator holds the advisory lock, skipping");
-            return Ok(());
-        }
-        tracing::info!("inbox_process: advisory lock acquired");
-        let pool_for_unlock = ctx.pool.clone();
-        struct AdvisoryGuard {
-            pool: sqlx::PgPool,
-        }
-        impl Drop for AdvisoryGuard {
-            fn drop(&mut self) {
-                let pool = self.pool.clone();
-                tokio::spawn(async move {
-                    release_orchestrator_lock(&pool).await;
-                    tracing::info!("inbox_process: advisory lock released");
-                });
+        let _advisory_guard = match try_acquire_orchestrator_lock(&ctx.pool).await? {
+            Some(guard) => guard,
+            None => {
+                log.warn("Another inbox_process orchestrator holds the advisory lock");
+                anyhow::bail!(
+                    "inbox_process advisory lock is held by another database session; no in-process orchestrator is running"
+                );
             }
-        }
-        let _advisory_guard = AdvisoryGuard {
-            pool: pool_for_unlock,
         };
+        tracing::info!("inbox_process: advisory lock acquired");
 
         let config = Arc::clone(&ctx.config);
         let mut total_ok = 0u64;

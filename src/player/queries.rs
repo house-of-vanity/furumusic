@@ -49,6 +49,7 @@ pub(super) struct RemoveTrackRequest {
 pub(super) struct PaginationQuery {
     pub(super) page: Option<i32>,
     pub(super) limit: Option<i32>,
+    pub(super) mine: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]

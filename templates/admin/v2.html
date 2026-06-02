@@ -1332,6 +1332,89 @@ tbody tr:hover {
 .user-stats-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
 }
+
+.user-activity-list {
+    display: grid;
+    gap: 8px;
+}
+
+.user-activity-row {
+    min-width: 0;
+    padding: 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-primary);
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+}
+
+.user-activity-cover {
+    width: 52px;
+    height: 52px;
+    border-radius: 4px;
+    background: var(--bg-elevated);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-subdued);
+}
+
+.user-activity-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.user-activity-cover svg {
+    width: 24px;
+    height: 24px;
+}
+
+.user-activity-main {
+    min-width: 0;
+}
+
+.user-activity-title,
+.user-activity-meta,
+.user-activity-sub {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.user-activity-title {
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.user-activity-meta {
+    margin-top: 3px;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.user-activity-sub {
+    margin-top: 3px;
+    color: var(--text-subdued);
+    font-size: 11px;
+}
+
+.user-activity-time {
+    min-width: 118px;
+    color: var(--text-subdued);
+    font-size: 11px;
+    text-align: right;
+}
+
+.user-activity-time strong {
+    display: block;
+    color: var(--text-primary);
+    font-size: 12px;
+}
 </style>
 {% endblock head_extra %}
 
@@ -2160,7 +2243,7 @@ tbody tr:hover {
             <div class="modal-body" x-show="activeUserDetail">
                 <div class="segmented user-modal-tabs">
                     <button class="seg-btn" :class="{active: userModalTab === 'overview'}" @click="userModalTab = 'overview'">Overview</button>
-                    <button class="seg-btn" :class="{active: userModalTab === 'activity'}" @click="userModalTab = 'activity'" disabled>Activity</button>
+                    <button class="seg-btn" :class="{active: userModalTab === 'activity'}" @click="userModalTab = 'activity'">Activity</button>
                     <button class="seg-btn" :class="{active: userModalTab === 'library'}" @click="userModalTab = 'library'" disabled>Library</button>
                 </div>
                 <div x-show="userModalTab === 'overview'">
@@ -2198,6 +2281,32 @@ tbody tr:hover {
                             <div><span>Display name</span><strong x-text="activeUserDetail.user.display_name || 'not set'"></strong></div>
                             <div><span>Role</span><strong x-text="activeUserDetail.user.role"></strong></div>
                         </div>
+                    </div>
+                </div>
+                <div x-show="userModalTab === 'activity'">
+                    <div class="user-activity-list">
+                        <template x-for="play in (activeUserDetail?.recent_plays || [])" :key="play.history_id">
+                            <div class="user-activity-row">
+                                <div class="user-activity-cover">
+                                    <template x-if="play.cover_url">
+                                        <img :src="play.cover_url" :alt="play.release_title || play.title" loading="lazy">
+                                    </template>
+                                    <template x-if="!play.cover_url">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="12" r="4"/></svg>
+                                    </template>
+                                </div>
+                                <div class="user-activity-main">
+                                    <div class="user-activity-title" x-text="play.title"></div>
+                                    <div class="user-activity-meta" x-text="play.artists"></div>
+                                    <div class="user-activity-sub" x-text="userPlayMeta(play)"></div>
+                                </div>
+                                <div class="user-activity-time">
+                                    <strong x-text="userPlayListened(play)"></strong>
+                                    <span x-text="shortDate(play.played_at)"></span>
+                                </div>
+                            </div>
+                        </template>
+                        <div class="empty" x-show="activeUserDetail && (!activeUserDetail.recent_plays || activeUserDetail.recent_plays.length === 0)">No play history for this user yet</div>
                     </div>
                 </div>
             </div>
@@ -2837,7 +2946,7 @@ function adminV2() {
         async openUser(user) {
             if (!user) return;
             this.userModalTab = 'overview';
-            this.activeUserDetail = { user, stats: {} };
+            this.activeUserDetail = { user, stats: {}, recent_plays: [] };
             this.userModalOpen = true;
             try {
                 this.activeUserDetail = await this.request(`${this.apiBase}/users/${user.id}`);
@@ -3786,6 +3895,26 @@ function adminV2() {
                 { label: 'Uploaded tracks', display: this.fmt(stats.uploaded_tracks || 0) },
                 { label: 'Torrent sessions', display: this.fmt(stats.torrent_sessions || 0) }
             ];
+        },
+
+        userPlayListened(play) {
+            const listened = play?.duration_listened;
+            const duration = play?.track_duration_seconds;
+            const listenedText = listened == null ? 'unknown' : this.durationApprox(listened);
+            const durationText = duration ? this.durationApprox(duration) : null;
+            return durationText ? `${listenedText} / ${durationText}` : listenedText;
+        },
+
+        userPlayMeta(play) {
+            const parts = [];
+            if (play.release_title) {
+                parts.push(play.release_year ? `${play.release_title} (${play.release_year})` : play.release_title);
+            }
+            if (play.audio_format) parts.push(String(play.audio_format).toUpperCase());
+            if (play.audio_bitrate) parts.push(`${play.audio_bitrate} kbps`);
+            if (play.uploader_name) parts.push(`uploaded by ${play.uploader_name}`);
+            parts.push(play.completed ? 'completed' : 'partial');
+            return parts.join(' · ');
         },
 
         durationApprox(seconds) {

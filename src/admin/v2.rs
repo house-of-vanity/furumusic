@@ -191,6 +191,7 @@ struct AdminUserRowDto {
 struct AdminUserDetailDto {
     user: AdminUserRowDto,
     stats: AdminUserStatsDto,
+    recent_plays: Vec<AdminUserPlayDto>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -205,6 +206,25 @@ struct AdminUserStatsDto {
     uploaded_tracks: i64,
     torrent_sessions: i64,
     lastfm_connected: bool,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct AdminUserPlayDto {
+    history_id: i64,
+    played_at: String,
+    duration_listened: Option<i32>,
+    completed: bool,
+    track_id: i64,
+    title: String,
+    artists: String,
+    release_id: i64,
+    release_title: String,
+    release_year: Option<i32>,
+    cover_url: Option<String>,
+    track_duration_seconds: f64,
+    uploader_name: String,
+    audio_format: Option<String>,
+    audio_bitrate: Option<i32>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -1778,7 +1798,7 @@ async fn load_admin_user_detail(
         .bind(user_id)
         .fetch_one(pool),
         sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(DISTINCT t.id) FROM furumusic__track t JOIN furumusic__media_file mf ON mf.id = t.media_file_id WHERE mf.uploaded_by_user_id = $1"
+            "SELECT COUNT(DISTINCT t.id) FROM furumusic__track t JOIN furumusic__media_file mf ON mf.id = t.audio_file_id WHERE mf.uploaded_by_user_id = $1"
         )
         .bind(user_id)
         .fetch_one(pool),
@@ -1793,6 +1813,7 @@ async fn load_admin_user_detail(
         .bind(user_id)
         .fetch_one(pool),
     )?;
+    let recent_plays = load_admin_user_recent_plays(pool, user_id, 30).await?;
 
     Ok(Some(AdminUserDetailDto {
         user,
@@ -1808,7 +1829,96 @@ async fn load_admin_user_detail(
             torrent_sessions,
             lastfm_connected,
         },
+        recent_plays,
     }))
+}
+
+async fn load_admin_user_recent_plays(
+    pool: &PgPool,
+    user_id: i64,
+    limit: i64,
+) -> anyhow::Result<Vec<AdminUserPlayDto>> {
+    let rows = sqlx::query_as::<_, AdminUserPlaySqlRow>(
+        r#"SELECT ph.id AS history_id,
+                  ph.played_at::text AS played_at,
+                  ph.duration_listened,
+                  ph.completed,
+                  t.id AS track_id,
+                  t.title::text AS title,
+                  COALESCE(NULLIF(STRING_AGG(a.name::text, ', ' ORDER BY ta.position), ''), 'Unknown artist') AS artists,
+                  t.release_id,
+                  COALESCE(r.title::text, '') AS release_title,
+                  r.year AS release_year,
+                  t.cover_file_id,
+                  r.cover_file_id AS release_cover_file_id,
+                  t.duration_seconds AS track_duration_seconds,
+                  COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
+                  mf.audio_format,
+                  mf.audio_bitrate
+           FROM furumusic__play_history ph
+           JOIN furumusic__track t ON t.id = ph.track_id
+           LEFT JOIN furumusic__release r ON r.id = t.release_id
+           LEFT JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
+           LEFT JOIN furumusic__track_artist ta ON ta.track_id = t.id AND ta.role = 'main'
+           LEFT JOIN furumusic__artist a ON a.id = ta.artist_id
+           WHERE ph.user_id = $1
+           GROUP BY ph.id, ph.played_at, ph.duration_listened, ph.completed, t.id, t.title,
+                    t.release_id, r.title, r.year, t.cover_file_id, r.cover_file_id,
+                    t.duration_seconds, mf.uploader_name, mf.audio_format, mf.audio_bitrate
+           ORDER BY ph.played_at DESC, ph.id DESC
+           LIMIT $2"#,
+    )
+    .bind(user_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| AdminUserPlayDto {
+            history_id: row.history_id,
+            played_at: row.played_at,
+            duration_listened: row.duration_listened,
+            completed: row.completed,
+            track_id: row.track_id,
+            title: row.title,
+            artists: row.artists,
+            release_id: row.release_id,
+            release_title: row.release_title,
+            release_year: row.release_year,
+            cover_url: admin_track_cover_url(row.cover_file_id, row.release_cover_file_id),
+            track_duration_seconds: row.track_duration_seconds,
+            uploader_name: row.uploader_name,
+            audio_format: row.audio_format,
+            audio_bitrate: row.audio_bitrate,
+        })
+        .collect())
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct AdminUserPlaySqlRow {
+    history_id: i64,
+    played_at: String,
+    duration_listened: Option<i32>,
+    completed: bool,
+    track_id: i64,
+    title: String,
+    artists: String,
+    release_id: i64,
+    release_title: String,
+    release_year: Option<i32>,
+    cover_file_id: Option<i64>,
+    release_cover_file_id: Option<i64>,
+    track_duration_seconds: f64,
+    uploader_name: String,
+    audio_format: Option<String>,
+    audio_bitrate: Option<i32>,
+}
+
+fn admin_track_cover_url(track_cover: Option<i64>, release_cover: Option<i64>) -> Option<String> {
+    track_cover
+        .or(release_cover)
+        .map(|id| format!("/api/player/cover/{id}/medium"))
 }
 
 fn admin_user_row(
