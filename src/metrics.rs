@@ -159,6 +159,14 @@ pub fn record_active_user(user_id: i64) {
     users.insert(user_id, Instant::now());
 }
 
+pub fn active_user_last_seen_ms() -> HashMap<i64, i64> {
+    let users = ACTIVE_USERS.lock().expect("active user lock");
+    users
+        .iter()
+        .map(|(user_id, last_seen)| (*user_id, last_seen.elapsed().as_millis() as i64))
+        .collect()
+}
+
 pub fn record_auth_attempt(method: &'static str, outcome: &'static str, reason: &'static str) {
     REGISTRY.inc_counter(
         "furumusic_auth_login_attempts_total",

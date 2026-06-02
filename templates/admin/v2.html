@@ -307,7 +307,8 @@ button {
 }
 
 .btn:disabled,
-.icon-btn:disabled {
+.icon-btn:disabled,
+.seg-btn:disabled {
     opacity: 0.45;
     cursor: not-allowed;
 }
@@ -415,6 +416,15 @@ tbody tr:hover {
 .col-confidence { width: 88px; }
 .col-tags { width: 250px; }
 .col-time { width: 132px; }
+
+.users-table-wrap {
+    max-height: calc(100vh - 300px);
+}
+
+.users-table .user-status-column { width: 116px; }
+.users-table .user-role-column { width: 110px; }
+.users-table .user-active-column { width: 112px; }
+.users-table .user-seen-column { width: 170px; }
 
 .check {
     width: 16px;
@@ -1274,6 +1284,54 @@ tbody tr:hover {
     padding: 14px;
     overflow: auto;
 }
+
+.user-modal {
+    width: min(860px, calc(100vw - 80px));
+}
+
+.user-modal-tabs {
+    margin-bottom: 14px;
+}
+
+.user-summary-grid,
+.user-profile-facts {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+.user-summary-card,
+.user-profile-facts > div {
+    min-width: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-primary);
+}
+
+.user-summary-card span,
+.user-profile-facts span {
+    display: block;
+    color: var(--text-subdued);
+    font-size: 11px;
+    margin-bottom: 4px;
+}
+
+.user-summary-card strong,
+.user-profile-facts strong {
+    display: block;
+    overflow: hidden;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 800;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.user-stats-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
 </style>
 {% endblock head_extra %}
 
@@ -1308,6 +1366,11 @@ tbody tr:hover {
             <button class="nav-btn" :class="{active: activeView === 'tools'}" @click="openTools()">
                 <i data-lucide="wrench"></i>
                 <span>Future Tools</span>
+            </button>
+            <button class="nav-btn" :class="{active: activeView === 'users'}" @click="openUsers()">
+                <i data-lucide="users"></i>
+                <span>Users</span>
+                <span class="nav-count" x-text="users.online_count ? users.online_count + ' online' : ''"></span>
             </button>
             <button class="nav-btn" :class="{active: activeView === 'settings'}" @click="openSettings()">
                 <i data-lucide="settings"></i>
@@ -1729,6 +1792,79 @@ tbody tr:hover {
             </div>
         </div>
 
+        <div class="content" x-show="activeView === 'users'">
+            <section class="stats-strip">
+                <div class="stat-cell">
+                    <div class="stat-value" x-text="fmt(users.total || 0)"></div>
+                    <div class="stat-label">Users</div>
+                </div>
+                <div class="stat-cell">
+                    <div class="stat-value" x-text="fmt(users.online_count || 0)"></div>
+                    <div class="stat-label">Online now</div>
+                </div>
+            </section>
+            <section class="panel">
+                <div class="panel-head">
+                    <div class="panel-title">
+                        <strong>Users</strong>
+                        <span x-text="usersSubtitle()"></span>
+                    </div>
+                    <div class="toolbar">
+                        <input class="search" placeholder="Search users" x-model="userSearch" @input.debounce.350ms="loadUsers()" />
+                        <button class="btn" @click="loadUsers(false)">
+                            <i data-lucide="refresh-cw"></i>
+                            Refresh
+                        </button>
+                    </div>
+                </div>
+                <div class="table-wrap users-table-wrap">
+                    <table class="users-table">
+                        <thead>
+                            <tr>
+                                <th class="user-status-column">Status</th>
+                                <th>User</th>
+                                <th class="user-role-column">Role</th>
+                                <th class="user-active-column">Account</th>
+                                <th class="user-seen-column">Last activity</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="user in users.items" :key="user.id">
+                                <tr @click="openUser(user)">
+                                    <td>
+                                        <span class="badge" :class="userStatusClass(user)" x-text="userStatusLabel(user)"></span>
+                                    </td>
+                                    <td>
+                                        <div class="primary-line" x-text="user.display_name || user.username"></div>
+                                        <div class="secondary-line" x-text="user.email ? user.username + ' · ' + user.email : user.username"></div>
+                                    </td>
+                                    <td><span x-text="user.role"></span></td>
+                                    <td>
+                                        <span class="badge" :class="user.is_active ? 'ok' : 'disabled'" x-text="user.is_active ? 'active' : 'disabled'"></span>
+                                    </td>
+                                    <td><span x-text="userLastSeenLabel(user)"></span></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                    <div class="empty" x-show="!usersLoading && users.items.length === 0">No users in this filter</div>
+                </div>
+                <div class="action-strip">
+                    <span class="selection-summary" x-text="usersRangeText()"></span>
+                    <div class="toolbar">
+                        <select class="search" style="width:92px" x-model.number="users.limit" @change="users.offset = 0; loadUsers(false)">
+                            <option value="25">25</option>
+                            <option value="40">40</option>
+                            <option value="80">80</option>
+                            <option value="120">120</option>
+                        </select>
+                        <button class="btn" @click="pageUsers(-1)" :disabled="users.offset === 0">Previous</button>
+                        <button class="btn" @click="pageUsers(1)" :disabled="users.offset + users.limit >= users.total">Next</button>
+                    </div>
+                </div>
+            </section>
+        </div>
+
         <div class="content" x-show="activeView === 'tools'">
             <section class="panel">
                 <div class="panel-head">
@@ -2009,6 +2145,64 @@ tbody tr:hover {
             </div>
         </div>
     </main>
+
+    <div class="modal-backdrop" x-show="userModalOpen && activeUserDetail" x-transition @click.self="userModalOpen = false">
+        <section class="modal user-modal">
+            <div class="modal-head">
+                <div class="panel-title">
+                    <strong x-text="activeUserDetail ? (activeUserDetail.user.display_name || activeUserDetail.user.username) : 'User'"></strong>
+                    <span x-text="activeUserDetail ? userStatusLabel(activeUserDetail.user) + ' · ' + activeUserDetail.user.role : ''"></span>
+                </div>
+                <button class="icon-btn" @click="userModalOpen = false">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <div class="modal-body" x-show="activeUserDetail">
+                <div class="segmented user-modal-tabs">
+                    <button class="seg-btn" :class="{active: userModalTab === 'overview'}" @click="userModalTab = 'overview'">Overview</button>
+                    <button class="seg-btn" :class="{active: userModalTab === 'activity'}" @click="userModalTab = 'activity'" disabled>Activity</button>
+                    <button class="seg-btn" :class="{active: userModalTab === 'library'}" @click="userModalTab = 'library'" disabled>Library</button>
+                </div>
+                <div x-show="userModalTab === 'overview'">
+                    <section class="user-summary-grid">
+                        <div class="user-summary-card">
+                            <span>Status</span>
+                            <strong x-text="userStatusLabel(activeUserDetail.user)"></strong>
+                        </div>
+                        <div class="user-summary-card">
+                            <span>Last activity</span>
+                            <strong x-text="userLastSeenLabel(activeUserDetail.user)"></strong>
+                        </div>
+                        <div class="user-summary-card">
+                            <span>Account</span>
+                            <strong x-text="activeUserDetail.user.is_active ? 'active' : 'disabled'"></strong>
+                        </div>
+                        <div class="user-summary-card">
+                            <span>Last.fm</span>
+                            <strong x-text="activeUserDetail.stats.lastfm_connected ? 'connected' : 'not connected'"></strong>
+                        </div>
+                    </section>
+                    <section class="stats-strip user-stats-grid">
+                        <template x-for="cell in userStatCards()" :key="cell.label">
+                            <div class="stat-cell">
+                                <div class="stat-value" x-text="cell.display"></div>
+                                <div class="stat-label" x-text="cell.label"></div>
+                            </div>
+                        </template>
+                    </section>
+                    <div class="field">
+                        <label>Profile</label>
+                        <div class="user-profile-facts">
+                            <div><span>Username</span><strong x-text="activeUserDetail.user.username"></strong></div>
+                            <div><span>Email</span><strong x-text="activeUserDetail.user.email || 'not set'"></strong></div>
+                            <div><span>Display name</span><strong x-text="activeUserDetail.user.display_name || 'not set'"></strong></div>
+                            <div><span>Role</span><strong x-text="activeUserDetail.user.role"></strong></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
 
     <div class="modal-backdrop" x-show="reviewModalOpen && activeReview" x-transition @click.self="reviewModalOpen = false">
         <section class="modal">
@@ -2307,6 +2501,12 @@ function adminV2() {
         runtime: { agent: {}, storage: [], node: {} },
         libraryOverview: {},
         reviews: { items: [], total: 0, limit: 80, offset: 0, status_counts: [] },
+        users: { items: [], total: 0, limit: 40, offset: 0, online_count: 0 },
+        usersLoading: false,
+        userSearch: '',
+        userModalOpen: false,
+        userModalTab: 'overview',
+        activeUserDetail: null,
         reviewFilter: { status: null, search: '' },
         selectedReviewIds: {},
         reviewSelectionScope: 'ids',
@@ -2450,6 +2650,8 @@ function adminV2() {
                     this.activeJobName ? this.loadRunsForJob(this.activeJobName, false) : Promise.resolve(),
                     this.refreshActiveRunDetail()
                 ]);
+            } else if (this.activeView === 'users') {
+                await Promise.allSettled([this.loadUsers(false)]);
             } else {
                 await Promise.allSettled([this.loadJobs(false), this.loadReviews(false)]);
             }
@@ -2482,6 +2684,8 @@ function adminV2() {
                 this.libraryKind = nextKind;
             } else if (view === 'settings') {
                 this.activeView = 'settings';
+            } else if (view === 'users') {
+                this.activeView = 'users';
             } else if (view === 'tools') {
                 this.activeView = 'tools';
             } else {
@@ -2513,6 +2717,9 @@ function adminV2() {
                 if (!this.settingsProbe.status || this.settingsProbe.status === 'idle') {
                     await this.loadSettingsProbe(false);
                 }
+            } else if (this.activeView === 'users') {
+                if (updateRoute) this.setRoute('#users');
+                await this.loadUsers(false);
             } else if (this.activeView === 'tools' && updateRoute) {
                 this.setRoute('#tools');
             }
@@ -2553,6 +2760,12 @@ function adminV2() {
         openTools() {
             this.activeView = 'tools';
             this.setRoute('#tools');
+        },
+
+        openUsers() {
+            this.activeView = 'users';
+            this.setRoute('#users');
+            this.loadUsers();
         },
 
         async loadReviews(resetOffset = true) {
@@ -2599,6 +2812,38 @@ function adminV2() {
                 this.showToast(error.message);
             } finally {
                 this.libraryLoading = false;
+                this.icons();
+            }
+        },
+
+        async loadUsers(resetOffset = true) {
+            if (this.activeView !== 'users' && resetOffset) return;
+            if (resetOffset) this.users.offset = 0;
+            this.usersLoading = true;
+            const params = new URLSearchParams();
+            params.set('limit', this.users.limit || 40);
+            params.set('offset', this.users.offset || 0);
+            if (this.userSearch) params.set('search', this.userSearch);
+            try {
+                this.users = await this.request(`${this.apiBase}/users?${params.toString()}`);
+            } catch (error) {
+                this.showToast(error.message);
+            } finally {
+                this.usersLoading = false;
+                this.icons();
+            }
+        },
+
+        async openUser(user) {
+            if (!user) return;
+            this.userModalTab = 'overview';
+            this.activeUserDetail = { user, stats: {} };
+            this.userModalOpen = true;
+            try {
+                this.activeUserDetail = await this.request(`${this.apiBase}/users/${user.id}`);
+            } catch (error) {
+                this.showToast(error.message);
+            } finally {
                 this.icons();
             }
         },
@@ -3413,6 +3658,13 @@ function adminV2() {
             this.loadLibrary(false);
         },
 
+        pageUsers(delta) {
+            const next = Math.max(0, (this.users.offset || 0) + delta * (this.users.limit || 40));
+            if (next === this.users.offset) return;
+            this.users.offset = next;
+            this.loadUsers(false);
+        },
+
         statCells() {
             const agent = (this.runtime && this.runtime.agent) || {};
             const storage = (this.runtime && this.runtime.storage) || [];
@@ -3469,6 +3721,7 @@ function adminV2() {
             if (this.activeView === 'jobs') return 'Tasks';
             if (this.activeView === 'tools') return 'Future Tools';
             if (this.activeView === 'settings') return 'Settings';
+            if (this.activeView === 'users') return 'Users';
             return 'Review Queue';
         },
 
@@ -3477,6 +3730,7 @@ function adminV2() {
             if (this.activeView === 'jobs') return 'Scheduler state, recent runs, and manual controls in one place';
             if (this.activeView === 'tools') return 'Reserved space for merge, split, enrichment, and destructive workflows';
             if (this.activeView === 'settings') return 'Application configuration and external API credentials';
+            if (this.activeView === 'users') return 'Account status, live presence, and per-user listening statistics';
             return 'Full-screen review triage with filter-aware bulk actions';
         },
 
@@ -3491,6 +3745,55 @@ function adminV2() {
 
         librarySubtitle() {
             return `${this.libraryKind} · ${this.fmt(this.library.total || 0)} rows`;
+        },
+
+        usersSubtitle() {
+            return `${this.fmt(this.users.total || 0)} users · ${this.fmt(this.users.online_count || 0)} online`;
+        },
+
+        userStatusClass(user) {
+            return user?.is_online ? 'ok' : 'disabled';
+        },
+
+        userStatusLabel(user) {
+            return user?.is_online ? 'online' : 'offline';
+        },
+
+        userLastSeenLabel(user) {
+            if (!user || user.last_seen_ms == null) return 'never in this session';
+            if (user.is_online) return 'online now';
+            return this.durationApprox(user.last_seen_ms / 1000) + ' ago';
+        },
+
+        usersRangeText() {
+            const total = this.users.total || 0;
+            if (!total) return 'No users';
+            const start = (this.users.offset || 0) + 1;
+            const end = Math.min(total, (this.users.offset || 0) + (this.users.limit || 40));
+            return `${start}-${end} of ${this.fmt(total)}`;
+        },
+
+        userStatCards() {
+            const stats = this.activeUserDetail?.stats || {};
+            return [
+                { label: 'Plays', display: this.fmt(stats.plays || 0) },
+                { label: 'Completed plays', display: this.fmt(stats.completed_plays || 0) },
+                { label: 'Listened time', display: this.durationApprox(stats.listened_seconds || 0) },
+                { label: 'Liked tracks', display: this.fmt(stats.liked_tracks || 0) },
+                { label: 'Followed artists', display: this.fmt(stats.followed_artists || 0) },
+                { label: 'Own playlists', display: this.fmt(stats.own_playlists || 0) },
+                { label: 'Saved playlists', display: this.fmt(stats.saved_playlists || 0) },
+                { label: 'Uploaded tracks', display: this.fmt(stats.uploaded_tracks || 0) },
+                { label: 'Torrent sessions', display: this.fmt(stats.torrent_sessions || 0) }
+            ];
+        },
+
+        durationApprox(seconds) {
+            const value = Math.max(0, Number(seconds || 0));
+            if (value < 60) return `${Math.floor(value)}s`;
+            if (value < 3600) return `${Math.floor(value / 60)}m`;
+            if (value < 86400) return `${Math.floor(value / 3600)}h ${Math.floor((value % 3600) / 60)}m`;
+            return `${Math.floor(value / 86400)}d ${Math.floor((value % 86400) / 3600)}h`;
         },
 
         librarySelectionSummary() {

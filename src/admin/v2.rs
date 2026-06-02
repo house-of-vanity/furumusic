@@ -46,6 +46,13 @@ pub(super) struct LibraryQuery {
 }
 
 #[derive(Debug, Deserialize)]
+pub(super) struct UsersQuery {
+    pub(super) search: Option<String>,
+    pub(super) limit: Option<i64>,
+    pub(super) offset: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
 pub(super) struct BulkReviewsRequest {
     action: String,
     mode: Option<String>,
@@ -156,6 +163,48 @@ struct AdminDashboardDto {
     jobs: Vec<JobDto>,
     recent_runs: Vec<JobRunDto>,
     library: LibraryOverviewDto,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct AdminUsersPageDto {
+    items: Vec<AdminUserRowDto>,
+    total: i64,
+    limit: i64,
+    offset: i64,
+    search: Option<String>,
+    online_count: i64,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct AdminUserRowDto {
+    id: i64,
+    username: String,
+    display_name: Option<String>,
+    email: Option<String>,
+    role: String,
+    is_active: bool,
+    is_online: bool,
+    last_seen_ms: Option<i64>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct AdminUserDetailDto {
+    user: AdminUserRowDto,
+    stats: AdminUserStatsDto,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct AdminUserStatsDto {
+    plays: i64,
+    completed_plays: i64,
+    listened_seconds: i64,
+    liked_tracks: i64,
+    followed_artists: i64,
+    own_playlists: i64,
+    saved_playlists: i64,
+    uploaded_tracks: i64,
+    torrent_sessions: i64,
+    lastfm_connected: bool,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -643,6 +692,41 @@ pub async fn reviews(
         .await
         .map_err(|e| cot::Error::internal(e.to_string()))?;
     Json(page).into_response()
+}
+
+pub async fn users(
+    session: Session,
+    db: Database,
+    pool: &PgPool,
+    query: UsersQuery,
+) -> cot::Result<cot::response::Response> {
+    if let Err(response) = require_admin_json(&session, &db).await {
+        return Ok(response);
+    }
+
+    let page = load_admin_users_page(pool, query)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    Json(page).into_response()
+}
+
+pub async fn user_detail(
+    session: Session,
+    db: Database,
+    pool: &PgPool,
+    user_id: i64,
+) -> cot::Result<cot::response::Response> {
+    if let Err(response) = require_admin_json(&session, &db).await {
+        return Ok(response);
+    }
+
+    let detail = load_admin_user_detail(pool, user_id)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    match detail {
+        Some(detail) => Json(detail).into_response(),
+        None => Ok(json_error(StatusCode::NOT_FOUND, "user not found")),
+    }
 }
 
 pub async fn bulk_reviews(
@@ -1552,6 +1636,197 @@ async fn load_overview_stats(pool: &PgPool) -> anyhow::Result<OverviewStatsDto> 
         hidden_releases,
         hidden_artists,
     })
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct AdminUserSqlRow {
+    id: i64,
+    username: String,
+    display_name: Option<String>,
+    email: Option<String>,
+    role: String,
+    is_active: bool,
+}
+
+async fn load_admin_users_page(
+    pool: &PgPool,
+    query: UsersQuery,
+) -> anyhow::Result<AdminUsersPageDto> {
+    let limit = query.limit.unwrap_or(40).clamp(10, 200);
+    let offset = query.offset.unwrap_or(0).max(0);
+    let search = query
+        .search
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+    let pattern = search.as_ref().map(|value| format!("%{value}%"));
+
+    let mut count_qb =
+        QueryBuilder::<Postgres>::new("SELECT COUNT(*) FROM furumusic__user WHERE 1=1");
+    if let Some(pattern) = pattern.as_ref() {
+        count_qb.push(" AND (username ILIKE ");
+        count_qb.push_bind(pattern);
+        count_qb.push(" OR COALESCE(display_name, '') ILIKE ");
+        count_qb.push_bind(pattern);
+        count_qb.push(" OR COALESCE(email, '') ILIKE ");
+        count_qb.push_bind(pattern);
+        count_qb.push(")");
+    }
+    let total: i64 = count_qb.build_query_scalar().fetch_one(pool).await?;
+
+    let mut qb = QueryBuilder::<Postgres>::new(
+        "SELECT id, username::text, display_name, email, role::text, is_active FROM furumusic__user WHERE 1=1",
+    );
+    if let Some(pattern) = pattern.as_ref() {
+        qb.push(" AND (username ILIKE ");
+        qb.push_bind(pattern);
+        qb.push(" OR COALESCE(display_name, '') ILIKE ");
+        qb.push_bind(pattern);
+        qb.push(" OR COALESCE(email, '') ILIKE ");
+        qb.push_bind(pattern);
+        qb.push(")");
+    }
+    qb.push(" ORDER BY username ASC LIMIT ");
+    qb.push_bind(limit);
+    qb.push(" OFFSET ");
+    qb.push_bind(offset);
+    let rows: Vec<AdminUserSqlRow> = qb.build_query_as().fetch_all(pool).await?;
+
+    let active = crate::metrics::active_user_last_seen_ms();
+    let online_cutoff_ms = 60_000;
+    let items = rows
+        .into_iter()
+        .map(|row| admin_user_row(row, &active, online_cutoff_ms))
+        .collect::<Vec<_>>();
+    let online_count = active
+        .values()
+        .filter(|last_seen_ms| **last_seen_ms <= online_cutoff_ms)
+        .count() as i64;
+
+    Ok(AdminUsersPageDto {
+        items,
+        total,
+        limit,
+        offset,
+        search,
+        online_count,
+    })
+}
+
+async fn load_admin_user_detail(
+    pool: &PgPool,
+    user_id: i64,
+) -> anyhow::Result<Option<AdminUserDetailDto>> {
+    let row = sqlx::query_as::<_, AdminUserSqlRow>(
+        "SELECT id, username::text, display_name, email, role::text, is_active FROM furumusic__user WHERE id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+
+    let active = crate::metrics::active_user_last_seen_ms();
+    let user = admin_user_row(row, &active, 60_000);
+    let (
+        plays,
+        completed_plays,
+        listened_seconds,
+        liked_tracks,
+        followed_artists,
+        own_playlists,
+        saved_playlists,
+        uploaded_tracks,
+        torrent_sessions,
+        lastfm_connected,
+    ) = tokio::try_join!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM furumusic__play_history WHERE user_id = $1"
+        )
+        .bind(user_id)
+        .fetch_one(pool),
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM furumusic__play_history WHERE user_id = $1 AND completed"
+        )
+        .bind(user_id)
+        .fetch_one(pool),
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COALESCE(SUM(duration_listened), 0)::bigint FROM furumusic__play_history WHERE user_id = $1"
+        )
+        .bind(user_id)
+        .fetch_one(pool),
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM furumusic__user_liked_track WHERE user_id = $1"
+        )
+        .bind(user_id)
+        .fetch_one(pool),
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM furumusic__user_followed_artist WHERE user_id = $1"
+        )
+        .bind(user_id)
+        .fetch_one(pool),
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM furumusic__playlist WHERE owner_id = $1"
+        )
+        .bind(user_id)
+        .fetch_one(pool),
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM furumusic__saved_playlist WHERE user_id = $1"
+        )
+        .bind(user_id)
+        .fetch_one(pool),
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(DISTINCT t.id) FROM furumusic__track t JOIN furumusic__media_file mf ON mf.id = t.media_file_id WHERE mf.uploaded_by_user_id = $1"
+        )
+        .bind(user_id)
+        .fetch_one(pool),
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM furumusic__torrent_session WHERE user_id = $1"
+        )
+        .bind(user_id)
+        .fetch_one(pool),
+        sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM furumusic__lastfm_account WHERE user_id = $1 AND session_key <> '')"
+        )
+        .bind(user_id)
+        .fetch_one(pool),
+    )?;
+
+    Ok(Some(AdminUserDetailDto {
+        user,
+        stats: AdminUserStatsDto {
+            plays,
+            completed_plays,
+            listened_seconds,
+            liked_tracks,
+            followed_artists,
+            own_playlists,
+            saved_playlists,
+            uploaded_tracks,
+            torrent_sessions,
+            lastfm_connected,
+        },
+    }))
+}
+
+fn admin_user_row(
+    row: AdminUserSqlRow,
+    active: &HashMap<i64, i64>,
+    online_cutoff_ms: i64,
+) -> AdminUserRowDto {
+    let last_seen_ms = active.get(&row.id).copied();
+    AdminUserRowDto {
+        id: row.id,
+        username: row.username,
+        display_name: row.display_name,
+        email: row.email,
+        role: row.role,
+        is_active: row.is_active,
+        is_online: last_seen_ms.is_some_and(|value| value <= online_cutoff_ms),
+        last_seen_ms,
+    }
 }
 
 fn load_runtime_overview(config: &AppConfig) -> RuntimeOverviewDto {

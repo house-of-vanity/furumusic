@@ -228,6 +228,55 @@ impl App for AdminApp {
                 "admin_v2_reviews_bulk",
             ),
             Route::with_handler_and_name(
+                "/v2/api/users",
+                {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    get(move |session: Session, db: Database,
+                              query: UrlQuery<v2::UsersQuery>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("admin pool")
+                                })
+                                .await;
+                            v2::users(session, db, pg_pool, query.0).await
+                        }
+                    })
+                },
+                "admin_v2_users",
+            ),
+            Route::with_handler_and_name(
+                "/v2/api/users/{id}",
+                {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    get(move |session: Session, db: Database, path: Path<PathId>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("admin pool")
+                                })
+                                .await;
+                            v2::user_detail(session, db, pg_pool, path.0.id).await
+                        }
+                    })
+                },
+                "admin_v2_user_detail",
+            ),
+            Route::with_handler_and_name(
                 "/v2/api/reviews/{id}/approve",
                 {
                     let pool = Arc::clone(&pool);

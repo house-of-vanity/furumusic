@@ -298,6 +298,7 @@ translations! {
     player_search_placeholder: "Search artists, releases, tracks..." , "Поиск артистов, релизов, треков...";
     player_connection_lost: "Server connection lost"             , "Нет соединения с сервером";
     player_connection_lost_detail: "Player cannot reach the server. Retrying..." , "Плеер не может связаться с сервером. Повторяю...";
+    player_active_device:   "Active device"                   , "Активный девайс";
     player_no_results:       "No results found"                , "Ничего не найдено";
     player_new_playlist:     "New Playlist"                    , "Новый плейлист";
     player_rename_playlist:  "Rename Playlist"                 , "Переименовать плейлист";

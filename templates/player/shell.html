@@ -639,23 +639,37 @@
                                 <span style="text-align:right">{{ t.player_duration }}</span>
                             </div>
                             <template x-for="(track, idx) in $store.library.currentArtist.featured_tracks" :key="track.id">
-                                <div class="track-row"
+                                <div class="track-row artist-appearance-row"
                                      :class="{ playing: $store.player.currentTrack && $store.player.currentTrack.id === track.id }"
                                      @dblclick="$store.queue.playRelease($store.library.currentArtist.featured_tracks, idx)">
                                     <span class="track-num" x-text="idx + 1"></span>
                                     <div class="track-info">
-                                        <div class="track-title">
-                                            <span x-text="track.title"></span>
-                                            <span style="color:var(--text-subdued)"> · </span>
-                                            <a class="artist-link" @click.stop="$store.library.openRelease(track.release_id)" x-text="track.release_title"></a>
-                                        </div>
-                                        <div class="track-artists-inline">
-                                            <template x-for="(artist, artistIdx) in $store.library.trackArtistLinks(track)" :key="artist.label + '-' + artist.id + '-' + artistIdx">
-                                                <span>
-                                                    <template x-if="artistIdx > 0"><span>, </span></template>
-                                                    <a class="artist-link" @click.stop="$store.library.openArtist(artist.id)" x-text="artist.label"></a>
-                                                </span>
+                                        <button class="artist-appearance-cover"
+                                                type="button"
+                                                @click.stop="$store.library.openRelease(track.release_id)"
+                                                :title="track.release_title"
+                                                aria-label="{{ t.player_release }}">
+                                            <template x-if="track.cover_url">
+                                                <img :src="track.cover_url" :alt="track.release_title" loading="lazy">
                                             </template>
+                                            <template x-if="!track.cover_url">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="12" r="4"/></svg>
+                                            </template>
+                                        </button>
+                                        <div class="artist-appearance-copy">
+                                            <div class="track-title">
+                                                <span x-text="track.title"></span>
+                                                <span style="color:var(--text-subdued)"> · </span>
+                                                <a class="artist-link" @click.stop="$store.library.openRelease(track.release_id)" x-text="track.release_title"></a>
+                                            </div>
+                                            <div class="track-artists-inline">
+                                                <template x-for="(artist, artistIdx) in $store.library.trackArtistLinks(track)" :key="artist.label + '-' + artist.id + '-' + artistIdx">
+                                                    <span>
+                                                        <template x-if="artistIdx > 0"><span>, </span></template>
+                                                        <a class="artist-link" @click.stop="$store.library.openArtist(artist.id)" x-text="artist.label"></a>
+                                                    </span>
+                                                </template>
+                                            </div>
                                         </div>
                                     </div>
                                     <span></span>
@@ -1074,6 +1088,16 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
             </button>
             <div class="device-picker" @click.outside="$store.devices.open = false">
+                <template x-if="$store.devices.remoteHintVisible">
+                    <button class="remote-playback-hint"
+                            type="button"
+                            @click="$store.devices.dismissRemoteHint()"
+                            x-transition
+                            x-cloak>
+                        <span class="remote-playback-hint-text" x-text="$store.devices.remoteHintText()"></span>
+                        <span class="remote-playback-hint-progress"></span>
+                    </button>
+                </template>
                 <button class="queue-toggle-btn device-toggle-btn"
                         :class="{ active: $store.devices.isActive() }"
                         @click="$store.devices.toggle()"

@@ -46,6 +46,7 @@ const T = {
     radioFailed: "{{ t.player_radio_failed }}",
     connectionLost: "{{ t.player_connection_lost }}",
     connectionLostDetail: "{{ t.player_connection_lost_detail }}",
+    activeDevice: "{{ t.player_active_device }}",
     trackWord: "{{ t.player_tracks_count }}",
     releaseWord: "{{ t.player_releases_count }}",
     ofWord: "{{ t.player_of }}",
@@ -1176,6 +1177,10 @@ document.addEventListener('alpine:init', () => {
         jamUsers: [],
         jamSelectedUsers: [],
         jamSearching: false,
+        remoteHintVisible: false,
+        remoteHintDeviceName: '',
+        _remoteHintShown: false,
+        _remoteHintTimer: null,
         _pollTimer: null,
         _jamSearchTimer: null,
         _stateRefreshTick: 0,
@@ -1265,6 +1270,34 @@ document.addEventListener('alpine:init', () => {
             if (wasActive && !this.isActive()) {
                 Alpine.store('player')?._pauseLocal();
             }
+            this._maybeShowRemoteHint();
+        },
+
+        remoteActiveDevice() {
+            if (!this.activeDeviceId || this.activeDeviceId === this.id) return null;
+            return this.devices.find(device => device.id === this.activeDeviceId) || null;
+        },
+
+        _maybeShowRemoteHint() {
+            if (this._remoteHintShown || this.remoteHintVisible || this.open) return;
+            const active = this.remoteActiveDevice();
+            if (!active) return;
+            this.remoteHintDeviceName = active.name || 'Devices';
+            this.remoteHintVisible = true;
+            this._remoteHintShown = true;
+            clearTimeout(this._remoteHintTimer);
+            this._remoteHintTimer = setTimeout(() => this.dismissRemoteHint(), 60000);
+        },
+
+        dismissRemoteHint() {
+            this.remoteHintVisible = false;
+            this._remoteHintShown = true;
+            clearTimeout(this._remoteHintTimer);
+            this._remoteHintTimer = null;
+        },
+
+        remoteHintText() {
+            return `${T.activeDevice}: ${this.remoteHintDeviceName || this.activeLabel()}`;
         },
 
         selectedJam() {
@@ -1330,6 +1363,7 @@ document.addEventListener('alpine:init', () => {
         },
 
         toggle() {
+            this.dismissRemoteHint();
             this.open = !this.open;
             if (this.open) this.poll();
         },
