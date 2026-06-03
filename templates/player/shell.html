@@ -523,29 +523,36 @@
                 <div>
                     <h1 class="section-title" x-text="$store.library.view === 'my_uploads' ? '{{ t.player_my_uploads }}' : '{{ t.player_global_library }}'"></h1>
                     <div class="card-grid">
-                        <template x-for="artist in $store.library.artists" :key="artist.id">
-                            <div class="card" @click="$store.library.openArtist(artist.id)">
-                                <div class="card-img">
-                                    <template x-if="artist.image_url">
-                                        <img :src="artist.image_url" :alt="artist.name" loading="lazy">
-                                    </template>
-                                    <template x-if="!artist.image_url">
-                                        <span class="placeholder-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 10-16 0"/></svg></span>
-                                    </template>
-                                    <button class="artist-follow-card-btn"
-                                            :class="{ followed: $store.follows.has(artist.id) }"
-                                            @click.stop="$store.follows.toggle(artist.id)"
-                                            :title="$store.follows.has(artist.id) ? '{{ t.player_unfollow_artist }}' : '{{ t.player_follow_artist }}'">
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                            <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/>
-                                            <circle cx="9" cy="7" r="4"/>
-                                            <path x-show="!$store.follows.has(artist.id)" d="M19 8v6M16 11h6"/>
-                                            <path x-show="$store.follows.has(artist.id)" d="M16 11l2 2 4-5"/>
-                                        </svg>
-                                    </button>
+                        <template x-for="(artist, idx) in $store.library.artists" :key="artist.id">
+                            <div class="artist-grid-entry">
+                                <div class="artist-section-divider"
+                                     x-show="$store.library.shouldShowFeaturedSeparator(idx)"
+                                     x-cloak>
+                                    <span>{{ t.player_featured_only_artists }}</span>
                                 </div>
-                                <div class="card-title" x-text="artist.name"></div>
-                                <div class="card-subtitle" x-text="artist.release_count + ' {{ t.player_releases_count }} · ' + artist.track_count + ' {{ t.player_tracks_count }}'"></div>
+                                <div class="card" @click="$store.library.openArtist(artist.id)">
+                                    <div class="card-img">
+                                        <template x-if="artist.image_url">
+                                            <img :src="artist.image_url" :alt="artist.name" loading="lazy">
+                                        </template>
+                                        <template x-if="!artist.image_url">
+                                            <span class="placeholder-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 10-16 0"/></svg></span>
+                                        </template>
+                                        <button class="artist-follow-card-btn"
+                                                :class="{ followed: $store.follows.has(artist.id) }"
+                                                @click.stop="$store.follows.toggle(artist.id)"
+                                                :title="$store.follows.has(artist.id) ? '{{ t.player_unfollow_artist }}' : '{{ t.player_follow_artist }}'">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/>
+                                                <circle cx="9" cy="7" r="4"/>
+                                                <path x-show="!$store.follows.has(artist.id)" d="M19 8v6M16 11h6"/>
+                                                <path x-show="$store.follows.has(artist.id)" d="M16 11l2 2 4-5"/>
+                                            </svg>
+                                        </button>
+                                    </div>
+                                    <div class="card-title" x-text="artist.name"></div>
+                                    <div class="card-subtitle" x-text="artist.release_count + ' {{ t.player_releases_count }} · ' + artist.track_count + ' {{ t.player_tracks_count }}'"></div>
+                                </div>
                             </div>
                         </template>
                     </div>

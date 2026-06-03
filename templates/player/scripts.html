@@ -2048,6 +2048,17 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        isFeaturedOnlyArtist(artist) {
+            return Number(artist?.release_count || 0) <= 0 && Number(artist?.track_count || 0) > 0;
+        },
+
+        shouldShowFeaturedSeparator(index) {
+            if (!(this.view === 'artists' || this.view === 'my_uploads') || index <= 0) return false;
+            const current = this.artists[index];
+            const previous = this.artists[index - 1];
+            return this.isFeaturedOnlyArtist(current) && !this.isFeaturedOnlyArtist(previous);
+        },
+
         async openArtist(id, options = {}) {
             this._beginNavigation('#artist/' + id, options);
             this.searchQuery = '';

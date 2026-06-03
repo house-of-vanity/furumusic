@@ -513,6 +513,31 @@ button.user-stat:hover {
     gap: 20px;
 }
 
+.artist-grid-entry {
+    display: contents;
+}
+
+.artist-section-divider {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 28px;
+    margin: 2px 0 -2px;
+    color: var(--text-subdued);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.artist-section-divider::before,
+.artist-section-divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--border-color);
+}
+
 .card {
     background: var(--bg-secondary);
     border-radius: 8px;
