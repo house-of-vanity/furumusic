@@ -3533,13 +3533,127 @@ async fn load_track_items_by_ids(pool: &sqlx::PgPool, ids: &[i64]) -> cot::Resul
     .await
     .map_err(|e| cot::Error::internal(e.to_string()))?;
 
-    let mut track_map: HashMap<i64, TrackItem> = build_track_items(tracks, pool)
+    let track_map: HashMap<i64, TrackItem> = build_track_items(tracks, pool)
         .await?
         .into_iter()
         .map(|track| (track.id, track))
         .collect();
 
-    Ok(ids.iter().filter_map(|id| track_map.remove(id)).collect())
+    Ok(ids
+        .iter()
+        .filter_map(|id| track_map.get(id).cloned())
+        .collect())
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/player/share-playlist
+// ---------------------------------------------------------------------------
+
+async fn create_playlist_share_handler(
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+    Json(body): Json<CreatePlaylistShareRequest>,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+
+    let ids: Vec<i64> = body
+        .track_ids
+        .into_iter()
+        .filter(|id| *id > 0)
+        .take(500)
+        .collect();
+    if ids.is_empty() {
+        return Ok(json_error(StatusCode::BAD_REQUEST, "playlist is empty"));
+    }
+
+    let tracks = load_track_items_by_ids(pool, &ids).await?;
+    if tracks.is_empty() {
+        return Ok(json_error(
+            StatusCode::BAD_REQUEST,
+            "playlist has no visible tracks",
+        ));
+    }
+
+    let visible_ids: Vec<i64> = tracks.iter().map(|track| track.id).collect();
+    let track_ids_json =
+        serde_json::to_string(&visible_ids).map_err(|e| cot::Error::internal(e.to_string()))?;
+    let title = body
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("Shared queue")
+        .chars()
+        .take(160)
+        .collect::<String>();
+    let token = uuid::Uuid::new_v4().simple().to_string();
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
+    sqlx::query(
+        r#"INSERT INTO furumusic__playlist_share_link
+           (token, creator_user_id, title, track_ids_json, created_at)
+           VALUES ($1, $2, $3, $4, $5)"#,
+    )
+    .bind(&token)
+    .bind(user.id)
+    .bind(&title)
+    .bind(&track_ids_json)
+    .bind(&now)
+    .execute(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    Json(ShareLinkResponse {
+        token: token.clone(),
+        url: format!("/share/playlist/{token}"),
+    })
+    .into_response()
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/player/share-playlist/{id}
+// ---------------------------------------------------------------------------
+
+async fn playlist_share_detail_handler(
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+    path: Path<PathStringId>,
+) -> cot::Result<cot::response::Response> {
+    let Some(_user) = auth::get_session_user(&session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+
+    let token = path.0.id.trim().to_string();
+    let share: Option<(String, String)> = sqlx::query_as(
+        r#"SELECT title::text, track_ids_json::text
+           FROM furumusic__playlist_share_link
+           WHERE token = $1"#,
+    )
+    .bind(&token)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    let Some((title, track_ids_json)) = share else {
+        return Ok(json_error(
+            StatusCode::NOT_FOUND,
+            "shared playlist not found",
+        ));
+    };
+
+    let ids: Vec<i64> = serde_json::from_str(&track_ids_json).unwrap_or_default();
+    let tracks = load_track_items_by_ids(pool, &ids).await?;
+
+    Json(PlaylistShareDetail {
+        token,
+        title,
+        tracks,
+    })
+    .into_response()
 }
 
 /// Return the virtual "Likes" playlist for a given user.
@@ -6839,6 +6953,55 @@ impl App for PlayerApp {
                     }
                 }),
                 "player_playlists",
+            ),
+            // -- Shared playlist snapshots --
+            Route::with_handler_and_name(
+                "/share-playlist",
+                post({
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    move |session: Session, db: Database, json: Json<CreatePlaylistShareRequest>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            create_playlist_share_handler(session, db, pg_pool, json).await
+                        }
+                    }
+                }),
+                "player_share_playlist",
+            ),
+            Route::with_handler_and_name(
+                "/share-playlist/{id}",
+                get({
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    move |session: Session, db: Database, path: Path<PathStringId>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            playlist_share_detail_handler(session, db, pg_pool, path).await
+                        }
+                    }
+                }),
+                "player_share_playlist_detail",
             ),
             // -- Playlist detail (get, update, delete) --
             Route::with_handler_and_name(

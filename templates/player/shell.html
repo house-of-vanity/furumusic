@@ -411,17 +411,6 @@
                                                     <template x-if="!artist.image_url">
                                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 10-16 0"/></svg>
                                                     </template>
-                                                    <button class="artist-follow-card-btn"
-                                                            :class="{ followed: $store.follows.has(artist.id) }"
-                                                            @click.stop="$store.follows.toggle(artist.id)"
-                                                            :title="$store.follows.has(artist.id) ? '{{ t.player_unfollow_artist }}' : '{{ t.player_follow_artist }}'">
-                                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                            <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/>
-                                                            <circle cx="9" cy="7" r="4"/>
-                                                            <path x-show="!$store.follows.has(artist.id)" d="M19 8v6M16 11h6"/>
-                                                            <path x-show="$store.follows.has(artist.id)" d="M16 11l2 2 4-5"/>
-                                                        </svg>
-                                                    </button>
                                                 </div>
                                                 <div class="search-artist-name" x-text="artist.name"></div>
                                             </div>
@@ -503,6 +492,9 @@
                                                 </button>
                                                 <button class="track-action-btn queue-insert-btn queue-end-btn" @click.stop="$store.queue.addToEnd([track])" title="{{ t.player_add_to_queue }}">
                                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h14M5 18h7"/><path d="M17 15l4 3-4 3" fill="currentColor" stroke="none"/></svg>
+                                                </button>
+                                                <button class="track-action-btn track-share-btn" @click.stop="$store.sharing.copyTrack(track, $event.currentTarget)" title="{{ t.player_share_track }}" aria-label="{{ t.player_share_track }}">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.6l6.8-3.9M8.6 13.4l6.8 3.9"/></svg>
                                                 </button>
                                                 <button class="track-action-btn playlist-add-btn" @click.stop="$store.playlists.showPicker([track.id])" title="{{ t.player_add_to_playlist }}">
                                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
@@ -725,6 +717,9 @@
                                         <button class="track-action-btn queue-insert-btn queue-end-btn" @click.stop="$store.queue.addToEnd([track])" title="{{ t.player_add_to_queue }}">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h14M5 18h7"/><path d="M17 15l4 3-4 3" fill="currentColor" stroke="none"/></svg>
                                         </button>
+                                        <button class="track-action-btn track-share-btn" @click.stop="$store.sharing.copyTrack(track, $event.currentTarget)" title="{{ t.player_share_track }}" aria-label="{{ t.player_share_track }}">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.6l6.8-3.9M8.6 13.4l6.8 3.9"/></svg>
+                                        </button>
                                         <button class="track-action-btn playlist-add-btn" @click.stop="$store.playlists.showPicker([track.id])" title="{{ t.player_add_to_playlist }}">
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
                                         </button>
@@ -780,25 +775,36 @@
                             </div>
                             <div class="release-year" x-text="$store.library.currentRelease.year || ''"></div>
                             <div class="release-actions">
-                                <button class="release-action-btn secondary"
-                                        @click.stop="$store.library.openReleaseInfo($store.library.currentRelease)"
-                                        :title="$store.library.releaseInfo($store.library.currentRelease)"
-                                        aria-label="{{ t.player_release_info }}">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                                    {{ t.player_info }}
-                                </button>
-                                <button class="release-action-btn primary" @click="$store.queue.playRelease($store.library.currentRelease.tracks, 0)">
-                                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-                                    {{ t.player_play }}
-                                </button>
-                                <button class="release-action-btn secondary" @click="$store.queue.addToEnd($store.library.currentRelease.tracks)" title="{{ t.player_add_to_end_queue }}">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                                    {{ t.player_queue }}
-                                </button>
-                                <button class="release-action-btn secondary" @click="$store.queue.addNextInQueue($store.library.currentRelease.tracks)" title="{{ t.player_play_next }}">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h8M5 18h14"/><path d="M17 10l4 3-4 3" fill="currentColor" stroke="none"/></svg>
-                                    {{ t.player_next }}
-                                </button>
+                                <div class="release-action-row release-meta-actions">
+                                    <button class="release-action-btn secondary"
+                                            @click.stop="$store.library.openReleaseInfo($store.library.currentRelease)"
+                                            :title="$store.library.releaseInfo($store.library.currentRelease)"
+                                            aria-label="{{ t.player_release_info }}">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                                        {{ t.player_info }}
+                                    </button>
+                                    <button class="release-action-btn secondary release-share-btn"
+                                            @click.stop="$store.sharing.copyRelease($store.library.currentRelease, $event.currentTarget)"
+                                            title="{{ t.player_share }}"
+                                            aria-label="{{ t.player_share }}">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.6l6.8-3.9M8.6 13.4l6.8 3.9"/></svg>
+                                        {{ t.player_share }}
+                                    </button>
+                                </div>
+                                <div class="release-action-row release-playback-actions">
+                                    <button class="release-action-btn primary" @click="$store.queue.playRelease($store.library.currentRelease.tracks, 0)">
+                                        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                                        {{ t.player_play }}
+                                    </button>
+                                    <button class="release-action-btn secondary" @click="$store.queue.addToEnd($store.library.currentRelease.tracks)" title="{{ t.player_add_to_end_queue }}">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                        {{ t.player_queue }}
+                                    </button>
+                                    <button class="release-action-btn secondary" @click="$store.queue.addNextInQueue($store.library.currentRelease.tracks)" title="{{ t.player_play_next }}">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h8M5 18h14"/><path d="M17 10l4 3-4 3" fill="currentColor" stroke="none"/></svg>
+                                        {{ t.player_next }}
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -812,7 +818,8 @@
                     </div>
                     <template x-for="(track, idx) in $store.library.currentRelease.tracks" :key="track.id">
                         <div class="track-row"
-                             :class="{ playing: $store.player.currentTrack && $store.player.currentTrack.id === track.id }"
+                             :data-shared-track-id="track.id"
+                             :class="{ playing: $store.player.currentTrack && $store.player.currentTrack.id === track.id, 'shared-target': $store.sharing.isSharedTrack(track) }"
                              @dblclick="$store.queue.playRelease([track], 0)">
                             <span class="track-num" x-text="track.track_number || (idx + 1)"></span>
                             <div class="track-info">
@@ -845,6 +852,9 @@
                                 </button>
                                 <button class="track-action-btn queue-insert-btn queue-end-btn" @click.stop="$store.queue.addToEnd([track])" title="{{ t.player_add_to_queue }}">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h14M5 18h7"/><path d="M17 15l4 3-4 3" fill="currentColor" stroke="none"/></svg>
+                                </button>
+                                <button class="track-action-btn track-share-btn" @click.stop="$store.sharing.copyTrack(track, $event.currentTarget)" title="{{ t.player_share_track }}" aria-label="{{ t.player_share_track }}">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.6l6.8-3.9M8.6 13.4l6.8 3.9"/></svg>
                                 </button>
                                 <button class="track-action-btn playlist-add-btn" @click.stop="$store.playlists.showPicker([track.id])" title="{{ t.player_add_to_playlist }}">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
@@ -919,6 +929,9 @@
                                 <button class="track-action-btn queue-insert-btn queue-end-btn" @click.stop="$store.queue.addToEnd([track])" title="{{ t.player_add_to_queue }}">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h14M5 18h7"/><path d="M17 15l4 3-4 3" fill="currentColor" stroke="none"/></svg>
                                 </button>
+                                <button class="track-action-btn track-share-btn" @click.stop="$store.sharing.copyTrack(track, $event.currentTarget)" title="{{ t.player_share_track }}" aria-label="{{ t.player_share_track }}">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.6l6.8-3.9M8.6 13.4l6.8 3.9"/></svg>
+                                </button>
                                 <button class="track-action-btn playlist-add-btn" @click.stop="$store.playlists.showPicker([track.id])" title="{{ t.player_add_to_playlist }}">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
                                 </button>
@@ -938,7 +951,12 @@
         <div class="queue-panel" :class="{ hidden: !$store.queue.visible }">
             <div class="queue-header">
                 <h3>{{ t.player_queue }}</h3>
-                <button class="queue-clear-btn" @click="$store.queue.clear()">{{ t.player_clear }}</button>
+                <div class="queue-header-actions">
+                    <button class="queue-share-btn" @click="$store.sharing.copyQueue($event.currentTarget)" :disabled="$store.queue.tracks.length === 0" title="{{ t.player_share_queue }}" aria-label="{{ t.player_share_queue }}">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.6l6.8-3.9M8.6 13.4l6.8 3.9"/></svg>
+                    </button>
+                    <button class="queue-clear-btn" @click="$store.queue.clear()">{{ t.player_clear }}</button>
+                </div>
             </div>
             <div class="queue-tracks">
                 <template x-if="$store.queue.tracks.length === 0">
@@ -1015,7 +1033,7 @@
             </button>
             <div class="player-now-playing">
             <template x-if="$store.player.currentTrack">
-                <div style="display:flex;align-items:center;gap:12px;overflow:hidden">
+                <div class="player-current-track">
                     <div class="player-cover"
                          @click.stop="$store.mobile.openPlayerFullscreen()">
                         <template x-if="$store.player.currentTrack.cover_url">
@@ -1034,6 +1052,12 @@
                                     title="{{ t.player_like }}"
                                     aria-label="{{ t.player_like }}">
                                 <svg viewBox="0 0 24 24" :fill="$store.likes.has($store.player.currentTrack.id) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z"/></svg>
+                            </button>
+                            <button class="track-action-btn player-current-share"
+                                    @click.stop="$store.sharing.copyTrack($store.player.currentTrack, $event.currentTarget)"
+                                    title="{{ t.player_share_track }}"
+                                    aria-label="{{ t.player_share_track }}">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.6l6.8-3.9M8.6 13.4l6.8 3.9"/></svg>
                             </button>
                         </div>
                         <div class="player-track-artist">
@@ -1060,7 +1084,7 @@
                 <button class="player-btn" :class="{ active: $store.player.shuffle }" @click="$store.player.toggleShuffle()" title="{{ t.player_shuffle }}">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
                 </button>
-                <button class="player-btn" @click="$store.player.prev()" title="{{ t.player_previous }}">
+                <button class="player-btn player-btn-prev" @click="$store.player.prev()" title="{{ t.player_previous }}">
                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
                 </button>
                 <button class="player-btn player-btn-play" @click="$store.player.toggle()">
@@ -1071,7 +1095,7 @@
                         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>
                     </template>
                 </button>
-                <button class="player-btn" @click="$store.player.next()" title="{{ t.player_next }}">
+                <button class="player-btn player-btn-next" @click="$store.player.next()" title="{{ t.player_next }}">
                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
                 </button>
                 <button class="player-btn" :class="{ active: $store.player.repeatMode !== 'off' }" @click="$store.player.cycleRepeat()" title="{{ t.player_repeat }}">
@@ -1085,7 +1109,9 @@
             </div>
             <div class="player-timeline">
                 <span class="player-time" x-text="formatTime($store.player.currentTime)"></span>
-                <div class="progress-bar" @click="$store.player.seekFromClick($event)">
+                <div class="progress-bar"
+                     @pointerdown.prevent="$store.player.startProgressDrag($event)"
+                     aria-label="{{ t.player_duration }}">
                     <div class="progress-bar-fill" :style="'width:' + $store.player.progress + '%'">
                         <div class="progress-bar-thumb"></div>
                     </div>
@@ -1222,6 +1248,14 @@
                     </button>
                     <div class="jam-create-panel" x-show="$store.devices.jamPanelOpen" x-transition x-cloak>
                         <div class="jam-panel-title" x-text="$store.devices.jamPanelMode === 'manage' ? 'Invite listeners' : 'Start Jam'"></div>
+                        <label class="jam-local-playback-toggle"
+                               x-show="$store.devices.jamPanelMode === 'manage' && $store.devices.canPlayJamLocally()"
+                               x-cloak>
+                            <input type="checkbox"
+                                   :checked="$store.devices.jamLocalPlayback"
+                                   @change="$store.devices.setJamLocalPlayback($event.target.checked)">
+                            <span>{{ t.player_jam_play_on_this_device }}</span>
+                        </label>
                         <div class="jam-selected-users" x-show="$store.devices.jamSelectedUsers.length > 0">
                             <template x-for="user in $store.devices.jamSelectedUsers" :key="user.id">
                                 <button class="jam-user-chip" @click="$store.devices.removeJamInvitee(user.id)">

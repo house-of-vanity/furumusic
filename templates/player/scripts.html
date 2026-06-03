@@ -44,6 +44,10 @@ const T = {
     lastfmDisconnectFailed: "{{ t.player_lastfm_disconnect_failed }}",
     startRadio: "{{ t.player_start_radio }}",
     radioFailed: "{{ t.player_radio_failed }}",
+    share: "{{ t.player_share }}",
+    shareTrack: "{{ t.player_share_track }}",
+    shareQueue: "{{ t.player_share_queue }}",
+    sharedPlaylist: "{{ t.player_shared_playlist }}",
     connectionLost: "{{ t.player_connection_lost }}",
     connectionLostDetail: "{{ t.player_connection_lost_detail }}",
     activeDevice: "{{ t.player_active_device }}",
@@ -285,6 +289,204 @@ document.addEventListener('alpine:init', () => {
         },
     });
 
+    Alpine.store('sharing', {
+        _handledInitialLink: false,
+        sharedTrackId: null,
+
+        absoluteUrl(path) {
+            return new URL(path, window.location.origin).href;
+        },
+
+        async copyText(text) {
+            try {
+                if (navigator.clipboard?.writeText && window.isSecureContext) {
+                    await navigator.clipboard.writeText(text);
+                    return true;
+                }
+            } catch {}
+
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.setAttribute('readonly', '');
+            textarea.style.position = 'fixed';
+            textarea.style.left = '-9999px';
+            textarea.style.top = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            let ok = false;
+            try {
+                ok = document.execCommand('copy');
+            } catch {}
+            textarea.remove();
+            return ok;
+        },
+
+        async copyUrl(path, trigger = null) {
+            const copied = await this.copyText(this.absoluteUrl(path));
+            this.flashTrigger(trigger, copied);
+            return copied;
+        },
+
+        copyTrack(track, trigger = null) {
+            const id = Number(track?.id || track);
+            if (!id) return;
+            this.copyUrl(`/share/track/${id}`, trigger);
+        },
+
+        async copyQueue(trigger = null) {
+            const queue = Alpine.store('queue');
+            return this.copyTracks(queue?.tracks || [], T.sharedPlaylist, trigger);
+        },
+
+        async copyRelease(release, trigger = null) {
+            const id = Number(release?.id || release || 0);
+            if (!id) return;
+            return this.copyUrl(`/share/release/${id}`, trigger);
+        },
+
+        async copyTracks(tracks, title = T.sharedPlaylist, trigger = null) {
+            const trackIds = (tracks || []).map(track => Number(track.id)).filter(Boolean);
+            if (!trackIds.length) return;
+            try {
+                const res = await fetch('/api/player/share-playlist', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ track_ids: trackIds, title }),
+                });
+                if (!res.ok) throw new Error('share failed');
+                const data = await res.json();
+                await this.copyUrl(data.url || `/share/playlist/${data.token}`, trigger);
+            } catch (err) {
+                this.flashTrigger(trigger, false);
+                console.warn(err);
+            }
+        },
+
+        flashTrigger(trigger, copied) {
+            if (!trigger) return;
+            const className = copied ? 'share-copy-flash' : 'share-copy-failed';
+            trigger.classList.remove('share-copy-flash', 'share-copy-failed');
+            void trigger.offsetWidth;
+            trigger.classList.add(className);
+            window.setTimeout(() => trigger.classList.remove(className), 720);
+        },
+
+        markSharedTrack(trackId) {
+            const id = Number(trackId || 0);
+            this.sharedTrackId = id > 0 ? id : null;
+        },
+
+        isSharedTrack(track) {
+            const id = Number(track?.id || track || 0);
+            return id > 0 && id === Number(this.sharedTrackId || 0);
+        },
+
+        focusSharedTrack(trackId) {
+            const run = () => this.scrollSharedTrackIntoView(trackId);
+            requestAnimationFrame(run);
+            setTimeout(run, 120);
+            setTimeout(run, 360);
+            setTimeout(run, 720);
+        },
+
+        scrollSharedTrackIntoView(trackId) {
+            const id = Number(trackId || 0);
+            if (!id) return false;
+            const row = document.querySelector(`#center-scroll [data-shared-track-id="${id}"]`);
+            const container = document.getElementById('center-scroll');
+            if (!row || !container) return false;
+
+            const containerRect = container.getBoundingClientRect();
+            const rowRect = row.getBoundingClientRect();
+            const top = container.scrollTop
+                + rowRect.top
+                - containerRect.top
+                - ((container.clientHeight - rowRect.height) / 2);
+            container.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+            return true;
+        },
+
+        async handleInitialShareLinks() {
+            if (this._handledInitialLink) return;
+            this._handledInitialLink = true;
+
+            const params = new URLSearchParams(window.location.search);
+            const trackId = Number(params.get('track') || 0);
+            const releaseId = Number(params.get('release') || 0);
+            const playlistToken = (params.get('playlist_share') || '').trim();
+
+            if (trackId > 0) {
+                await this.openSharedTrack(trackId);
+                this._clearShareQuery();
+            } else if (releaseId > 0) {
+                await this.openSharedRelease(releaseId);
+                this._clearShareQuery();
+            } else if (playlistToken) {
+                await this.openSharedPlaylist(playlistToken);
+                this._clearShareQuery();
+            }
+        },
+
+        async openSharedTrack(trackId) {
+            try {
+                const res = await fetch('/api/player/tracks-by-ids', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids: [Number(trackId)] }),
+                });
+                if (!res.ok) throw new Error('track load failed');
+                const tracks = await res.json();
+                const track = Array.isArray(tracks) ? tracks[0] : null;
+                if (!track) return;
+                this.markSharedTrack(track.id);
+                if (track.release_id) {
+                    await Alpine.store('library').openRelease(track.release_id, { focusSharedTrackId: track.id });
+                }
+                const queue = Alpine.store('queue');
+                queue.tracks = [track];
+                queue.currentIndex = 0;
+                Alpine.store('player')._playLocal(track, { paused: true });
+                this.focusSharedTrack(track.id);
+            } catch (err) {
+                console.warn(err);
+            }
+        },
+
+        async openSharedRelease(releaseId) {
+            const id = Number(releaseId || 0);
+            if (!id) return;
+            this.markSharedTrack(null);
+            await Alpine.store('library').openRelease(id);
+        },
+
+        async openSharedPlaylist(token) {
+            try {
+                const res = await fetch(`/api/player/share-playlist/${encodeURIComponent(token)}`);
+                if (!res.ok) throw new Error('playlist load failed');
+                const data = await res.json();
+                const tracks = Array.isArray(data.tracks) ? data.tracks : [];
+                if (!tracks.length) return;
+                const queue = Alpine.store('queue');
+                queue.tracks = tracks;
+                queue.currentIndex = 0;
+                Alpine.store('player')._playLocal(tracks[0], { paused: true });
+                Alpine.store('library').showSharedPlaylist(data);
+            } catch (err) {
+                console.warn(err);
+            }
+        },
+
+        _clearShareQuery() {
+            const url = new URL(window.location.href);
+            url.searchParams.delete('track');
+            url.searchParams.delete('release');
+            url.searchParams.delete('playlist_share');
+            const query = url.searchParams.toString();
+            const next = `${url.pathname}${query ? '?' + query : ''}${window.location.hash}`;
+            history.replaceState({}, '', next);
+        },
+    });
+
     // -----------------------------------------------------------------------
     // User store
     // -----------------------------------------------------------------------
@@ -510,10 +712,17 @@ document.addEventListener('alpine:init', () => {
         _playbackStartedAt: null,
         _listenedSeconds: 0,
         _lastAudioTime: 0,
+        _localSourceTrackId: null,
         _remoteExecuting: false,
         _remoteStateBaseTime: 0,
         _remoteStateReceivedAt: 0,
         _remoteStateTimer: null,
+
+        _hasInitialShareLink() {
+            const params = new URLSearchParams(window.location.search);
+            return Number(params.get('track') || 0) > 0
+                || (params.get('playlist_share') || '').trim().length > 0;
+        },
 
         init() {
             audio.volume = this.volume;
@@ -528,6 +737,10 @@ document.addEventListener('alpine:init', () => {
             audio.addEventListener('ended', () => {
                 this._trackListenedDelta();
                 this._recordHistory(true);
+                if (Alpine.store('devices')?.shouldPlayJamLocally()) {
+                    this.isPlaying = false;
+                    return;
+                }
                 this.next();
             });
 
@@ -555,7 +768,9 @@ document.addEventListener('alpine:init', () => {
             }, 250);
 
             // Restore state
-            this._restoreState();
+            if (!this._hasInitialShareLink()) {
+                this._restoreState();
+            }
 
             // Save state on page unload
             window.addEventListener('beforeunload', () => {
@@ -567,6 +782,12 @@ document.addEventListener('alpine:init', () => {
             if (!track) return;
             if (this._shouldSendRemote()) {
                 this._mirrorRemoteTrack(track, true, 0);
+                if (this._shouldMirrorRemoteLocally()) {
+                    this._playLocal(track, {
+                        position_seconds: 0,
+                        paused: false,
+                    });
+                }
                 this._sendRemote('play_track', this._remotePlaybackPayload(track, {
                     position_seconds: 0,
                     paused: false,
@@ -583,6 +804,12 @@ document.addEventListener('alpine:init', () => {
             const track = queue.tracks[idx];
             if (this._shouldSendRemote()) {
                 this._mirrorRemoteTrack(track, true, 0);
+                if (this._shouldMirrorRemoteLocally()) {
+                    this._playLocal(track, {
+                        position_seconds: 0,
+                        paused: false,
+                    });
+                }
                 this._sendRemote('play_from_index', this._remotePlaybackPayload(track, {
                     index: idx,
                     position_seconds: 0,
@@ -595,6 +822,7 @@ document.addEventListener('alpine:init', () => {
 
         _playLocal(track, options = {}) {
             this.currentTrack = track;
+            this._localSourceTrackId = track.id;
             this._historyRecorded = false;
             this._resetPlaybackTracking();
             audio.src = track.stream_url;
@@ -626,6 +854,9 @@ document.addEventListener('alpine:init', () => {
                 this.isPlaying = false;
                 this._remoteStateBaseTime = this.currentTime;
                 this._remoteStateReceivedAt = Date.now();
+                if (this._shouldMirrorRemoteLocally()) {
+                    this._pauseLocal();
+                }
                 this._sendRemote('pause');
                 return;
             }
@@ -637,6 +868,9 @@ document.addEventListener('alpine:init', () => {
                 this.isPlaying = true;
                 this._remoteStateBaseTime = this.currentTime;
                 this._remoteStateReceivedAt = Date.now();
+                if (this._shouldMirrorRemoteLocally()) {
+                    audio.play().catch(() => {});
+                }
                 this._sendRemote('resume');
                 return;
             }
@@ -656,6 +890,10 @@ document.addEventListener('alpine:init', () => {
                 this.progress = this.duration > 0 ? (this.currentTime / this.duration) * 100 : 0;
                 this._remoteStateBaseTime = nextTime;
                 this._remoteStateReceivedAt = Date.now();
+                if (this._shouldMirrorRemoteLocally() && this._localSourceTrackId === this.currentTrack?.id) {
+                    audio.currentTime = nextTime;
+                    this._lastAudioTime = audio.currentTime || 0;
+                }
                 this._sendRemote('seek', { time: nextTime });
                 return;
             }
@@ -673,11 +911,33 @@ document.addEventListener('alpine:init', () => {
 
         seekFromClick(event) {
             const bar = event.currentTarget;
+            this._setProgressFromClientX(event.clientX, bar);
+        },
+
+        _setProgressFromClientX(clientX, bar) {
             const rect = bar.getBoundingClientRect();
-            const pct = (event.clientX - rect.left) / rect.width;
+            const pct = rect.width > 0 ? Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) : 0;
             if (this.duration > 0) {
                 this.seek(pct * this.duration);
             }
+        },
+
+        startProgressDrag(event) {
+            const bar = event.currentTarget;
+            this._setProgressFromClientX(event.clientX, bar);
+            bar.setPointerCapture?.(event.pointerId);
+
+            const move = (e) => {
+                this._setProgressFromClientX(e.clientX, bar);
+            };
+            const stop = () => {
+                window.removeEventListener('pointermove', move);
+                window.removeEventListener('pointerup', stop);
+                window.removeEventListener('pointercancel', stop);
+            };
+            window.addEventListener('pointermove', move);
+            window.addEventListener('pointerup', stop);
+            window.addEventListener('pointercancel', stop);
         },
 
         next() {
@@ -742,7 +1002,7 @@ document.addEventListener('alpine:init', () => {
 
         setVolume(v) {
             this._setVolumeLocal(v);
-            if (this._shouldSendRemote()) {
+            if (this._shouldSendRemote() && !this._shouldMirrorRemoteLocally()) {
                 this._sendRemote('set_volume', { volume: this.volume });
             }
         },
@@ -832,6 +1092,10 @@ document.addEventListener('alpine:init', () => {
             return !!devices && !this._remoteExecuting && !devices.isActive();
         },
 
+        _shouldMirrorRemoteLocally() {
+            return !!Alpine.store('devices')?.shouldPlayJamLocally();
+        },
+
         _sendRemote(command, payload = {}) {
             const devices = Alpine.store('devices');
             if (!devices) return false;
@@ -906,8 +1170,57 @@ document.addEventListener('alpine:init', () => {
             this._updateMediaSession();
         },
 
+        _syncLocalPlaybackState(state) {
+            if (!state) return;
+            const queue = Alpine.store('queue');
+            const tracks = Array.isArray(state.tracks) ? state.tracks.filter(Boolean) : [];
+            if (queue && tracks.length > 0) {
+                queue.tracks = queue._tracksWithJamDefaults(tracks);
+                queue.currentIndex = Math.max(0, Math.min(Number(state.index || 0), queue.tracks.length - 1));
+            }
+
+            const track = state.track || queue?.tracks?.[queue.currentIndex] || null;
+            if (!track) return;
+
+            const desiredTime = Math.max(0, Number(state.position_seconds || 0));
+            const duration = Number(state.duration_seconds || track.duration_seconds || this.duration || 0);
+            this.currentTrack = track;
+            this.shuffle = !!state.shuffle;
+            this.repeatMode = state.repeat_mode || 'off';
+            this.duration = duration;
+            this._remoteStateBaseTime = desiredTime;
+            this._remoteStateReceivedAt = Date.now();
+
+            if (this._localSourceTrackId !== track.id) {
+                this._playLocal(track, {
+                    position_seconds: desiredTime,
+                    paused: !!state.paused,
+                });
+            } else {
+                const drift = Math.abs((audio.currentTime || 0) - desiredTime);
+                const driftLimit = state.paused ? 0.08 : 0.75;
+                if (drift > driftLimit) {
+                    audio.currentTime = desiredTime;
+                    this._lastAudioTime = audio.currentTime || 0;
+                }
+                if (state.paused) {
+                    if (!audio.paused) audio.pause();
+                    this.isPlaying = false;
+                } else if (audio.paused) {
+                    audio.play().catch(() => {});
+                    this.isPlaying = true;
+                } else {
+                    this.isPlaying = true;
+                }
+            }
+
+            this.currentTime = audio.currentTime || desiredTime;
+            this.progress = duration > 0 ? (this.currentTime / duration) * 100 : 0;
+            this._updateMediaSession();
+        },
+
         _tickRemoteProgress(force = false) {
-            if (this._isLocalPlaybackDevice() || !this.currentTrack) return;
+            if (this._isLocalPlaybackDevice() || this._shouldMirrorRemoteLocally() || !this.currentTrack) return;
             if (!force && !this.isPlaying) return;
             let nextTime = Number(this._remoteStateBaseTime || 0);
             if (this.isPlaying && this._remoteStateReceivedAt > 0) {
@@ -1046,6 +1359,7 @@ document.addEventListener('alpine:init', () => {
                                     : tracks[idx];
                                 if (currentTrack) {
                                     this.currentTrack = currentTrack;
+                                    this._localSourceTrackId = currentTrack.id;
                                     this._historyRecorded = false;
                                     this._resetPlaybackTracking();
                                     audio.src = currentTrack.stream_url;
@@ -1177,6 +1491,7 @@ document.addEventListener('alpine:init', () => {
         jamUsers: [],
         jamSelectedUsers: [],
         jamSearching: false,
+        jamLocalPlayback: false,
         remoteHintVisible: false,
         remoteHintDeviceName: '',
         _remoteHintShown: false,
@@ -1184,6 +1499,7 @@ document.addEventListener('alpine:init', () => {
         _pollTimer: null,
         _jamSearchTimer: null,
         _stateRefreshTick: 0,
+        _lastPlaybackState: null,
 
         init() {
             this.id = this._ensureId();
@@ -1239,6 +1555,7 @@ document.addEventListener('alpine:init', () => {
                 });
                 if (!res.ok) return;
                 const data = await res.json();
+                if (data.playback_state) this._lastPlaybackState = data.playback_state;
                 this._apply(data);
 
                 const player = Alpine.store('player');
@@ -1247,7 +1564,11 @@ document.addEventListener('alpine:init', () => {
                 }
                 if (player && !this.isActive()) {
                     if (data.playback_state) {
-                        player._applyRemotePlaybackState(data.playback_state);
+                        if (this.shouldPlayJamLocally()) {
+                            player._syncLocalPlaybackState(data.playback_state);
+                        } else {
+                            player._applyRemotePlaybackState(data.playback_state);
+                        }
                     } else if (++this._stateRefreshTick % 8 === 0) {
                         player._restoreState();
                     }
@@ -1257,15 +1578,20 @@ document.addEventListener('alpine:init', () => {
 
         _apply(data) {
             const wasActive = this.isActive();
+            const previousJamId = this.currentJamId;
             this.activeDeviceId = data.active_device_id || null;
             this.devices = Array.isArray(data.devices) ? data.devices : [];
             this.jams = Array.isArray(data.jams) ? data.jams : [];
+            if (data.playback_state) this._lastPlaybackState = data.playback_state;
             if (data.current_jam_id) {
                 this.currentJamId = data.current_jam_id;
                 sessionStorage.setItem('furu_player_jam_id', this.currentJamId);
             } else if (this.currentJamId && !this.jams.some(jam => jam.id === this.currentJamId)) {
                 this.currentJamId = null;
                 sessionStorage.removeItem('furu_player_jam_id');
+            }
+            if (previousJamId !== this.currentJamId || !this.canPlayJamLocally()) {
+                this._setJamLocalPlayback(false, { pauseLocal: true });
             }
             if (wasActive && !this.isActive()) {
                 Alpine.store('player')?._pauseLocal();
@@ -1348,6 +1674,41 @@ document.addEventListener('alpine:init', () => {
         isControllingRemoteJam() {
             const jam = this.selectedJam();
             return !!jam && !jam.is_owner;
+        },
+
+        canPlayJamLocally() {
+            const jam = this.selectedJam();
+            return !!jam && jam.is_member && !jam.is_owner && jam.host_device_online;
+        },
+
+        shouldPlayJamLocally() {
+            return this.jamLocalPlayback && this.canPlayJamLocally();
+        },
+
+        setJamLocalPlayback(enabled) {
+            this._setJamLocalPlayback(enabled, { pauseLocal: true });
+            if (!this.jamLocalPlayback) return;
+
+            const player = Alpine.store('player');
+            if (player && this._lastPlaybackState) {
+                player._syncLocalPlaybackState(this._lastPlaybackState);
+            } else if (player?.currentTrack) {
+                player._syncLocalPlaybackState(player._remotePlaybackPayload(player.currentTrack, {
+                    position_seconds: player.currentTime || 0,
+                    duration_seconds: player.duration || 0,
+                    paused: !player.isPlaying,
+                }));
+            }
+            this.poll();
+        },
+
+        _setJamLocalPlayback(enabled, options = {}) {
+            const next = !!enabled && this.canPlayJamLocally();
+            const wasEnabled = this.jamLocalPlayback;
+            this.jamLocalPlayback = next;
+            if (wasEnabled && !next && options.pauseLocal) {
+                Alpine.store('player')?._pauseLocal();
+            }
         },
 
         isActive() {
@@ -1555,6 +1916,7 @@ document.addEventListener('alpine:init', () => {
                 const data = await res.json();
                 this.currentJamId = jam.id;
                 sessionStorage.setItem('furu_player_jam_id', jam.id);
+                if (data.playback_state) this._lastPlaybackState = data.playback_state;
                 this._apply(data);
                 Alpine.store('queue')?._ensureCurrentJamAttribution();
                 this.open = false;
@@ -1588,6 +1950,7 @@ document.addEventListener('alpine:init', () => {
             this.currentJamId = null;
             this.jamPanelOpen = false;
             this.jamPanelJamId = null;
+            this._setJamLocalPlayback(false, { pauseLocal: true });
             sessionStorage.removeItem('furu_player_jam_id');
         },
     });
@@ -1881,6 +2244,9 @@ document.addEventListener('alpine:init', () => {
 
             // Navigate to initial hash (if any)
             this._navigateFromHash({ fromHash: true, restoreScroll: true });
+            this.$nextTick(() => {
+                Alpine.store('sharing')?.handleInitialShareLinks();
+            });
         },
 
         _setHash(hash) {
@@ -1957,7 +2323,11 @@ document.addEventListener('alpine:init', () => {
         },
 
         _afterNavigation(options = {}) {
-            if (options.restoreScroll) {
+            if (options.focusSharedTrackId) {
+                this.$nextTick(() => {
+                    Alpine.store('sharing')?.focusSharedTrack(options.focusSharedTrackId);
+                });
+            } else if (options.restoreScroll) {
                 this._restoreScrollPosition(this._activeHash);
             } else {
                 this.$nextTick(() => { this._scrollToTop(); });
@@ -2328,6 +2698,28 @@ document.addEventListener('alpine:init', () => {
                 if (!res.ok) throw new Error('failed');
                 this.currentPlaylist = await res.json();
             } catch {}
+            this._afterNavigation(options);
+        },
+
+        showSharedPlaylist(share, options = {}) {
+            this._saveScrollPosition(this._activeHash);
+            this.searchQuery = '';
+            this.searchResults = null;
+            this.currentArtist = null;
+            this.currentRelease = null;
+            this.currentPlaylist = {
+                id: 0,
+                title: share?.title || T.sharedPlaylist,
+                description: null,
+                is_own: false,
+                owner_name: null,
+                is_public: false,
+                is_saved: false,
+                kind: 'shared',
+                tracks: Array.isArray(share?.tracks) ? share.tracks : [],
+            };
+            this.view = 'playlist_detail';
+            this._previousView = 'artists';
             this._afterNavigation(options);
         },
 

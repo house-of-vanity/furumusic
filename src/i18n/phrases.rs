@@ -358,6 +358,11 @@ translations! {
     player_add_to_queue:     "Add to queue"                    , "Добавить в очередь";
     player_add_to_end_queue: "Add to end of queue"             , "Добавить в конец очереди";
     player_play_next:        "Play next"                       , "Играть следующим";
+    player_share:            "Share"                           , "Поделиться";
+    player_share_track:      "Share track"                     , "Поделиться треком";
+    player_share_queue:      "Share queue"                     , "Поделиться очередью";
+    player_shared_playlist:  "Shared playlist"                 , "Общий плейлист";
+    player_jam_play_on_this_device: "Play on this device"      , "Играть на этом устройстве";
     player_queue:            "Queue"                           , "Очередь";
     player_next:             "Next"                            , "Далее";
     player_previous:         "Previous"                        , "Назад";

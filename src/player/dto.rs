@@ -290,6 +290,19 @@ pub(super) struct PlaylistDetail {
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
+pub(super) struct ShareLinkResponse {
+    pub(super) token: String,
+    pub(super) url: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub(super) struct PlaylistShareDetail {
+    pub(super) token: String,
+    pub(super) title: String,
+    pub(super) tracks: Vec<TrackItem>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
 pub(super) struct SearchResults {
     pub(super) artists: Vec<ArtistCard>,
     pub(super) releases: Vec<ReleaseCard>,

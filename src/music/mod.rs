@@ -1910,6 +1910,47 @@ pub mod db_migrations {
             &[Operation::custom(create_external_metadata_ids).build()];
     }
 
+    // -- M0037: Shared playlist snapshots ------------------------------------
+
+    #[cot::db::migrations::migration_op]
+    async fn create_playlist_share_links(
+        ctx: migrations::MigrationContext<'_>,
+    ) -> cot::db::Result<()> {
+        ctx.db
+            .raw(
+                "CREATE TABLE IF NOT EXISTS furumusic__playlist_share_link (
+                    token VARCHAR(64) PRIMARY KEY,
+                    creator_user_id BIGINT NOT NULL,
+                    title TEXT NOT NULL,
+                    track_ids_json TEXT NOT NULL,
+                    created_at VARCHAR(32) NOT NULL
+                )",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE INDEX IF NOT EXISTS idx_playlist_share_link_creator
+                   ON furumusic__playlist_share_link (creator_user_id, created_at DESC)",
+            )
+            .await?;
+        Ok(())
+    }
+
+    #[derive(Debug, Copy, Clone)]
+    pub struct M0037CreatePlaylistShareLinks;
+
+    impl migrations::Migration for M0037CreatePlaylistShareLinks {
+        const APP_NAME: &'static str = "furumusic";
+        const MIGRATION_NAME: &'static str = "m_0037_create_playlist_share_links";
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
+                "furumusic",
+                "m_0036_create_external_metadata_ids",
+            )];
+        const OPERATIONS: &'static [Operation] =
+            &[Operation::custom(create_playlist_share_links).build()];
+    }
+
     pub const MIGRATIONS: &[&SyncDynMigration] = &[
         &M0006CreateMediaFile,
         &M0007CreateArtist,
@@ -1937,5 +1978,6 @@ pub mod db_migrations {
         &M0034CreateArtworkLookupState,
         &M0035CreateEntityGenreTags,
         &M0036CreateExternalMetadataIds,
+        &M0037CreatePlaylistShareLinks,
     ];
 }

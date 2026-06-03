@@ -37,6 +37,7 @@ impl Role {
 // ---------------------------------------------------------------------------
 
 const SESSION_USER_ID: &str = "user_id";
+const SESSION_POST_LOGIN_REDIRECT: &str = "post_login_redirect";
 
 #[derive(Debug, Clone)]
 pub struct AuthenticatedUser {
@@ -101,6 +102,43 @@ pub async fn login(session: &Session, user_id: i64) -> cot::Result<()> {
         .map_err(|e| cot::Error::internal(e.to_string()))?;
     crate::metrics::record_active_user(user_id);
     Ok(())
+}
+
+pub async fn remember_post_login_redirect(session: &Session, location: &str) -> cot::Result<()> {
+    if let Some(location) = safe_internal_redirect(location) {
+        session
+            .insert(SESSION_POST_LOGIN_REDIRECT, location)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
+    }
+    Ok(())
+}
+
+pub async fn get_post_login_redirect(session: &Session) -> cot::Result<Option<String>> {
+    let location: Option<String> = session
+        .get(SESSION_POST_LOGIN_REDIRECT)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    Ok(location.and_then(|value| safe_internal_redirect(&value)))
+}
+
+pub async fn clear_post_login_redirect(session: &Session) -> cot::Result<()> {
+    let _: Option<String> = session
+        .remove(SESSION_POST_LOGIN_REDIRECT)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    Ok(())
+}
+
+fn safe_internal_redirect(location: &str) -> Option<String> {
+    let location = location.trim();
+    if !location.starts_with('/') || location.starts_with("//") {
+        return None;
+    }
+    if location.bytes().any(|b| matches!(b, b'\r' | b'\n')) {
+        return None;
+    }
+    Some(location.chars().take(2048).collect())
 }
 
 /// Flush (destroy) the session.

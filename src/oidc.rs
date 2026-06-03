@@ -430,8 +430,13 @@ pub async fn oidc_callback_handler(
         }
     };
 
+    let redirect_to = auth::get_post_login_redirect(&session)
+        .await?
+        .unwrap_or_else(|| "/".to_string());
+
     // Log the user in.
     auth::login(&session, user.id_val()).await?;
+    auth::clear_post_login_redirect(&session).await?;
     crate::metrics::record_auth_attempt("oidc", "success", "ok");
     crate::metrics::record_session_created("oidc");
 
@@ -453,7 +458,7 @@ pub async fn oidc_callback_handler(
         .await
         .map_err(|e| cot::Error::internal(e.to_string()))?;
 
-    Ok(auth::redirect("/"))
+    Ok(auth::redirect(&redirect_to))
 }
 
 // ---------------------------------------------------------------------------

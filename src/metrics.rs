@@ -6,11 +6,11 @@ use std::sync::{LazyLock, Mutex};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
-use cot::http::header::CONTENT_LENGTH;
+use cot::Error;
 use cot::http::Method;
+use cot::http::header::CONTENT_LENGTH;
 use cot::request::Request;
 use cot::response::Response;
-use cot::Error;
 use sqlx::PgPool;
 use tower::{Layer, Service};
 
@@ -80,28 +80,33 @@ where
 
     fn call(&mut self, request: Request) -> Self::Future {
         let method = request.method().clone();
-        let route = normalize_route(request.uri().path());
+        let route = known_http_route(request.uri().path()).map(str::to_owned);
         let request_bytes = request
             .headers()
             .get(CONTENT_LENGTH)
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.parse::<f64>().ok())
             .unwrap_or(0.0);
-        let labels = http_labels(&method, &route, "in_flight");
-        REGISTRY.inc_gauge("furumusic_http_in_flight_requests", labels, 1.0);
-        REGISTRY.inc_counter(
-            "furumusic_http_request_body_bytes_total",
-            vec![
-                ("method", method.as_str().to_owned()),
-                ("route", route.clone()),
-            ],
-            request_bytes,
-        );
+        if let Some(route) = &route {
+            let labels = http_labels(&method, route, "in_flight");
+            REGISTRY.inc_gauge("furumusic_http_in_flight_requests", labels, 1.0);
+            REGISTRY.inc_counter(
+                "furumusic_http_request_body_bytes_total",
+                vec![
+                    ("method", method.as_str().to_owned()),
+                    ("route", route.clone()),
+                ],
+                request_bytes,
+            );
+        }
 
         let start = Instant::now();
         let fut = self.inner.call(request);
         Box::pin(async move {
             let result = fut.await;
+            let Some(route) = route else {
+                return result;
+            };
             let elapsed = start.elapsed().as_secs_f64();
             REGISTRY.inc_gauge(
                 "furumusic_http_in_flight_requests",
@@ -236,8 +241,17 @@ pub fn record_agent_discover_run(outcome: &'static str, duration: Duration) {
     );
 }
 
-pub fn record_agent_discover_files(seen: u64, queued: u64, skipped_hash: u64, skipped_existing: u64) {
-    REGISTRY.inc_counter("furumusic_agent_discover_files_seen_total", Vec::new(), seen as f64);
+pub fn record_agent_discover_files(
+    seen: u64,
+    queued: u64,
+    skipped_hash: u64,
+    skipped_existing: u64,
+) {
+    REGISTRY.inc_counter(
+        "furumusic_agent_discover_files_seen_total",
+        Vec::new(),
+        seen as f64,
+    );
     REGISTRY.inc_counter(
         "furumusic_agent_discover_files_queued_total",
         Vec::new(),
@@ -340,18 +354,12 @@ pub fn record_agent_llm(
     let model = normalize_model_label(model);
     REGISTRY.inc_counter(
         "furumusic_agent_llm_requests_total",
-        vec![
-            ("model", model.clone()),
-            ("outcome", outcome.to_owned()),
-        ],
+        vec![("model", model.clone()), ("outcome", outcome.to_owned())],
         1.0,
     );
     REGISTRY.observe_histogram(
         "furumusic_agent_llm_duration_seconds",
-        vec![
-            ("model", model.clone()),
-            ("outcome", outcome.to_owned()),
-        ],
+        vec![("model", model.clone()), ("outcome", outcome.to_owned())],
         duration.as_secs_f64(),
         JOB_BUCKETS,
     );
@@ -362,10 +370,7 @@ pub fn record_agent_llm(
     );
     REGISTRY.inc_counter(
         "furumusic_agent_llm_tokens_total",
-        vec![
-            ("model", model.clone()),
-            ("type", "completion".to_owned()),
-        ],
+        vec![("model", model.clone()), ("type", "completion".to_owned())],
         completion_tokens as f64,
     );
     REGISTRY.observe_histogram(
@@ -400,7 +405,12 @@ pub fn record_agent_llm_parse_failure(model: &str) {
     );
 }
 
-pub fn record_agent_rag(kind: &'static str, outcome: &'static str, duration: Duration, results: usize) {
+pub fn record_agent_rag(
+    kind: &'static str,
+    outcome: &'static str,
+    duration: Duration,
+    results: usize,
+) {
     REGISTRY.inc_counter(
         "furumusic_agent_rag_queries_total",
         vec![("kind", kind.to_owned()), ("outcome", outcome.to_owned())],
@@ -423,7 +433,10 @@ pub fn record_agent_rag(kind: &'static str, outcome: &'static str, duration: Dur
 pub fn record_agent_cover_lookup(source: &'static str, outcome: &'static str, bytes: usize) {
     REGISTRY.inc_counter(
         "furumusic_agent_cover_lookup_total",
-        vec![("source", source.to_owned()), ("outcome", outcome.to_owned())],
+        vec![
+            ("source", source.to_owned()),
+            ("outcome", outcome.to_owned()),
+        ],
         1.0,
     );
     REGISTRY.inc_counter(
@@ -433,7 +446,11 @@ pub fn record_agent_cover_lookup(source: &'static str, outcome: &'static str, by
     );
 }
 
-pub fn record_agent_cover_variant(variant: &'static str, outcome: &'static str, duration: Duration) {
+pub fn record_agent_cover_variant(
+    variant: &'static str,
+    outcome: &'static str,
+    duration: Duration,
+) {
     REGISTRY.inc_counter(
         "furumusic_agent_cover_variant_generation_total",
         vec![
@@ -489,7 +506,12 @@ pub fn record_torrent_download(outcome: &'static str, selected_bytes: u64, durat
 
 pub async fn render(pool: &PgPool, config: &AppConfig) -> String {
     let mut out = String::new();
-    emit_static_gauge(&mut out, "furumusic_build_info", &[("version", env!("CARGO_PKG_VERSION"))], 1.0);
+    emit_static_gauge(
+        &mut out,
+        "furumusic_build_info",
+        &[("version", env!("CARGO_PKG_VERSION"))],
+        1.0,
+    );
     render_active_users(&mut out);
     render_storage(&mut out, config);
     render_db_metrics(&mut out, pool).await;
@@ -538,11 +560,42 @@ fn render_storage(out: &mut String, config: &AppConfig) {
 }
 
 async fn render_db_metrics(out: &mut String, pool: &PgPool) {
-    render_group_counts(out, pool, "furumusic_users_total", "SELECT role::text AS label, COUNT(*) AS count FROM furumusic__user GROUP BY role", "role").await;
-    render_single_count(out, pool, "furumusic_library_tracks_total", "SELECT COUNT(*) FROM furumusic__track").await;
-    render_single_count(out, pool, "furumusic_library_releases_total", "SELECT COUNT(*) FROM furumusic__release").await;
-    render_single_count(out, pool, "furumusic_library_artists_total", "SELECT COUNT(*) FROM furumusic__artist").await;
-    render_single_count(out, pool, "furumusic_library_playlists_total", "SELECT COUNT(*) FROM furumusic__playlist").await;
+    render_group_counts(
+        out,
+        pool,
+        "furumusic_users_total",
+        "SELECT role::text AS label, COUNT(*) AS count FROM furumusic__user GROUP BY role",
+        "role",
+    )
+    .await;
+    render_single_count(
+        out,
+        pool,
+        "furumusic_library_tracks_total",
+        "SELECT COUNT(*) FROM furumusic__track",
+    )
+    .await;
+    render_single_count(
+        out,
+        pool,
+        "furumusic_library_releases_total",
+        "SELECT COUNT(*) FROM furumusic__release",
+    )
+    .await;
+    render_single_count(
+        out,
+        pool,
+        "furumusic_library_artists_total",
+        "SELECT COUNT(*) FROM furumusic__artist",
+    )
+    .await;
+    render_single_count(
+        out,
+        pool,
+        "furumusic_library_playlists_total",
+        "SELECT COUNT(*) FROM furumusic__playlist",
+    )
+    .await;
     render_group_counts(out, pool, "furumusic_media_files_total", "SELECT file_type::text AS label, COUNT(*) AS count FROM furumusic__media_file GROUP BY file_type", "type").await;
     render_group_sums(out, pool, "furumusic_media_file_bytes_total", "SELECT file_type::text AS label, COALESCE(SUM(file_size_bytes), 0)::bigint AS value FROM furumusic__media_file GROUP BY file_type", "type").await;
     render_group_counts(out, pool, "furumusic_agent_reviews_total", "SELECT status::text AS label, COUNT(*) AS count FROM furumusic__pending_review GROUP BY status", "status").await;
@@ -550,7 +603,13 @@ async fn render_db_metrics(out: &mut String, pool: &PgPool) {
     render_group_counts(out, pool, "furumusic_scheduler_job_running", "SELECT job_name::text AS label, COUNT(*) AS count FROM furumusic__job_run WHERE status = 'running' GROUP BY job_name", "job").await;
     render_group_sums(out, pool, "furumusic_scheduler_job_enabled", "SELECT name::text AS label, (CASE WHEN enabled THEN 1 ELSE 0 END)::bigint AS value FROM furumusic__scheduled_job", "job").await;
     render_group_counts(out, pool, "furumusic_torrent_sessions_total", "SELECT status::text AS label, COUNT(*) AS count FROM furumusic__torrent_session GROUP BY status", "status").await;
-    render_single_count(out, pool, "furumusic_play_history_total", "SELECT COUNT(*) FROM furumusic__play_history").await;
+    render_single_count(
+        out,
+        pool,
+        "furumusic_play_history_total",
+        "SELECT COUNT(*) FROM furumusic__play_history",
+    )
+    .await;
 }
 
 async fn render_single_count(out: &mut String, pool: &PgPool, metric: &'static str, sql: &str) {
@@ -566,7 +625,10 @@ async fn render_group_counts(
     sql: &str,
     label_name: &'static str,
 ) {
-    if let Ok(rows) = sqlx::query_as::<_, (String, i64)>(sql).fetch_all(pool).await {
+    if let Ok(rows) = sqlx::query_as::<_, (String, i64)>(sql)
+        .fetch_all(pool)
+        .await
+    {
         for (label, count) in rows {
             emit_static_gauge(out, metric, &[(label_name, label.as_str())], count as f64);
         }
@@ -580,7 +642,10 @@ async fn render_group_sums(
     sql: &str,
     label_name: &'static str,
 ) {
-    if let Ok(rows) = sqlx::query_as::<_, (String, i64)>(sql).fetch_all(pool).await {
+    if let Ok(rows) = sqlx::query_as::<_, (String, i64)>(sql)
+        .fetch_all(pool)
+        .await
+    {
         for (label, value) in rows {
             emit_static_gauge(out, metric, &[(label_name, label.as_str())], value as f64);
         }
@@ -641,7 +706,12 @@ impl Registry {
             for (bucket, count) in state.buckets.iter().zip(state.counts.iter()) {
                 let mut labels = key.labels.clone();
                 labels.push(("le", bucket.to_string()));
-                emit_metric(&mut out, &format!("{}_bucket", key.name), &labels, *count as f64);
+                emit_metric(
+                    &mut out,
+                    &format!("{}_bucket", key.name),
+                    &labels,
+                    *count as f64,
+                );
             }
             let mut inf_labels = key.labels.clone();
             inf_labels.push(("le", "+Inf".to_owned()));
@@ -683,31 +753,220 @@ fn http_labels(method: &Method, route: &str, status: &str) -> Vec<(&'static str,
     ]
 }
 
-fn normalize_route(path: &str) -> String {
-    let mut route = String::with_capacity(path.len());
-    for segment in path.split('/') {
-        if segment.is_empty() {
-            continue;
-        }
-        route.push('/');
-        if segment.parse::<i64>().is_ok() || looks_like_uuid(segment) {
-            route.push_str("{id}");
-        } else {
-            route.push_str(segment);
-        }
-    }
-    if route.is_empty() {
+fn known_http_route(path: &str) -> Option<&'static str> {
+    let path = canonicalize_http_path(path);
+    KNOWN_HTTP_ROUTES
+        .iter()
+        .copied()
+        .find(|pattern| route_pattern_matches(pattern, &path))
+}
+
+fn canonicalize_http_path(path: &str) -> String {
+    let without_trailing = path.trim_end_matches('/');
+    if without_trailing.is_empty() {
         "/".to_owned()
     } else {
-        route
+        without_trailing.to_owned()
     }
 }
 
-fn looks_like_uuid(value: &str) -> bool {
-    value.len() == 36
-        && value
-            .chars()
-            .all(|ch| ch.is_ascii_hexdigit() || ch == '-')
+fn route_pattern_matches(pattern: &str, path: &str) -> bool {
+    if pattern == "/" {
+        return path == "/";
+    }
+
+    let mut pattern_segments = pattern.trim_start_matches('/').split('/');
+    let mut path_segments = path.trim_start_matches('/').split('/');
+
+    loop {
+        match (pattern_segments.next(), path_segments.next()) {
+            (None, None) => return true,
+            (Some(pattern_segment), Some(path_segment)) => {
+                if path_segment.is_empty() {
+                    return false;
+                }
+                if is_route_param(pattern_segment) {
+                    continue;
+                }
+                if pattern_segment != path_segment {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+    }
+}
+
+fn is_route_param(segment: &str) -> bool {
+    segment.starts_with('{') && segment.ends_with('}')
+}
+
+const KNOWN_HTTP_ROUTES: &[&str] = &[
+    // Keep this allowlist in sync with Cot route declarations. Unknown paths are
+    // intentionally skipped so bot traffic cannot create high-cardinality labels.
+    "/",
+    "/admin",
+    "/swagger",
+    "/swagger/openapi.json",
+    "/share/track/{id}",
+    "/share/release/{id}",
+    "/share/playlist/{token}",
+    "/metrics",
+    "/login",
+    "/logout",
+    "/set-lang",
+    "/auth/oidc/start",
+    "/auth/oidc/callback",
+    "/api/me",
+    "/admin/setup",
+    "/admin/v2",
+    "/admin/v2/api/dashboard",
+    "/admin/v2/api/reviews",
+    "/admin/v2/api/reviews/bulk",
+    "/admin/v2/api/users",
+    "/admin/v2/api/users/{id}",
+    "/admin/v2/api/reviews/{id}/approve",
+    "/admin/v2/api/jobs",
+    "/admin/v2/api/jobs/metadata_backfill/run-options",
+    "/admin/v2/api/jobs/artwork_backfill/run-options",
+    "/admin/v2/api/jobs/{name}/run",
+    "/admin/v2/api/settings",
+    "/admin/v2/api/settings/probe",
+    "/admin/v2/api/jobs/{name}/toggle",
+    "/admin/v2/api/jobs/{name}/runs",
+    "/admin/v2/api/jobs/{name}/runs/{run_id}",
+    "/admin/v2/api/library",
+    "/admin/v2/api/library/item",
+    "/admin/v2/api/library/item/detail",
+    "/admin/v2/api/library/item/image",
+    "/admin/v2/api/library/item/upload-image",
+    "/admin/v2/api/library/bulk",
+    "/admin/debug",
+    "/admin/settings",
+    "/admin/settings/probe",
+    "/admin/users",
+    "/admin/users/new",
+    "/admin/users/{id}/edit",
+    "/admin/users/{id}/delete",
+    "/admin/artists",
+    "/admin/artists/new",
+    "/admin/artists/{id}/edit",
+    "/admin/artists/{id}/delete",
+    "/admin/artists/{id}/available-covers",
+    "/admin/artists/{id}/set-image",
+    "/admin/artists/{id}/upload-image",
+    "/admin/releases",
+    "/admin/releases/new",
+    "/admin/releases/{id}/edit",
+    "/admin/releases/{id}/delete",
+    "/admin/media-files",
+    "/admin/media-files/{id}/delete",
+    "/admin/jobs",
+    "/admin/jobs/metadata_backfill/run-options",
+    "/admin/jobs/{name}/run",
+    "/admin/jobs/{name}/toggle",
+    "/admin/jobs/{name}/cron",
+    "/admin/jobs/{name}/runs/{run_id}",
+    "/admin/jobs/{name}",
+    "/admin/reviews/clear",
+    "/admin/reviews/bulk",
+    "/admin/reviews",
+    "/admin/reviews/{id}",
+    "/admin/reviews/{id}/approve",
+    "/admin/reviews/{id}/reject",
+    "/admin/reviews/{id}/requeue",
+    "/api/player/me",
+    "/api/player/lastfm/status",
+    "/api/player/lastfm/connect",
+    "/api/player/lastfm/callback",
+    "/api/player/lastfm/disconnect",
+    "/api/player/lastfm/now-playing",
+    "/api/player/lastfm/scrobble",
+    "/api/player/agent-queue",
+    "/api/player/torrents",
+    "/api/player/torrents/session/{id}",
+    "/api/player/torrents/preview",
+    "/api/player/uploads/local",
+    "/api/player/uploads/tracks",
+    "/api/player/uploads/tracks/{track_id}",
+    "/api/player/uploads/bulk-tracks",
+    "/api/player/uploads/releases/{id}",
+    "/api/player/uploads/reviews/{id}",
+    "/api/player/uploads/reviews/{id}/approve",
+    "/api/player/torrents/{id}/start",
+    "/api/player/torrents/{id}/pause",
+    "/api/player/torrents/{id}/status",
+    "/api/player/artists",
+    "/api/player/artists/{id}",
+    "/api/player/releases/{id}",
+    "/api/player/radio/{kind}/{id}",
+    "/api/player/playlists",
+    "/api/player/share-playlist",
+    "/api/player/share-playlist/{id}",
+    "/api/player/playlists/{id}",
+    "/api/player/playlists/{id}/tracks",
+    "/api/player/likes",
+    "/api/player/likes/toggle/{track_id}",
+    "/api/player/likes/release/{id}",
+    "/api/player/follows",
+    "/api/player/follows/toggle/{id}",
+    "/api/player/stream/{track_id}",
+    "/api/player/cover/{media_file_id}/{variant}",
+    "/api/player/cover/{media_file_id}",
+    "/api/player/devices/heartbeat",
+    "/api/player/devices/poll",
+    "/api/player/devices/active",
+    "/api/player/devices/command",
+    "/api/player/jams/users",
+    "/api/player/jams",
+    "/api/player/jams/join",
+    "/api/player/jams/invite",
+    "/api/player/jams/leave",
+    "/api/player/state",
+    "/api/player/history",
+    "/api/player/search",
+    "/api/player/tracks-by-ids",
+];
+
+#[cfg(test)]
+mod tests {
+    use super::known_http_route;
+
+    #[test]
+    fn known_http_route_matches_declared_dynamic_routes() {
+        assert_eq!(
+            known_http_route("/api/player/stream/42"),
+            Some("/api/player/stream/{track_id}")
+        );
+        assert_eq!(
+            known_http_route("/admin/jobs/metadata_backfill/runs/123"),
+            Some("/admin/jobs/{name}/runs/{run_id}")
+        );
+        assert_eq!(
+            known_http_route("/share/playlist/abcDEF123"),
+            Some("/share/playlist/{token}")
+        );
+        assert_eq!(
+            known_http_route("/share/release/42"),
+            Some("/share/release/{id}")
+        );
+    }
+
+    #[test]
+    fn known_http_route_skips_unknown_bot_paths() {
+        assert_eq!(known_http_route("/wp-login.php"), None);
+        assert_eq!(
+            known_http_route("/api/player/not-a-real-endpoint/123"),
+            None
+        );
+        assert_eq!(known_http_route("/static/random-bot-path.js"), None);
+    }
+
+    #[test]
+    fn known_http_route_uses_stable_canonical_labels() {
+        assert_eq!(known_http_route("/admin/"), Some("/admin"));
+        assert_eq!(known_http_route("/login/"), Some("/login"));
+    }
 }
 
 fn normalize_model_label(value: &str) -> String {

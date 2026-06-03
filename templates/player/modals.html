@@ -722,6 +722,9 @@
                                 <button class="track-action-btn queue-insert-btn queue-end-btn" @click.stop="$store.queue.addToEnd([item.track])" title="{{ t.player_add_to_queue }}">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h14M5 18h7"/><path d="M17 15l4 3-4 3" fill="currentColor" stroke="none"/></svg>
                                 </button>
+                                <button class="track-action-btn track-share-btn" @click.stop="$store.sharing.copyTrack(item.track || item.track_id, $event.currentTarget)" title="{{ t.player_share_track }}" aria-label="{{ t.player_share_track }}">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.6l6.8-3.9M8.6 13.4l6.8 3.9"/></svg>
+                                </button>
                                 <button class="track-action-btn playlist-add-btn" @click.stop="$store.playlists.showPicker([item.track_id])" title="{{ t.player_add_to_playlist }}">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
                                 </button>

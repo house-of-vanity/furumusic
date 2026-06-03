@@ -46,6 +46,12 @@ pub(super) struct RemoveTrackRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub(super) struct CreatePlaylistShareRequest {
+    pub(super) track_ids: Vec<i64>,
+    pub(super) title: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 pub(super) struct PaginationQuery {
     pub(super) page: Option<i32>,
     pub(super) limit: Option<i32>,
