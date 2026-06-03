@@ -1434,7 +1434,7 @@ tbody tr:hover {
             <button class="nav-btn" :class="{active: activeView === 'reviews'}" @click="openReviews()">
                 <i data-lucide="inbox"></i>
                 <span>Review Queue</span>
-                <span class="nav-count" x-text="reviews.total || 0"></span>
+                <span class="nav-count" x-text="reviewTotalAll()"></span>
             </button>
             <button class="nav-btn" :class="{active: activeView === 'jobs'}" @click="openJobs()">
                 <i data-lucide="calendar-clock"></i>
@@ -1526,7 +1526,7 @@ tbody tr:hover {
                                 <template x-for="status in reviewStatuses" :key="status.value">
                                     <button class="seg-btn" :class="{active: reviewFilter.status === status.value}" @click="setReviewStatus(status.value)">
                                         <span x-text="status.label"></span>
-                                        <span class="muted" x-text="status.value ? statusCount(status.value) : reviews.total"></span>
+                                        <span class="muted" x-text="status.value ? statusCount(status.value) : reviewTotalAll()"></span>
                                     </button>
                                 </template>
                             </div>
@@ -1715,10 +1715,17 @@ tbody tr:hover {
                                 <label><input type="checkbox" x-model="metadataBackfillOptions.duration_seconds" /> duration_seconds</label>
                                 <label><input type="checkbox" x-model="metadataBackfillOptions.local_genres" /> local genres from files</label>
                                 <label><input type="checkbox" x-model="metadataBackfillOptions.lastfm_tags" /> Last.fm tags</label>
+                                <label><input type="checkbox" x-model="metadataBackfillOptions.musicbrainz_tags" /> MusicBrainz tags</label>
                             </div>
                             <div class="mode-row">
                                 <label><input type="radio" value="fill_missing" x-model="metadataBackfillOptions.mode" /> Fill missing only</label>
                                 <label><input type="radio" value="overwrite" x-model="metadataBackfillOptions.mode" /> Overwrite existing values</label>
+                            </div>
+                        </div>
+                        <div class="metadata-backfill-options" x-show="isArtworkBackfillJob(activeJob)">
+                            <div class="mode-row">
+                                <label><input type="radio" value="missing" x-model="artworkBackfillOptions.mode" /> Missing images only</label>
+                                <label><input type="radio" value="overwrite" x-model="artworkBackfillOptions.mode" /> Search all and replace existing</label>
                             </div>
                         </div>
                         <div class="job-param-note" x-show="activeJob && !jobHasParameterForm(activeJob)">
@@ -2609,7 +2616,7 @@ function adminV2() {
         stats: {},
         runtime: { agent: {}, storage: [], node: {} },
         libraryOverview: {},
-        reviews: { items: [], total: 0, limit: 80, offset: 0, status_counts: [] },
+        reviews: { items: [], total: 0, total_all: 0, limit: 80, offset: 0, status_counts: [] },
         users: { items: [], total: 0, limit: 40, offset: 0, online_count: 0 },
         usersLoading: false,
         userSearch: '',
@@ -2656,7 +2663,11 @@ function adminV2() {
             duration_seconds: true,
             local_genres: true,
             lastfm_tags: true,
+            musicbrainz_tags: true,
             mode: 'fill_missing'
+        },
+        artworkBackfillOptions: {
+            mode: 'missing'
         },
         libraryKind: 'artists',
         librarySearch: '',
@@ -3180,6 +3191,11 @@ function adminV2() {
                         method: 'POST',
                         body: JSON.stringify(this.metadataBackfillPayload())
                     })
+                    : this.isArtworkBackfillJob(job)
+                    ? await this.request(`${this.apiBase}/jobs/artwork_backfill/run-options`, {
+                        method: 'POST',
+                        body: JSON.stringify(this.artworkBackfillPayload())
+                    })
                     : await this.request(`${this.apiBase}/jobs/${encodeURIComponent(job.name)}/run`, { method: 'POST' });
                 this.showToast(`Run #${result.run_id} started`);
                 this.activeJobName = job.name;
@@ -3199,8 +3215,12 @@ function adminV2() {
             return job && job.name === 'metadata_backfill';
         },
 
+        isArtworkBackfillJob(job) {
+            return job && job.name === 'artwork_backfill';
+        },
+
         jobHasParameterForm(job) {
-            return this.isMetadataBackfillJob(job);
+            return this.isMetadataBackfillJob(job) || this.isArtworkBackfillJob(job);
         },
 
         metadataBackfillPayload() {
@@ -3212,7 +3232,15 @@ function adminV2() {
                 duration_seconds: Boolean(options.duration_seconds),
                 local_genres: Boolean(options.local_genres),
                 lastfm_tags: Boolean(options.lastfm_tags),
+                musicbrainz_tags: Boolean(options.musicbrainz_tags),
                 overwrite: options.mode === 'overwrite'
+            };
+        },
+
+        artworkBackfillPayload() {
+            const options = this.artworkBackfillOptions || {};
+            return {
+                overwrite_existing: options.mode === 'overwrite'
             };
         },
 
@@ -3844,7 +3872,11 @@ function adminV2() {
         },
 
         reviewPanelSubtitle() {
-            return `${this.fmt(this.reviews.total || 0)} rows · ${this.reviewFilter.status || 'all statuses'}`;
+            const total = this.reviews.total || 0;
+            const totalAll = this.reviewTotalAll();
+            const status = this.reviewFilter.status || 'all statuses';
+            if (this.reviewFilter.status) return `${this.fmt(total)} ${status} · ${this.fmt(totalAll)} total`;
+            return `${this.fmt(totalAll)} rows · ${status}`;
         },
 
         jobPanelSubtitle() {
@@ -3953,6 +3985,12 @@ function adminV2() {
         statusCount(status) {
             const row = (this.reviews.status_counts || []).find(item => item.status === status);
             return row ? row.count : 0;
+        },
+
+        reviewTotalAll() {
+            const explicit = Number(this.reviews.total_all || 0);
+            if (explicit > 0 || Object.prototype.hasOwnProperty.call(this.reviews || {}, 'total_all')) return explicit;
+            return (this.reviews.status_counts || []).reduce((sum, row) => sum + Number(row.count || 0), 0);
         },
 
         formatConfidence(value) {

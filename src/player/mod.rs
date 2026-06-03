@@ -2787,7 +2787,7 @@ async fn artists_handler(
         let total_row = sqlx::query_as::<_, CountRow>(
             r#"SELECT COUNT(DISTINCT a.id) AS count
                FROM furumusic__artist a
-               JOIN furumusic__track_artist ta ON ta.artist_id = a.id AND ta.role <> 'featuring'
+               JOIN furumusic__track_artist ta ON ta.artist_id = a.id
                JOIN furumusic__track t ON t.id = ta.track_id AND t.is_hidden = false
                JOIN furumusic__release r ON r.id = t.release_id AND r.is_hidden = false
                JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
@@ -2801,17 +2801,24 @@ async fn artists_handler(
 
         let rows = sqlx::query_as::<_, ArtistRow>(
             r#"SELECT a.id, a.name::text as name, a.image_file_id,
-                      COUNT(DISTINCT r.id) AS release_count,
+                      COUNT(DISTINCT r.id) FILTER (WHERE primary_release.artist_id IS NOT NULL) AS release_count,
                       COUNT(DISTINCT t.id) AS track_count
                FROM furumusic__artist a
-               JOIN furumusic__track_artist ta ON ta.artist_id = a.id AND ta.role <> 'featuring'
+               JOIN furumusic__track_artist ta ON ta.artist_id = a.id
                JOIN furumusic__track t ON t.id = ta.track_id AND t.is_hidden = false
                JOIN furumusic__release r ON r.id = t.release_id AND r.is_hidden = false
                JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
+               LEFT JOIN furumusic__release_artist primary_release
+                 ON primary_release.release_id = r.id
+                AND primary_release.artist_id = a.id
+                AND primary_release.position = 0
               WHERE a.is_hidden = false
                 AND mf.uploaded_by_user_id = $1
               GROUP BY a.id, a.name, a.name_sort, a.image_file_id
-              ORDER BY release_count DESC, track_count DESC, a.name_sort
+              ORDER BY (COUNT(DISTINCT r.id) FILTER (WHERE primary_release.artist_id IS NOT NULL) > 0) DESC,
+                       release_count DESC,
+                       track_count DESC,
+                       a.name_sort
               LIMIT $2 OFFSET $3"#,
         )
         .bind(user.id)
@@ -2831,22 +2838,22 @@ async fn artists_handler(
                 track_count: r.track_count,
             })
             .collect();
+        let has_more = offset + (items.len() as i64) < total_row.count;
 
         return Json(Paginated {
             items,
             total: total_row.count,
             page,
             per_page,
+            has_more,
         })
         .into_response();
     }
 
     let total_row = sqlx::query_as::<_, CountRow>(
-        r#"SELECT COUNT(DISTINCT a.id) AS count
+        r#"SELECT COUNT(*) AS count
            FROM furumusic__artist a
-           JOIN furumusic__release_artist ra ON ra.artist_id = a.id
-           JOIN furumusic__release r ON r.id = ra.release_id
-           WHERE a.is_hidden = false AND r.is_hidden = false AND ra.position = 0"#,
+           WHERE a.is_hidden = false"#,
     )
     .fetch_one(pool)
     .await
@@ -2854,21 +2861,33 @@ async fn artists_handler(
 
     let rows = sqlx::query_as::<_, ArtistRow>(
         r#"SELECT a.id, a.name::text as name, a.image_file_id,
-                  s.release_count,
-                  s.track_count
+                  COALESCE(s.release_count, 0) AS release_count,
+                  COALESCE(s.track_count, 0) AS track_count
            FROM furumusic__artist a
-           JOIN (
-               SELECT ra.artist_id,
-                      COUNT(DISTINCT r.id) AS release_count,
-                      COUNT(t.id) AS track_count
-               FROM furumusic__release_artist ra
-               JOIN furumusic__release r ON r.id = ra.release_id AND r.is_hidden = false
-               LEFT JOIN furumusic__track t ON t.release_id = r.id AND t.is_hidden = false
-               WHERE ra.position = 0
-               GROUP BY ra.artist_id
+           LEFT JOIN (
+               SELECT appearance.artist_id,
+                      COUNT(DISTINCT appearance.release_id) FILTER (WHERE appearance.is_primary_release_artist) AS release_count,
+                      COUNT(DISTINCT appearance.track_id) AS track_count
+                 FROM (
+                        SELECT ta.artist_id,
+                               t.id AS track_id,
+                               r.id AS release_id,
+                               primary_release.artist_id IS NOT NULL AS is_primary_release_artist
+                          FROM furumusic__track_artist ta
+                          JOIN furumusic__track t ON t.id = ta.track_id AND t.is_hidden = false
+                          JOIN furumusic__release r ON r.id = t.release_id AND r.is_hidden = false
+                          LEFT JOIN furumusic__release_artist primary_release
+                            ON primary_release.release_id = r.id
+                           AND primary_release.artist_id = ta.artist_id
+                           AND primary_release.position = 0
+                      ) appearance
+                GROUP BY appearance.artist_id
            ) s ON s.artist_id = a.id
            WHERE a.is_hidden = false
-           ORDER BY s.release_count DESC, s.track_count DESC, a.name_sort
+           ORDER BY (COALESCE(s.release_count, 0) > 0) DESC,
+                    COALESCE(s.release_count, 0) DESC,
+                    COALESCE(s.track_count, 0) DESC,
+                    a.name_sort
            LIMIT $1 OFFSET $2"#,
     )
     .bind(per_page as i64)
@@ -2887,12 +2906,14 @@ async fn artists_handler(
             track_count: r.track_count,
         })
         .collect();
+    let has_more = offset + (items.len() as i64) < total_row.count;
 
     Json(Paginated {
         items,
         total: total_row.count,
         page,
         per_page,
+        has_more,
     })
     .into_response()
 }
@@ -3480,10 +3501,7 @@ async fn build_track_items(
         .collect())
 }
 
-async fn load_track_items_by_ids(
-    pool: &sqlx::PgPool,
-    ids: &[i64],
-) -> cot::Result<Vec<TrackItem>> {
+async fn load_track_items_by_ids(pool: &sqlx::PgPool, ids: &[i64]) -> cot::Result<Vec<TrackItem>> {
     if ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -4073,7 +4091,10 @@ async fn devices_command_handler(
 }
 
 fn stamp_jam_queue_tracks(payload: &mut serde_json::Value, user_id: i64, user_name: &str) {
-    let Some(tracks) = payload.get_mut("tracks").and_then(serde_json::Value::as_array_mut) else {
+    let Some(tracks) = payload
+        .get_mut("tracks")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
         return;
     };
     for track in tracks {
@@ -5792,7 +5813,8 @@ async fn build_track_radio_ids(
 
     let artist_ids = track_primary_artist_ids(pool, track_id).await?;
     let remaining = PLAYER_RADIO_TRACK_LIMIT.saturating_sub(ids.len()) as i64;
-    let fallback_ids = fallback_radio_track_ids(pool, user_id, &artist_ids, &ids, remaining).await?;
+    let fallback_ids =
+        fallback_radio_track_ids(pool, user_id, &artist_ids, &ids, remaining).await?;
     append_unique_track_ids(&mut ids, fallback_ids, PLAYER_RADIO_TRACK_LIMIT);
 
     Ok(Some(ids))
@@ -5848,7 +5870,8 @@ async fn build_release_radio_ids(
 
     let artist_ids = release_primary_artist_ids(pool, release_id).await?;
     let remaining = PLAYER_RADIO_TRACK_LIMIT.saturating_sub(ids.len()) as i64;
-    let fallback_ids = fallback_radio_track_ids(pool, user_id, &artist_ids, &ids, remaining).await?;
+    let fallback_ids =
+        fallback_radio_track_ids(pool, user_id, &artist_ids, &ids, remaining).await?;
     append_unique_track_ids(&mut ids, fallback_ids, PLAYER_RADIO_TRACK_LIMIT);
 
     Ok(Some(ids))
@@ -6751,22 +6774,24 @@ impl App for PlayerApp {
                 {
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    get(move |session: Session, db: Database, path: Path<PathRadioSeed>| {
-                        let pool = Arc::clone(&pool);
-                        let pool_config = Arc::clone(&pool_config);
-                        async move {
-                            let pg_pool = pool
-                                .get_or_init(|| async {
-                                    sqlx::postgres::PgPoolOptions::new()
-                                        .max_connections(5)
-                                        .connect(&pool_config.database_url)
-                                        .await
-                                        .expect("player pool")
-                                })
-                                .await;
-                            radio_handler(session, db, pg_pool, path).await
-                        }
-                    })
+                    get(
+                        move |session: Session, db: Database, path: Path<PathRadioSeed>| {
+                            let pool = Arc::clone(&pool);
+                            let pool_config = Arc::clone(&pool_config);
+                            async move {
+                                let pg_pool = pool
+                                    .get_or_init(|| async {
+                                        sqlx::postgres::PgPoolOptions::new()
+                                            .max_connections(5)
+                                            .connect(&pool_config.database_url)
+                                            .await
+                                            .expect("player pool")
+                                    })
+                                    .await;
+                                radio_handler(session, db, pg_pool, path).await
+                            }
+                        },
+                    )
                 },
                 "player_radio",
             ),

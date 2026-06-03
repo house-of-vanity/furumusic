@@ -16,6 +16,7 @@ pub(super) struct Paginated<T: Serialize> {
     pub(super) total: i64,
     pub(super) page: i32,
     pub(super) per_page: i32,
+    pub(super) has_more: bool,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]

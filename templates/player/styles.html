@@ -1814,6 +1814,26 @@ button.user-stat:hover {
     animation: spin 0.8s linear infinite;
 }
 
+.scroll-load-indicator {
+    min-height: 56px;
+    margin: 18px 0 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.scroll-load-spinner {
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--bg-active);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* Empty state */

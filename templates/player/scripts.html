@@ -2025,23 +2025,26 @@ document.addEventListener('alpine:init', () => {
             this._artistsLoadToken = token;
             try {
                 const mine = filter === 'uploads' ? '&mine=true' : '';
-                const res = await fetch(`/api/player/artists?page=${page}&limit=60${mine}`);
+                const res = await fetch(`/api/player/artists?page=${page}&limit=80${mine}`);
                 if (!res.ok) throw new Error('failed');
                 const data = await res.json();
                 if (token !== this._artistsLoadToken || filter !== this.artistFilter) return;
+                const incoming = Array.isArray(data.items) ? data.items : [];
                 if (page === 1) {
-                    this.artists = data.items;
+                    this.artists = incoming;
                 } else {
-                    this.artists = [...this.artists, ...data.items];
+                    const existing = new Set(this.artists.map(artist => artist.id));
+                    this.artists = [...this.artists, ...incoming.filter(artist => !existing.has(artist.id))];
                 }
                 this.artistsPage = data.page;
                 this.artistsTotal = data.total;
-                if (this.artists.length >= data.total) {
+                if (data.has_more === false || this.artists.length >= data.total) {
                     this._allLoaded = true;
                 }
             } catch {}
             if (token === this._artistsLoadToken) {
                 this.loading = false;
+                this.$nextTick(() => { this._fillArtistViewport(); });
             }
         },
 
@@ -2400,9 +2403,19 @@ document.addEventListener('alpine:init', () => {
                     if (entries[0].isIntersecting && !this.loading && !this._allLoaded) {
                         this.loadArtists(this.artistsPage + 1);
                     }
-                }, { root: document.getElementById('center-scroll'), threshold: 0.1 });
+                }, { root: document.getElementById('center-scroll'), rootMargin: '900px 0px', threshold: 0.01 });
                 this._observer.observe(sentinel);
+                this._fillArtistViewport();
             });
+        },
+
+        _fillArtistViewport() {
+            if (!(this.view === 'artists' || this.view === 'my_uploads') || this.loading || this._allLoaded) return;
+            const el = this._scrollElement();
+            if (!el) return;
+            if (el.scrollHeight <= el.clientHeight + 900) {
+                this.loadArtists(this.artistsPage + 1);
+            }
         },
 
         $nextTick(fn) {

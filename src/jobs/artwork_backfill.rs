@@ -15,12 +15,19 @@ pub struct ArtworkBackfillJob;
 const LASTFM_REQUEST_DELAY: std::time::Duration = std::time::Duration::from_millis(1200);
 const MAX_LASTFM_RELEASE_LOOKUPS: i64 = 200;
 const MAX_LASTFM_ARTIST_LOOKUPS: i64 = 200;
+const MAX_CAA_RELEASE_LOOKUPS: i64 = 200;
+
+#[derive(Debug, Clone, Copy)]
+pub struct ArtworkBackfillOptions {
+    pub overwrite_existing: bool,
+}
 
 #[derive(Debug, sqlx::FromRow)]
 struct ReleaseCandidate {
     id: i64,
     title: String,
     artist_name: Option<String>,
+    track_title: Option<String>,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -34,6 +41,13 @@ struct ArtworkRefCandidate {
     entity_id: i64,
     media_file_id: i64,
     file_path: Option<String>,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct ArtistImageRepairCandidate {
+    id: i64,
+    name: String,
+    media_file_id: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -85,7 +99,10 @@ struct ArtworkStats {
     broken_release_refs_cleared: u64,
     broken_track_refs_cleared: u64,
     broken_artist_refs_cleared: u64,
+    remote_artist_album_fallback_refs_cleared: u64,
     release_local_assigned: u64,
+    release_caa_assigned: u64,
+    release_caa_not_found: u64,
     release_lastfm_assigned: u64,
     release_lastfm_not_found: u64,
     release_skipped_no_audio: u64,
@@ -114,64 +131,105 @@ impl Job for ArtworkBackfillJob {
     }
 
     async fn run(&self, ctx: &JobContext, log: &mut JobLog) -> anyhow::Result<()> {
-        let storage_dir = ctx.config.agent_storage_dir.trim();
-        if storage_dir.is_empty() {
-            log.warn("agent_storage_dir is not configured, skipping artwork backfill");
-            return Ok(());
-        }
-
-        let client = Client::builder()
-            .user_agent(format!(
-                "furumusic-artwork-backfill/{}",
-                env!("CARGO_PKG_VERSION")
-            ))
-            .timeout(std::time::Duration::from_secs(20))
-            .build()?;
-        let mut stats = ArtworkStats::default();
-
-        let normalized_paths =
-            crate::media_paths::normalize_media_file_paths(&ctx.pool, storage_dir).await?;
-        if normalized_paths > 0 {
-            log.info(&format!(
-                "Media path normalization pass: rewrote {normalized_paths} media file path(s) to relative storage paths"
-            ));
-        } else {
-            log.info("Media path normalization pass: all media file paths are already relative");
-        }
-
-        repair_missing_artwork_refs(ctx, log, storage_dir, &mut stats).await?;
-        backfill_release_local(ctx, log, storage_dir, &mut stats).await?;
-
-        let api_key = ctx.config.lastfm_api_key.trim();
-        if api_key.is_empty() {
-            log.warn("lastfm_api_key is not configured; skipping Last.fm artwork fallback");
-        } else {
-            backfill_release_lastfm(ctx, log, storage_dir, api_key, &client, &mut stats).await?;
-            backfill_artist_lastfm(ctx, log, storage_dir, api_key, &client, &mut stats).await?;
-        }
-
-        backfill_artist_album_fallbacks(ctx, log, &mut stats).await?;
-        repair_cover_variants(ctx, log, storage_dir, &mut stats).await?;
-
-        log.info(&format!(
-            "Artwork backfill complete: broken_release_refs_cleared={}, broken_track_refs_cleared={}, broken_artist_refs_cleared={}, release_local_assigned={}, release_lastfm_assigned={}, release_lastfm_not_found={}, release_skipped_no_audio={}, artist_lastfm_assigned={}, artist_lastfm_not_found={}, artist_album_fallback_assigned={}, variants_created={}, variants_unchanged={}, variants_missing_original={}, failed={}",
-            stats.broken_release_refs_cleared,
-            stats.broken_track_refs_cleared,
-            stats.broken_artist_refs_cleared,
-            stats.release_local_assigned,
-            stats.release_lastfm_assigned,
-            stats.release_lastfm_not_found,
-            stats.release_skipped_no_audio,
-            stats.artist_lastfm_assigned,
-            stats.artist_lastfm_not_found,
-            stats.artist_album_fallback_assigned,
-            stats.variants_created,
-            stats.variants_unchanged,
-            stats.variants_missing_original,
-            stats.failed
-        ));
-        Ok(())
+        run_with_options(
+            ctx,
+            log,
+            ArtworkBackfillOptions {
+                overwrite_existing: false,
+            },
+        )
+        .await
     }
+}
+
+pub async fn run_with_options(
+    ctx: &JobContext,
+    log: &mut JobLog,
+    options: ArtworkBackfillOptions,
+) -> anyhow::Result<()> {
+    let storage_dir = ctx.config.agent_storage_dir.trim();
+    if storage_dir.is_empty() {
+        log.warn("agent_storage_dir is not configured, skipping artwork backfill");
+        return Ok(());
+    }
+
+    log.info(&format!(
+        "Artwork backfill options: mode={}",
+        if options.overwrite_existing {
+            "overwrite_existing"
+        } else {
+            "missing_only"
+        }
+    ));
+
+    let client = Client::builder()
+        .user_agent(format!(
+            "furumusic-artwork-backfill/{}",
+            env!("CARGO_PKG_VERSION")
+        ))
+        .timeout(std::time::Duration::from_secs(20))
+        .build()?;
+    let musicbrainz_client =
+        crate::jobs::musicbrainz::MusicBrainzClient::new("furumusic-artwork-backfill")?;
+    let mut stats = ArtworkStats::default();
+
+    let normalized_paths =
+        crate::media_paths::normalize_media_file_paths(&ctx.pool, storage_dir).await?;
+    if normalized_paths > 0 {
+        log.info(&format!(
+            "Media path normalization pass: rewrote {normalized_paths} media file path(s) to relative storage paths"
+        ));
+    } else {
+        log.info("Media path normalization pass: all media file paths are already relative");
+    }
+
+    repair_missing_artwork_refs(ctx, log, storage_dir, &mut stats).await?;
+    repair_remote_artist_album_fallback_refs(ctx, log, &mut stats).await?;
+    backfill_release_local(ctx, log, storage_dir, options, &mut stats).await?;
+    backfill_release_coverartarchive(
+        ctx,
+        log,
+        storage_dir,
+        &musicbrainz_client,
+        options,
+        &mut stats,
+    )
+    .await?;
+
+    let api_key = ctx.config.lastfm_api_key.trim();
+    if api_key.is_empty() {
+        log.warn("lastfm_api_key is not configured; skipping Last.fm artwork fallback");
+    } else {
+        backfill_release_lastfm(ctx, log, storage_dir, api_key, &client, options, &mut stats)
+            .await?;
+        backfill_artist_lastfm(ctx, log, storage_dir, api_key, &client, options, &mut stats)
+            .await?;
+    }
+
+    backfill_artist_album_fallbacks(ctx, log, options, &mut stats).await?;
+    repair_cover_variants(ctx, log, storage_dir, &mut stats).await?;
+
+    log.info(&format!(
+        "Artwork backfill complete: broken_release_refs_cleared={}, broken_track_refs_cleared={}, broken_artist_refs_cleared={}, remote_artist_album_fallback_refs_cleared={}, release_local_assigned={}, release_caa_assigned={}, release_caa_not_found={}, release_lastfm_assigned={}, release_lastfm_not_found={}, release_skipped_no_audio={}, artist_lastfm_assigned={}, artist_lastfm_not_found={}, artist_album_fallback_assigned={}, variants_created={}, variants_unchanged={}, variants_missing_original={}, failed={}",
+        stats.broken_release_refs_cleared,
+        stats.broken_track_refs_cleared,
+        stats.broken_artist_refs_cleared,
+        stats.remote_artist_album_fallback_refs_cleared,
+        stats.release_local_assigned,
+        stats.release_caa_assigned,
+        stats.release_caa_not_found,
+        stats.release_lastfm_assigned,
+        stats.release_lastfm_not_found,
+        stats.release_skipped_no_audio,
+        stats.artist_lastfm_assigned,
+        stats.artist_lastfm_not_found,
+        stats.artist_album_fallback_assigned,
+        stats.variants_created,
+        stats.variants_unchanged,
+        stats.variants_missing_original,
+        stats.failed
+    ));
+    Ok(())
 }
 
 async fn repair_missing_artwork_refs(
@@ -183,6 +241,71 @@ async fn repair_missing_artwork_refs(
     repair_missing_release_cover_refs(ctx, log, storage_dir, stats).await?;
     repair_missing_track_cover_refs(ctx, log, storage_dir, stats).await?;
     repair_missing_artist_image_refs(ctx, log, storage_dir, stats).await?;
+    Ok(())
+}
+
+async fn repair_remote_artist_album_fallback_refs(
+    ctx: &JobContext,
+    log: &mut JobLog,
+    stats: &mut ArtworkStats,
+) -> anyhow::Result<()> {
+    let rows = sqlx::query_as::<_, ArtistImageRepairCandidate>(
+        r#"SELECT DISTINCT a.id,
+                  a.name::text AS name,
+                  a.image_file_id AS media_file_id
+             FROM furumusic__artist a
+             JOIN furumusic__media_file mf ON mf.id = a.image_file_id
+            WHERE a.image_file_id IS NOT NULL
+              AND a.is_hidden = false
+              AND mf.file_path NOT LIKE '%/__artist_image__/%'
+              AND EXISTS (
+                    SELECT 1
+                      FROM furumusic__release r
+                      JOIN furumusic__artwork_lookup_state s
+                        ON s.entity_kind = 'release'
+                       AND s.entity_id = r.id
+                       AND s.source IN ('lastfm', 'coverartarchive')
+                       AND s.status = 'found'
+                     WHERE r.cover_file_id = a.image_file_id
+                       AND r.is_hidden = false
+                  )
+            ORDER BY a.id"#,
+    )
+    .fetch_all(&ctx.pool)
+    .await?;
+
+    if rows.is_empty() {
+        return Ok(());
+    }
+
+    log.info(&format!(
+        "Artist fallback repair pass: clearing {} remote release cover fallback(s)",
+        rows.len()
+    ));
+
+    for row in rows {
+        let result = sqlx::query(
+            r#"UPDATE furumusic__artist
+                  SET image_file_id = NULL,
+                      updated_at = $3
+                WHERE id = $1
+                  AND image_file_id = $2"#,
+        )
+        .bind(row.id)
+        .bind(row.media_file_id)
+        .bind(now_iso())
+        .execute(&ctx.pool)
+        .await?;
+
+        if result.rows_affected() > 0 {
+            stats.remote_artist_album_fallback_refs_cleared += 1;
+            log.warn(&format!(
+                "Artist {} \"{}\": cleared remote release cover fallback (media_file_id={})",
+                row.id, row.name, row.media_file_id
+            ));
+        }
+    }
+
     Ok(())
 }
 
@@ -360,6 +483,7 @@ async fn backfill_release_local(
     ctx: &JobContext,
     log: &mut JobLog,
     storage_dir: &str,
+    options: ArtworkBackfillOptions,
     stats: &mut ArtworkStats,
 ) -> anyhow::Result<()> {
     let releases = sqlx::query_as::<_, ReleaseCandidate>(
@@ -372,17 +496,26 @@ async fn backfill_release_local(
                      WHERE ra.release_id = r.id
                      ORDER BY ra.position
                      LIMIT 1
-                  ) AS artist_name
+                  ) AS artist_name,
+                  (
+                    SELECT t.title::text
+                      FROM furumusic__track t
+                     WHERE t.release_id = r.id
+                       AND t.is_hidden = false
+                     ORDER BY t.disc_number NULLS LAST, t.track_number NULLS LAST, t.id
+                     LIMIT 1
+                  ) AS track_title
              FROM furumusic__release r
-            WHERE r.cover_file_id IS NULL
+            WHERE ($1 OR r.cover_file_id IS NULL)
               AND r.is_hidden = false
             ORDER BY r.id"#,
     )
+    .bind(options.overwrite_existing)
     .fetch_all(&ctx.pool)
     .await?;
 
     if releases.is_empty() {
-        log.info("Release local artwork pass: all visible releases already have covers");
+        log.info("Release local artwork pass: no eligible releases need local cover lookup");
         return Ok(());
     }
     log.info(&format!(
@@ -451,7 +584,7 @@ async fn backfill_release_local(
         .await
         {
             Ok(cover_file_id) => {
-                cover_art::assign_cover_to_release(&ctx.pool, release.id, cover_file_id).await?;
+                assign_cover_to_release(&ctx.pool, release.id, cover_file_id, options).await?;
                 stats.release_local_assigned += 1;
                 log.info(&format!(
                     "Release {} \"{}\": assigned local cover from {source_desc}",
@@ -471,12 +604,12 @@ async fn backfill_release_local(
     Ok(())
 }
 
-async fn backfill_release_lastfm(
+async fn backfill_release_coverartarchive(
     ctx: &JobContext,
     log: &mut JobLog,
     storage_dir: &str,
-    api_key: &str,
-    client: &Client,
+    client: &crate::jobs::musicbrainz::MusicBrainzClient,
+    options: ArtworkBackfillOptions,
     stats: &mut ArtworkStats,
 ) -> anyhow::Result<()> {
     let failed_cutoff = cutoff_iso(1);
@@ -502,25 +635,285 @@ async fn backfill_release_lastfm(
                        ORDER BY t.disc_number NULLS LAST, t.track_number NULLS LAST, ta.position
                        LIMIT 1
                     )
-                  ) AS artist_name
+                  ) AS artist_name,
+                  (
+                    SELECT t.title::text
+                      FROM furumusic__track t
+                     WHERE t.release_id = r.id
+                       AND t.is_hidden = false
+                     ORDER BY t.disc_number NULLS LAST, t.track_number NULLS LAST, t.id
+                     LIMIT 1
+                  ) AS track_title
              FROM furumusic__release r
              LEFT JOIN furumusic__artwork_lookup_state s
                ON s.entity_kind = 'release'
               AND s.entity_id = r.id
-              AND s.source = 'lastfm'
-            WHERE r.cover_file_id IS NULL
+              AND s.source = 'coverartarchive'
+            WHERE ($3 OR r.cover_file_id IS NULL)
               AND r.is_hidden = false
               AND (
-                    s.entity_id IS NULL
+                    $3
+                 OR s.entity_id IS NULL
                  OR s.status = 'failed' AND s.last_attempt_at < $1
                  OR s.status = 'not_found' AND (s.attempt_count < 3 OR s.last_attempt_at < $2)
                  OR s.status = 'found' AND s.last_attempt_at < $1
               )
             ORDER BY s.last_attempt_at NULLS FIRST, r.id
-            LIMIT $3"#,
+            LIMIT $4"#,
     )
     .bind(&failed_cutoff)
     .bind(&not_found_cutoff)
+    .bind(options.overwrite_existing)
+    .bind(MAX_CAA_RELEASE_LOOKUPS)
+    .fetch_all(&ctx.pool)
+    .await?;
+
+    if releases.is_empty() {
+        log.info("Release Cover Art Archive pass: no eligible releases need lookup");
+        return Ok(());
+    }
+    log.info(&format!(
+        "Release Cover Art Archive pass: looking up {} release(s)",
+        releases.len()
+    ));
+
+    for (index, release) in releases.iter().enumerate() {
+        let Some(artist_name) = release
+            .artist_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            stats.release_caa_not_found += 1;
+            record_coverartarchive_lookup_state(
+                &ctx.pool,
+                "release",
+                release.id,
+                "not_found",
+                Some("release has no primary artist for MusicBrainz lookup"),
+                None,
+            )
+            .await?;
+            continue;
+        };
+
+        log.info(&format!(
+            "Release Cover Art Archive {}/{}: release {} \"{}\" by \"{}\"",
+            index + 1,
+            releases.len(),
+            release.id,
+            release.title,
+            artist_name
+        ));
+
+        let release_mbid = crate::jobs::musicbrainz::load_or_search_release_mbid(
+            &ctx.pool,
+            client,
+            release.id,
+            artist_name,
+            &release.title,
+            release.track_title.as_deref(),
+        )
+        .await;
+        let (release_mbid, release_group_mbid) = match release_mbid {
+            Ok(value) => value,
+            Err(err) => {
+                stats.failed += 1;
+                record_coverartarchive_lookup_state(
+                    &ctx.pool,
+                    "release",
+                    release.id,
+                    "failed",
+                    Some(&err.to_string()),
+                    None,
+                )
+                .await?;
+                log.warn(&format!(
+                    "Release {} \"{}\": MusicBrainz lookup for cover art failed: {err}",
+                    release.id, release.title
+                ));
+                continue;
+            }
+        };
+
+        if release_mbid.is_none() && release_group_mbid.is_none() {
+            stats.release_caa_not_found += 1;
+            record_coverartarchive_lookup_state(
+                &ctx.pool,
+                "release",
+                release.id,
+                "not_found",
+                Some("MusicBrainz release match not found"),
+                None,
+            )
+            .await?;
+            continue;
+        }
+
+        match client
+            .fetch_cover_art_front_url(release_mbid.as_deref(), release_group_mbid.as_deref())
+            .await
+        {
+            Ok(Some(image_url)) => {
+                match download_remote_cover(client.http_client(), &image_url).await {
+                    Ok(cover) => match cover_art::save_cover_to_storage(
+                        &ctx.db,
+                        &ctx.pool,
+                        storage_dir,
+                        artist_name,
+                        &release.title,
+                        &cover,
+                    )
+                    .await
+                    {
+                        Ok(cover_file_id) => {
+                            assign_cover_to_release(&ctx.pool, release.id, cover_file_id, options)
+                                .await?;
+                            record_coverartarchive_lookup_state(
+                                &ctx.pool,
+                                "release",
+                                release.id,
+                                "found",
+                                None,
+                                Some(&image_url),
+                            )
+                            .await?;
+                            stats.release_caa_assigned += 1;
+                            log.info(&format!(
+                                "Release {} \"{}\": assigned Cover Art Archive cover",
+                                release.id, release.title
+                            ));
+                        }
+                        Err(err) => {
+                            stats.failed += 1;
+                            record_coverartarchive_lookup_state(
+                                &ctx.pool,
+                                "release",
+                                release.id,
+                                "failed",
+                                Some(&err.to_string()),
+                                Some(&image_url),
+                            )
+                            .await?;
+                            log.warn(&format!(
+                                "Release {} \"{}\": failed to save Cover Art Archive cover: {err}",
+                                release.id, release.title
+                            ));
+                        }
+                    },
+                    Err(err) => {
+                        stats.failed += 1;
+                        record_coverartarchive_lookup_state(
+                            &ctx.pool,
+                            "release",
+                            release.id,
+                            "failed",
+                            Some(&err.to_string()),
+                            Some(&image_url),
+                        )
+                        .await?;
+                        log.warn(&format!(
+                            "Release {} \"{}\": failed to download Cover Art Archive cover: {err}",
+                            release.id, release.title
+                        ));
+                    }
+                }
+            }
+            Ok(None) => {
+                stats.release_caa_not_found += 1;
+                record_coverartarchive_lookup_state(
+                    &ctx.pool,
+                    "release",
+                    release.id,
+                    "not_found",
+                    None,
+                    None,
+                )
+                .await?;
+            }
+            Err(err) => {
+                stats.failed += 1;
+                record_coverartarchive_lookup_state(
+                    &ctx.pool,
+                    "release",
+                    release.id,
+                    "failed",
+                    Some(&err.to_string()),
+                    None,
+                )
+                .await?;
+                log.warn(&format!(
+                    "Release {} \"{}\": Cover Art Archive lookup failed: {err}",
+                    release.id, release.title
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn backfill_release_lastfm(
+    ctx: &JobContext,
+    log: &mut JobLog,
+    storage_dir: &str,
+    api_key: &str,
+    client: &Client,
+    options: ArtworkBackfillOptions,
+    stats: &mut ArtworkStats,
+) -> anyhow::Result<()> {
+    let failed_cutoff = cutoff_iso(1);
+    let not_found_cutoff = cutoff_iso(30);
+    let releases = sqlx::query_as::<_, ReleaseCandidate>(
+        r#"SELECT r.id,
+                  r.title::text AS title,
+                  COALESCE(
+                    (
+                      SELECT a.name::text
+                        FROM furumusic__release_artist ra
+                        JOIN furumusic__artist a ON a.id = ra.artist_id
+                       WHERE ra.release_id = r.id
+                       ORDER BY ra.position
+                       LIMIT 1
+                    ),
+                    (
+                      SELECT a.name::text
+                        FROM furumusic__track t
+                        JOIN furumusic__track_artist ta ON ta.track_id = t.id
+                        JOIN furumusic__artist a ON a.id = ta.artist_id
+                       WHERE t.release_id = r.id AND ta.role <> 'featuring'
+                       ORDER BY t.disc_number NULLS LAST, t.track_number NULLS LAST, ta.position
+                       LIMIT 1
+                    )
+                  ) AS artist_name,
+                  (
+                    SELECT t.title::text
+                      FROM furumusic__track t
+                     WHERE t.release_id = r.id
+                       AND t.is_hidden = false
+                     ORDER BY t.disc_number NULLS LAST, t.track_number NULLS LAST, t.id
+                     LIMIT 1
+                  ) AS track_title
+             FROM furumusic__release r
+             LEFT JOIN furumusic__artwork_lookup_state s
+               ON s.entity_kind = 'release'
+              AND s.entity_id = r.id
+              AND s.source = 'lastfm'
+            WHERE ($3 OR r.cover_file_id IS NULL)
+              AND r.is_hidden = false
+              AND (
+                    $3
+                 OR s.entity_id IS NULL
+                 OR s.status = 'failed' AND s.last_attempt_at < $1
+                 OR s.status = 'not_found' AND (s.attempt_count < 3 OR s.last_attempt_at < $2)
+                 OR s.status = 'found' AND s.last_attempt_at < $1
+              )
+            ORDER BY s.last_attempt_at NULLS FIRST, r.id
+            LIMIT $4"#,
+    )
+    .bind(&failed_cutoff)
+    .bind(&not_found_cutoff)
+    .bind(options.overwrite_existing)
     .bind(MAX_LASTFM_RELEASE_LOOKUPS)
     .fetch_all(&ctx.pool)
     .await?;
@@ -580,7 +973,7 @@ async fn backfill_release_lastfm(
                 .await
                 {
                     Ok(cover_file_id) => {
-                        cover_art::assign_cover_to_release(&ctx.pool, release.id, cover_file_id)
+                        assign_cover_to_release(&ctx.pool, release.id, cover_file_id, options)
                             .await?;
                         record_lookup_state(
                             &ctx.pool,
@@ -680,12 +1073,37 @@ async fn backfill_release_lastfm(
     Ok(())
 }
 
+async fn assign_cover_to_release(
+    pool: &sqlx::PgPool,
+    release_id: i64,
+    cover_file_id: i64,
+    options: ArtworkBackfillOptions,
+) -> anyhow::Result<()> {
+    if options.overwrite_existing {
+        sqlx::query(
+            r#"UPDATE furumusic__release
+                  SET cover_file_id = $1,
+                      updated_at = $3
+                WHERE id = $2"#,
+        )
+        .bind(cover_file_id)
+        .bind(release_id)
+        .bind(now_iso())
+        .execute(pool)
+        .await?;
+    } else {
+        cover_art::assign_cover_to_release(pool, release_id, cover_file_id).await?;
+    }
+    Ok(())
+}
+
 async fn backfill_artist_lastfm(
     ctx: &JobContext,
     log: &mut JobLog,
     storage_dir: &str,
     api_key: &str,
     client: &Client,
+    options: ArtworkBackfillOptions,
     stats: &mut ArtworkStats,
 ) -> anyhow::Result<()> {
     let failed_cutoff = cutoff_iso(1);
@@ -699,21 +1117,25 @@ async fn backfill_artist_lastfm(
               AND s.entity_id = a.id
               AND s.source = 'lastfm'
             WHERE (
+                    $3
+                 OR
                     a.image_file_id IS NULL
                  OR mf.file_path NOT LIKE '%/__artist_image__/%'
                   )
               AND a.is_hidden = false
               AND (
-                    s.entity_id IS NULL
+                    $3
+                 OR s.entity_id IS NULL
                  OR s.status = 'failed' AND s.last_attempt_at < $1
                  OR s.status = 'not_found' AND (s.attempt_count < 3 OR s.last_attempt_at < $2)
                  OR s.status = 'found' AND s.last_attempt_at < $1
               )
             ORDER BY s.last_attempt_at NULLS FIRST, a.id
-            LIMIT $3"#,
+            LIMIT $4"#,
     )
     .bind(&failed_cutoff)
     .bind(&not_found_cutoff)
+    .bind(options.overwrite_existing)
     .bind(MAX_LASTFM_ARTIST_LOOKUPS)
     .fetch_all(&ctx.pool)
     .await?;
@@ -755,6 +1177,8 @@ async fn backfill_artist_lastfm(
                                           updated_at = $3
                                     WHERE id = $2
                                       AND (
+                                            $4
+                                         OR
                                             image_file_id IS NULL
                                          OR EXISTS (
                                                 SELECT 1
@@ -767,6 +1191,7 @@ async fn backfill_artist_lastfm(
                         .bind(image_file_id)
                         .bind(artist.id)
                         .bind(now_iso())
+                        .bind(options.overwrite_existing)
                         .execute(&ctx.pool)
                         .await?;
                         record_lookup_state(
@@ -826,7 +1251,7 @@ async fn backfill_artist_lastfm(
                     artist.id, artist.name
                 ));
                 stats.artist_lastfm_not_found += 1;
-                match assign_artist_album_fallback(ctx, artist.id).await {
+                match assign_artist_album_fallback(ctx, artist.id, options).await {
                     Ok(Some(media_file_id)) => {
                         stats.artist_album_fallback_assigned += 1;
                         log.info(&format!(
@@ -892,31 +1317,53 @@ async fn backfill_artist_lastfm(
 async fn backfill_artist_album_fallbacks(
     ctx: &JobContext,
     log: &mut JobLog,
+    options: ArtworkBackfillOptions,
     stats: &mut ArtworkStats,
 ) -> anyhow::Result<()> {
     let artists = sqlx::query_as::<_, ArtistCandidate>(
         r#"SELECT a.id, a.name::text AS name
              FROM furumusic__artist a
-            WHERE a.image_file_id IS NULL
+            WHERE ($1 OR a.image_file_id IS NULL)
               AND a.is_hidden = false
               AND EXISTS (
                     SELECT 1
                       FROM furumusic__release_artist ra
                       JOIN furumusic__release r ON r.id = ra.release_id
+                      JOIN furumusic__media_file mf ON mf.id = r.cover_file_id
                      WHERE ra.artist_id = a.id
                        AND r.cover_file_id IS NOT NULL
+                       AND mf.file_type = 'cover_art'
                        AND r.is_hidden = false
+                       AND NOT EXISTS (
+                            SELECT 1
+                              FROM furumusic__artwork_lookup_state s
+                             WHERE s.entity_kind = 'release'
+                               AND s.entity_id = r.id
+                               AND s.source IN ('lastfm', 'coverartarchive')
+                               AND s.status = 'found'
+                       )
                     UNION
                     SELECT 1
                       FROM furumusic__track_artist ta
                       JOIN furumusic__track t ON t.id = ta.track_id
                       JOIN furumusic__release r ON r.id = t.release_id
+                      JOIN furumusic__media_file mf ON mf.id = r.cover_file_id
                      WHERE ta.artist_id = a.id
                        AND r.cover_file_id IS NOT NULL
+                       AND mf.file_type = 'cover_art'
                        AND r.is_hidden = false
+                       AND NOT EXISTS (
+                            SELECT 1
+                              FROM furumusic__artwork_lookup_state s
+                             WHERE s.entity_kind = 'release'
+                               AND s.entity_id = r.id
+                               AND s.source IN ('lastfm', 'coverartarchive')
+                               AND s.status = 'found'
+                       )
                   )
             ORDER BY a.id"#,
     )
+    .bind(options.overwrite_existing)
     .fetch_all(&ctx.pool)
     .await?;
 
@@ -931,7 +1378,7 @@ async fn backfill_artist_album_fallbacks(
     ));
 
     for artist in artists {
-        match assign_artist_album_fallback(ctx, artist.id).await {
+        match assign_artist_album_fallback(ctx, artist.id, options).await {
             Ok(Some(media_file_id)) => {
                 stats.artist_album_fallback_assigned += 1;
                 log.info(&format!(
@@ -1016,6 +1463,7 @@ async fn repair_cover_variants(
 async fn assign_artist_album_fallback(
     ctx: &JobContext,
     artist_id: i64,
+    options: ArtworkBackfillOptions,
 ) -> anyhow::Result<Option<i64>> {
     let media_file_id: Option<i64> = sqlx::query_scalar(
         r#"SELECT media_file_id
@@ -1023,17 +1471,37 @@ async fn assign_artist_album_fallback(
                     SELECT DISTINCT r.cover_file_id AS media_file_id
                       FROM furumusic__release r
                       JOIN furumusic__release_artist ra ON ra.release_id = r.id
+                      JOIN furumusic__media_file mf ON mf.id = r.cover_file_id
                      WHERE ra.artist_id = $1
                        AND r.cover_file_id IS NOT NULL
+                       AND mf.file_type = 'cover_art'
                        AND r.is_hidden = false
+                       AND NOT EXISTS (
+                            SELECT 1
+                              FROM furumusic__artwork_lookup_state s
+                             WHERE s.entity_kind = 'release'
+                               AND s.entity_id = r.id
+                               AND s.source IN ('lastfm', 'coverartarchive')
+                               AND s.status = 'found'
+                       )
                     UNION
                     SELECT DISTINCT r.cover_file_id AS media_file_id
                       FROM furumusic__release r
                       JOIN furumusic__track t ON t.release_id = r.id
                       JOIN furumusic__track_artist ta ON ta.track_id = t.id
+                      JOIN furumusic__media_file mf ON mf.id = r.cover_file_id
                      WHERE ta.artist_id = $1
                        AND r.cover_file_id IS NOT NULL
+                       AND mf.file_type = 'cover_art'
                        AND r.is_hidden = false
+                       AND NOT EXISTS (
+                            SELECT 1
+                              FROM furumusic__artwork_lookup_state s
+                             WHERE s.entity_kind = 'release'
+                               AND s.entity_id = r.id
+                               AND s.source IN ('lastfm', 'coverartarchive')
+                               AND s.status = 'found'
+                       )
                   ) covers
             ORDER BY random()
             LIMIT 1"#,
@@ -1051,11 +1519,12 @@ async fn assign_artist_album_fallback(
               SET image_file_id = $1,
                   updated_at = $3
             WHERE id = $2
-              AND image_file_id IS NULL"#,
+              AND ($4 OR image_file_id IS NULL)"#,
     )
     .bind(media_file_id)
     .bind(artist_id)
     .bind(now_iso())
+    .bind(options.overwrite_existing)
     .execute(&ctx.pool)
     .await?;
 
@@ -1324,6 +1793,36 @@ async fn record_lookup_state(
     Ok(())
 }
 
+async fn record_coverartarchive_lookup_state(
+    pool: &sqlx::PgPool,
+    entity_kind: &str,
+    entity_id: i64,
+    status: &str,
+    error: Option<&str>,
+    source_url: Option<&str>,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"INSERT INTO furumusic__artwork_lookup_state
+              (entity_kind, entity_id, source, status, attempt_count, last_attempt_at, last_error, source_url)
+           VALUES ($1, $2, 'coverartarchive', $3, 1, $4, $5, $6)
+           ON CONFLICT (entity_kind, entity_id, source) DO UPDATE SET
+              status = EXCLUDED.status,
+              attempt_count = furumusic__artwork_lookup_state.attempt_count + 1,
+              last_attempt_at = EXCLUDED.last_attempt_at,
+              last_error = EXCLUDED.last_error,
+              source_url = EXCLUDED.source_url"#,
+    )
+    .bind(entity_kind)
+    .bind(entity_id)
+    .bind(status)
+    .bind(now_iso())
+    .bind(error)
+    .bind(source_url)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 async fn reset_lookup_state(
     pool: &sqlx::PgPool,
     entity_kind: &str,
@@ -1333,7 +1832,7 @@ async fn reset_lookup_state(
         r#"DELETE FROM furumusic__artwork_lookup_state
             WHERE entity_kind = $1
               AND entity_id = $2
-              AND source = 'lastfm'"#,
+              AND source IN ('lastfm', 'coverartarchive')"#,
     )
     .bind(entity_kind)
     .bind(entity_id)

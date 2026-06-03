@@ -4,6 +4,7 @@ pub mod inbox_process;
 pub mod lastfm_popularity;
 pub mod lastfm_scrobble;
 pub mod metadata_backfill;
+pub mod musicbrainz;
 
 use std::path::{Component, Path, PathBuf};
 

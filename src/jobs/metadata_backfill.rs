@@ -15,6 +15,7 @@ pub struct MetadataBackfillOptions {
     pub duration_seconds: bool,
     pub local_genres: bool,
     pub lastfm_tags: bool,
+    pub musicbrainz_tags: bool,
     pub overwrite: bool,
 }
 
@@ -26,6 +27,7 @@ impl MetadataBackfillOptions {
             || self.duration_seconds
             || self.local_genres
             || self.lastfm_tags
+            || self.musicbrainz_tags
     }
 
     fn needs_file_scan(self) -> bool {
@@ -59,6 +61,7 @@ struct LastfmReleaseTagRow {
     id: i64,
     title: String,
     artist_name: Option<String>,
+    track_title: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -76,6 +79,16 @@ struct TagCandidate {
 
 #[derive(Debug, Default)]
 struct LastfmTagStats {
+    considered: u64,
+    updated_entities: u64,
+    tags_saved: u64,
+    skipped_existing: u64,
+    not_found: u64,
+    failed: u64,
+}
+
+#[derive(Debug, Default)]
+struct MusicBrainzTagStats {
     considered: u64,
     updated_entities: u64,
     tags_saved: u64,
@@ -117,6 +130,7 @@ impl Job for MetadataBackfillJob {
                 duration_seconds: true,
                 local_genres: true,
                 lastfm_tags: true,
+                musicbrainz_tags: true,
                 overwrite: false,
             },
         )
@@ -143,10 +157,11 @@ pub async fn run_with_options(
     let mut failed = 0u64;
 
     log.info(&format!(
-        "Metadata backfill options: file_scan={}, local_genres={}, lastfm_tags={}, mode={}",
+        "Metadata backfill options: file_scan={}, local_genres={}, lastfm_tags={}, musicbrainz_tags={}, mode={}",
         options.needs_file_scan(),
         options.local_genres,
         options.lastfm_tags,
+        options.musicbrainz_tags,
         if options.overwrite {
             "overwrite"
         } else {
@@ -251,14 +266,9 @@ pub async fn run_with_options(
             let mut changed_tags = false;
             if options.local_genres {
                 if let (Some(track_id), Some(genre)) = (row.track_id, raw_meta.genre.as_deref()) {
-                    let saved = save_track_tag_text(
-                        &ctx.pool,
-                        track_id,
-                        genre,
-                        "file",
-                        options.overwrite,
-                    )
-                    .await?;
+                    let saved =
+                        save_track_tag_text(&ctx.pool, track_id, genre, "file", options.overwrite)
+                            .await?;
                     if saved > 0 {
                         local_tags_updated += saved;
                         changed_tags = true;
@@ -312,14 +322,28 @@ pub async fn run_with_options(
         LastfmTagStats::default()
     };
 
+    let musicbrainz_stats = if options.musicbrainz_tags {
+        log.info("Starting MusicBrainz tag backfill");
+        backfill_musicbrainz_tags(ctx, log, options.overwrite).await?
+    } else {
+        log.info("MusicBrainz tag backfill disabled for this run");
+        MusicBrainzTagStats::default()
+    };
+
     log.info(&format!(
-        "Metadata backfill complete: {scanned} scanned, {media_updated} media updated, {track_updated} tracks updated, {local_tags_updated} local tags saved, {unchanged} unchanged, {missing} missing, {failed} failed; Last.fm tags: considered={}, updated_entities={}, tags_saved={}, skipped_existing={}, not_found={}, failed={}",
+        "Metadata backfill complete: {scanned} scanned, {media_updated} media updated, {track_updated} tracks updated, {local_tags_updated} local tags saved, {unchanged} unchanged, {missing} missing, {failed} failed; Last.fm tags: considered={}, updated_entities={}, tags_saved={}, skipped_existing={}, not_found={}, failed={}; MusicBrainz tags: considered={}, updated_entities={}, tags_saved={}, skipped_existing={}, not_found={}, failed={}",
         lastfm_stats.considered,
         lastfm_stats.updated_entities,
         lastfm_stats.tags_saved,
         lastfm_stats.skipped_existing,
         lastfm_stats.not_found,
         lastfm_stats.failed,
+        musicbrainz_stats.considered,
+        musicbrainz_stats.updated_entities,
+        musicbrainz_stats.tags_saved,
+        musicbrainz_stats.skipped_existing,
+        musicbrainz_stats.not_found,
+        musicbrainz_stats.failed,
     ));
     Ok(())
 }
@@ -367,6 +391,259 @@ async fn backfill_lastfm_tags(
         return Ok(stats);
     }
     Ok(stats)
+}
+
+async fn backfill_musicbrainz_tags(
+    ctx: &JobContext,
+    log: &mut JobLog,
+    overwrite: bool,
+) -> anyhow::Result<MusicBrainzTagStats> {
+    log.info("MusicBrainz tag backfill started");
+    let client = crate::jobs::musicbrainz::MusicBrainzClient::new("furumusic-metadata-backfill")?;
+    let mut stats = MusicBrainzTagStats::default();
+    backfill_musicbrainz_artist_tags(ctx, log, &client, overwrite, &mut stats).await?;
+    backfill_musicbrainz_release_tags(ctx, log, &client, overwrite, &mut stats).await?;
+    Ok(stats)
+}
+
+async fn backfill_musicbrainz_artist_tags(
+    ctx: &JobContext,
+    log: &mut JobLog,
+    client: &crate::jobs::musicbrainz::MusicBrainzClient,
+    overwrite: bool,
+    stats: &mut MusicBrainzTagStats,
+) -> anyhow::Result<()> {
+    let rows = sqlx::query_as::<_, LastfmArtistTagRow>(
+        r#"SELECT DISTINCT a.id, a.name::text AS name
+           FROM furumusic__artist a
+           JOIN furumusic__track_artist ta ON ta.artist_id = a.id
+           JOIN furumusic__track t ON t.id = ta.track_id
+           WHERE a.is_hidden = false AND t.is_hidden = false
+           ORDER BY a.id"#,
+    )
+    .fetch_all(&ctx.pool)
+    .await?;
+
+    log.info(&format!(
+        "MusicBrainz artist tag pass: checking {} artist(s)",
+        rows.len()
+    ));
+    let total = rows.len();
+    for (index, row) in rows.into_iter().enumerate() {
+        if should_log_lastfm_item(index + 1, total, 25) {
+            log.info(&format!(
+                "MusicBrainz artist tags {}/{}: artist {} \"{}\"",
+                index + 1,
+                total,
+                row.id,
+                row.name
+            ));
+        }
+        if should_skip_source_entity(&ctx.pool, "artist", row.id, "musicbrainz", overwrite).await? {
+            stats.skipped_existing += 1;
+            continue;
+        }
+        stats.considered += 1;
+
+        let mbid =
+            match crate::jobs::musicbrainz::load_external_id(&ctx.pool, "artist", row.id, "artist")
+                .await?
+            {
+                Some(mbid) => Some(mbid),
+                None => match client.search_artist(&row.name).await {
+                    Ok(Some(found)) => {
+                        crate::jobs::musicbrainz::save_external_id(
+                            &ctx.pool,
+                            "artist",
+                            row.id,
+                            "artist",
+                            &found.mbid,
+                            found.score as f64 / 100.0,
+                        )
+                        .await?;
+                        Some(found.mbid)
+                    }
+                    Ok(None) => None,
+                    Err(err) => {
+                        stats.failed += 1;
+                        log.warn(&format!(
+                            "MusicBrainz artist search failed for artist {} \"{}\": {err}",
+                            row.id, row.name
+                        ));
+                        None
+                    }
+                },
+            };
+
+        let Some(mbid) = mbid else {
+            stats.not_found += 1;
+            continue;
+        };
+        match client.lookup_artist_tags(&mbid).await {
+            Ok(tags) if !tags.is_empty() => {
+                let tags = musicbrainz_tags_to_candidates(&tags);
+                match replace_entity_tags(&ctx.pool, "artist", row.id, &tags, "musicbrainz", false)
+                    .await
+                {
+                    Ok(saved) => {
+                        stats.tags_saved += saved;
+                        stats.updated_entities += 1;
+                    }
+                    Err(err) => {
+                        stats.failed += 1;
+                        log.warn(&format!(
+                            "MusicBrainz artist tags save failed for artist {} \"{}\": {err}",
+                            row.id, row.name
+                        ));
+                    }
+                }
+            }
+            Ok(_) => {
+                stats.not_found += 1;
+            }
+            Err(err) => {
+                stats.failed += 1;
+                log.warn(&format!(
+                    "MusicBrainz artist tags failed for artist {} \"{}\" mbid={}: {err}",
+                    row.id, row.name, mbid
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn backfill_musicbrainz_release_tags(
+    ctx: &JobContext,
+    log: &mut JobLog,
+    client: &crate::jobs::musicbrainz::MusicBrainzClient,
+    overwrite: bool,
+    stats: &mut MusicBrainzTagStats,
+) -> anyhow::Result<()> {
+    let rows = sqlx::query_as::<_, LastfmReleaseTagRow>(
+        r#"SELECT r.id,
+                  r.title::text AS title,
+                  (
+                    SELECT a.name::text
+                      FROM furumusic__release_artist ra
+                      JOIN furumusic__artist a ON a.id = ra.artist_id
+                     WHERE ra.release_id = r.id
+                     ORDER BY ra.position
+                     LIMIT 1
+                  ) AS artist_name,
+                  (
+                    SELECT t.title::text
+                      FROM furumusic__track t
+                     WHERE t.release_id = r.id
+                       AND t.is_hidden = false
+                     ORDER BY t.disc_number NULLS LAST, t.track_number NULLS LAST, t.id
+                     LIMIT 1
+                  ) AS track_title
+           FROM furumusic__release r
+           WHERE r.is_hidden = false
+           ORDER BY r.id"#,
+    )
+    .fetch_all(&ctx.pool)
+    .await?;
+
+    log.info(&format!(
+        "MusicBrainz release tag pass: checking {} release(s)",
+        rows.len()
+    ));
+    let total = rows.len();
+    for (index, row) in rows.into_iter().enumerate() {
+        if should_log_lastfm_item(index + 1, total, 25) {
+            log.info(&format!(
+                "MusicBrainz release tags {}/{}: release {} \"{}\"",
+                index + 1,
+                total,
+                row.id,
+                row.title
+            ));
+        }
+        if should_skip_source_entity(&ctx.pool, "release", row.id, "musicbrainz", overwrite).await?
+        {
+            stats.skipped_existing += 1;
+            continue;
+        }
+        let Some(artist) = row
+            .artist_name
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        else {
+            stats.not_found += 1;
+            continue;
+        };
+        stats.considered += 1;
+
+        let mbid = match crate::jobs::musicbrainz::load_or_search_release_mbid(
+            &ctx.pool,
+            client,
+            row.id,
+            artist,
+            &row.title,
+            row.track_title.as_deref(),
+        )
+        .await
+        {
+            Ok((release_mbid, _release_group_mbid)) => release_mbid,
+            Err(err) => {
+                stats.failed += 1;
+                log.warn(&format!(
+                    "MusicBrainz release search failed for release {} \"{}\" / \"{}\": {err}",
+                    row.id, artist, row.title
+                ));
+                None
+            }
+        };
+
+        let Some(mbid) = mbid else {
+            stats.not_found += 1;
+            continue;
+        };
+        match client.lookup_release_tags(&mbid).await {
+            Ok(result) if !result.tags.is_empty() => {
+                if let Some(group_mbid) = result.release_group_mbid.as_deref() {
+                    crate::jobs::musicbrainz::save_external_id(
+                        &ctx.pool,
+                        "release",
+                        row.id,
+                        "release_group",
+                        group_mbid,
+                        1.0,
+                    )
+                    .await?;
+                }
+                let tags = musicbrainz_tags_to_candidates(&result.tags);
+                match replace_entity_tags(&ctx.pool, "release", row.id, &tags, "musicbrainz", false)
+                    .await
+                {
+                    Ok(saved) => {
+                        stats.tags_saved += saved;
+                        stats.updated_entities += 1;
+                    }
+                    Err(err) => {
+                        stats.failed += 1;
+                        log.warn(&format!(
+                            "MusicBrainz release tags save failed for release {} \"{}\" / \"{}\": {err}",
+                            row.id, artist, row.title
+                        ));
+                    }
+                }
+            }
+            Ok(_) => {
+                stats.not_found += 1;
+            }
+            Err(err) => {
+                stats.failed += 1;
+                log.warn(&format!(
+                    "MusicBrainz release tags failed for release {} \"{}\" mbid={}: {err}",
+                    row.id, row.title, mbid
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 async fn backfill_lastfm_artist_tags(
@@ -428,8 +705,7 @@ async fn backfill_lastfm_artist_tags(
         stats.considered += 1;
         match fetch_lastfm_artist_tags(client, api_key, &row.name).await {
             Ok(tags) if !tags.is_empty() => {
-                match replace_entity_tags(&ctx.pool, "artist", row.id, &tags, "lastfm", false)
-                    .await
+                match replace_entity_tags(&ctx.pool, "artist", row.id, &tags, "lastfm", false).await
                 {
                     Ok(saved) => {
                         stats.tags_saved += saved;
@@ -493,7 +769,15 @@ async fn backfill_lastfm_release_tags(
                      WHERE ra.release_id = r.id
                      ORDER BY ra.position
                      LIMIT 1
-                  ) AS artist_name
+                  ) AS artist_name,
+                  (
+                    SELECT t.title::text
+                      FROM furumusic__track t
+                     WHERE t.release_id = r.id
+                       AND t.is_hidden = false
+                     ORDER BY t.disc_number NULLS LAST, t.track_number NULLS LAST, t.id
+                     LIMIT 1
+                  ) AS track_title
            FROM furumusic__release r
            WHERE r.is_hidden = false
            ORDER BY r.id"#,
@@ -538,7 +822,10 @@ async fn backfill_lastfm_release_tags(
                 continue;
             }
         }
-        let Some(artist) = row.artist_name.as_deref().filter(|value| !value.trim().is_empty())
+        let Some(artist) = row
+            .artist_name
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
         else {
             stats.not_found += 1;
             if should_log_lastfm_progress(index + 1, total, 25) {
@@ -663,7 +950,10 @@ async fn backfill_lastfm_track_tags(
                 continue;
             }
         }
-        let Some(artist) = row.artist_name.as_deref().filter(|value| !value.trim().is_empty())
+        let Some(artist) = row
+            .artist_name
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
         else {
             stats.not_found += 1;
             if should_log_lastfm_progress(index + 1, total, 50) {
@@ -678,8 +968,7 @@ async fn backfill_lastfm_track_tags(
         stats.considered += 1;
         match fetch_lastfm_track_tags(client, api_key, artist, &row.title).await {
             Ok(tags) if !tags.is_empty() => {
-                match replace_entity_tags(&ctx.pool, "track", row.id, &tags, "lastfm", true).await
-                {
+                match replace_entity_tags(&ctx.pool, "track", row.id, &tags, "lastfm", true).await {
                     Ok(saved) => {
                         stats.tags_saved += saved;
                         stats.updated_entities += 1;
@@ -742,20 +1031,42 @@ async fn should_skip_lastfm_entity(
     entity_id: i64,
     overwrite: bool,
 ) -> anyhow::Result<bool> {
+    should_skip_source_entity(pool, entity_kind, entity_id, "lastfm", overwrite).await
+}
+
+async fn should_skip_source_entity(
+    pool: &sqlx::PgPool,
+    entity_kind: &str,
+    entity_id: i64,
+    source: &str,
+    overwrite: bool,
+) -> anyhow::Result<bool> {
     if overwrite {
         return Ok(false);
     }
     let exists: Option<i64> = sqlx::query_scalar(
         r#"SELECT 1
            FROM furumusic__entity_genre_tag
-           WHERE entity_kind = $1 AND entity_id = $2 AND source = 'lastfm'
+           WHERE entity_kind = $1 AND entity_id = $2 AND source = $3
            LIMIT 1"#,
     )
     .bind(entity_kind)
     .bind(entity_id)
+    .bind(source)
     .fetch_optional(pool)
     .await?;
     Ok(exists.is_some())
+}
+
+fn musicbrainz_tags_to_candidates(
+    tags: &[crate::jobs::musicbrainz::MusicBrainzTag],
+) -> Vec<TagCandidate> {
+    tags.iter()
+        .map(|tag| TagCandidate {
+            name: tag.name.clone(),
+            weight: tag.weight,
+        })
+        .collect()
 }
 
 async fn fetch_lastfm_artist_tags(
@@ -854,7 +1165,11 @@ async fn fetch_lastfm_top_tags(
         Value::Object(_) => tag_from_value(tag_value).into_iter().collect::<Vec<_>>(),
         _ => Vec::new(),
     };
-    tags.sort_by(|a, b| b.weight.total_cmp(&a.weight).then_with(|| a.name.cmp(&b.name)));
+    tags.sort_by(|a, b| {
+        b.weight
+            .total_cmp(&a.weight)
+            .then_with(|| a.name.cmp(&b.name))
+    });
     tags.truncate(LASTFM_TAG_LIMIT);
     Ok(tags)
 }
@@ -1027,9 +1342,9 @@ fn tags_from_text(value: &str) -> Vec<TagCandidate> {
     for raw in normalized_separators.split([';', ',']) {
         if let Some(name) = clean_tag_name(raw) {
             if !is_ignored_tag(&normalize_tag_name(&name))
-                && !tags
-                    .iter()
-                    .any(|tag: &TagCandidate| normalize_tag_name(&tag.name) == normalize_tag_name(&name))
+                && !tags.iter().any(|tag: &TagCandidate| {
+                    normalize_tag_name(&tag.name) == normalize_tag_name(&name)
+                })
             {
                 tags.push(TagCandidate { name, weight: 1.0 });
             }

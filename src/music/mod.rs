@@ -1865,6 +1865,51 @@ pub mod db_migrations {
             &[Operation::custom(create_entity_genre_tags).build()];
     }
 
+    // -- M0036: External metadata identifiers --------------------------------
+
+    #[cot::db::migrations::migration_op]
+    async fn create_external_metadata_ids(
+        ctx: migrations::MigrationContext<'_>,
+    ) -> cot::db::Result<()> {
+        ctx.db
+            .raw(
+                "CREATE TABLE IF NOT EXISTS furumusic__external_metadata_id (
+                    id BIGSERIAL PRIMARY KEY,
+                    entity_kind VARCHAR(32) NOT NULL,
+                    entity_id BIGINT NOT NULL,
+                    source VARCHAR(32) NOT NULL,
+                    id_kind VARCHAR(64) NOT NULL,
+                    external_id VARCHAR(255) NOT NULL,
+                    confidence DOUBLE PRECISION NOT NULL DEFAULT 1,
+                    updated_at VARCHAR(32) NOT NULL,
+                    UNIQUE(entity_kind, entity_id, source, id_kind)
+                )",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE INDEX IF NOT EXISTS idx_external_metadata_id_lookup
+                   ON furumusic__external_metadata_id (source, id_kind, external_id)",
+            )
+            .await?;
+        Ok(())
+    }
+
+    #[derive(Debug, Copy, Clone)]
+    pub struct M0036CreateExternalMetadataIds;
+
+    impl migrations::Migration for M0036CreateExternalMetadataIds {
+        const APP_NAME: &'static str = "furumusic";
+        const MIGRATION_NAME: &'static str = "m_0036_create_external_metadata_ids";
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
+                "furumusic",
+                "m_0035_create_entity_genre_tags",
+            )];
+        const OPERATIONS: &'static [Operation] =
+            &[Operation::custom(create_external_metadata_ids).build()];
+    }
+
     pub const MIGRATIONS: &[&SyncDynMigration] = &[
         &M0006CreateMediaFile,
         &M0007CreateArtist,
@@ -1891,5 +1936,6 @@ pub mod db_migrations {
         &M0033CreateLastfmScrobbling,
         &M0034CreateArtworkLookupState,
         &M0035CreateEntityGenreTags,
+        &M0036CreateExternalMetadataIds,
     ];
 }

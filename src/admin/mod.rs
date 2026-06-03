@@ -358,6 +358,32 @@ impl App for AdminApp {
                 "admin_v2_metadata_backfill_run_options",
             ),
             Route::with_handler_and_name(
+                "/v2/api/jobs/artwork_backfill/run-options",
+                cot::router::method::post({
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    move |session: Session,
+                          db: Database,
+                          json: Json<v2::ArtworkBackfillRunRequest>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("admin pool")
+                                })
+                                .await;
+                            v2::run_artwork_backfill(session, db, pg_pool, json).await
+                        }
+                    }
+                }),
+                "admin_v2_artwork_backfill_run_options",
+            ),
+            Route::with_handler_and_name(
                 "/v2/api/jobs/{name}/run",
                 cot::router::method::post({
                     let handle = Arc::clone(&self.scheduler_handle);

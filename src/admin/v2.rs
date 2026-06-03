@@ -83,8 +83,16 @@ pub struct MetadataBackfillRunRequest {
     local_genres: bool,
     #[serde(default = "default_true")]
     lastfm_tags: bool,
+    #[serde(default = "default_true")]
+    musicbrainz_tags: bool,
     #[serde(default)]
     overwrite: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ArtworkBackfillRunRequest {
+    #[serde(default)]
+    overwrite_existing: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -296,6 +304,7 @@ struct MetadataTagDto {
 struct ReviewPageDto {
     items: Vec<ReviewDto>,
     total: i64,
+    total_all: i64,
     limit: i64,
     offset: i64,
     status: Option<String>,
@@ -1076,6 +1085,7 @@ pub async fn run_metadata_backfill(
         duration_seconds: body.duration_seconds,
         local_genres: body.local_genres,
         lastfm_tags: body.lastfm_tags,
+        musicbrainz_tags: body.musicbrainz_tags,
         overwrite: body.overwrite,
     };
     if !options.any_field() {
@@ -1105,6 +1115,56 @@ pub async fn run_metadata_backfill(
         let mut log = scheduler::JobLog::with_live_flush(pool_for_task.clone(), run_id);
         let result =
             crate::jobs::metadata_backfill::run_with_options(&ctx, &mut log, options).await;
+        let duration_ms = start.elapsed().as_millis() as i64;
+        match result {
+            Ok(()) => {
+                let _ = run
+                    .set_completed(&db_for_task, duration_ms, &log.output())
+                    .await;
+            }
+            Err(err) => {
+                let _ = run
+                    .set_failed(&db_for_task, duration_ms, &log.output(), &err.to_string())
+                    .await;
+            }
+        }
+    });
+
+    Json(JobRunStartedDto { ok: true, run_id }).into_response()
+}
+
+pub async fn run_artwork_backfill(
+    session: Session,
+    db: Database,
+    pool: &PgPool,
+    Json(body): Json<ArtworkBackfillRunRequest>,
+) -> cot::Result<cot::response::Response> {
+    if let Err(response) = require_admin_json(&session, &db).await {
+        return Ok(response);
+    }
+
+    let options = crate::jobs::artwork_backfill::ArtworkBackfillOptions {
+        overwrite_existing: body.overwrite_existing,
+    };
+    let mut run = JobRun::create_running(&db, "artwork_backfill", "manual")
+        .await
+        .map_err(|e| cot::Error::internal(format!("failed to create job run: {e}")))?;
+    let run_id = run.id_val();
+    let (live_config, _) = AppConfig::load_with_db(&db).await;
+    let db_for_task = db.clone();
+    let pool_for_task = pool.clone();
+
+    tokio::spawn(async move {
+        let start = std::time::Instant::now();
+        let ctx = scheduler::JobContext {
+            config: std::sync::Arc::new(live_config),
+            db: db_for_task.clone(),
+            pool: pool_for_task.clone(),
+            run_id,
+            registry: std::sync::Arc::new(JobRegistry::new()),
+        };
+        let mut log = scheduler::JobLog::with_live_flush(pool_for_task.clone(), run_id);
+        let result = crate::jobs::artwork_backfill::run_with_options(&ctx, &mut log, options).await;
         let duration_ms = start.elapsed().as_millis() as i64;
         match result {
             Ok(()) => {
@@ -2109,6 +2169,7 @@ async fn load_review_page(pool: &PgPool, query: ReviewsQuery) -> anyhow::Result<
     let search_pattern = search.as_ref().map(|s| format!("%{s}%"));
 
     let total = count_reviews(pool, status.clone(), search_pattern.clone()).await?;
+    let total_all = count_reviews(pool, None, search_pattern.clone()).await?;
     let status_counts = load_review_status_counts(pool, None, search_pattern.clone()).await?;
 
     let mut qb = QueryBuilder::<Postgres>::new(
@@ -2134,6 +2195,7 @@ async fn load_review_page(pool: &PgPool, query: ReviewsQuery) -> anyhow::Result<
     Ok(ReviewPageDto {
         items,
         total,
+        total_all,
         limit,
         offset,
         status,

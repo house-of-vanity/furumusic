@@ -272,6 +272,7 @@ translations! {
     // Player UI
     player_library:          "Library"                         , "Библиотека";
     player_artists:          "Artists"                         , "Артисты";
+    player_global_library:   "Global"                          , "Global";
     player_release:          "Release"                         , "Релиз";
     player_releases:         "Releases"                        , "Релизы";
     player_tracks:           "Tracks"                          , "Треки";
@@ -479,6 +480,7 @@ translations! {
     player_seen:             "seen"                            , "видели";
     player_eta:              "eta"                             , "осталось";
     player_loading_history:  "Loading history..."              , "Загрузка истории...";
+    player_loading_more:     "Loading more..."                 , "Загружаю ещё...";
     player_failed_load_history: "Failed to load history"        , "Не удалось загрузить историю";
     player_total_plays:      "total plays"                     , "прослушиваний всего";
     player_play_history:     "Play history"                    , "История прослушиваний";

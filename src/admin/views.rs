@@ -1472,6 +1472,7 @@ pub async fn metadata_backfill_run(
         duration_seconds: data.duration_seconds.is_some(),
         local_genres: data.local_genres.is_some(),
         lastfm_tags: data.lastfm_tags.is_some(),
+        musicbrainz_tags: true,
         overwrite: data.mode.as_deref() == Some("overwrite"),
     };
 
