@@ -378,6 +378,15 @@ impl App for FuruApp {
                                 }
                             };
 
+                            let (live_config, _) = AppConfig::load_with_db(&db).await;
+                            if !live_config.auth_password_enabled {
+                                metrics::record_auth_attempt("password", "failure", "disabled");
+                                let msg = i18n.t.login_disabled.to_owned();
+                                return login_page_handler(i18n, &config, db, msg)
+                                    .await?
+                                    .into_response();
+                            }
+
                             // Try to authenticate
                             if let Ok(Some(user)) = User::get_by_username(&db, &data.username).await
                             {
@@ -424,6 +433,16 @@ impl App for FuruApp {
                 "/auth/oidc/callback",
                 get(oidc::oidc_callback_handler),
                 "oidc_callback",
+            ),
+            Route::with_handler_and_name(
+                "/auth/mobile/oidc/start",
+                get(oidc::oidc_mobile_start_handler),
+                "mobile_oidc_start",
+            ),
+            Route::with_handler_and_name(
+                "/auth/mobile/oidc/callback",
+                get(oidc::oidc_mobile_callback_handler),
+                "mobile_oidc_callback",
             ),
         ])
     }

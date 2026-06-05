@@ -1324,6 +1324,9 @@ impl App for AdminApp {
         all.extend(cot::db::migrations::wrap_migrations(
             crate::scheduler::db_migrations::MIGRATIONS,
         ));
+        all.extend(cot::db::migrations::wrap_migrations(
+            crate::auth::db_migrations::MIGRATIONS,
+        ));
         all
     }
 }

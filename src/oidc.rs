@@ -4,6 +4,7 @@ use std::sync::LazyLock;
 use std::time::Instant;
 
 use cot::db::Database;
+use cot::request::extractors::UrlQuery;
 use cot::session::Session;
 use openidconnect::core::{CoreClient, CoreProviderMetadata};
 use openidconnect::{
@@ -53,6 +54,13 @@ const SESSION_CSRF_STATE: &str = "oidc_csrf_state";
 const SESSION_NONCE: &str = "oidc_nonce";
 const SESSION_PKCE_VERIFIER: &str = "oidc_pkce_verifier";
 const SESSION_REDIRECT_URI: &str = "oidc_redirect_uri";
+
+const SESSION_MOBILE_CSRF_STATE: &str = "mobile_oidc_csrf_state";
+const SESSION_MOBILE_NONCE: &str = "mobile_oidc_nonce";
+const SESSION_MOBILE_PKCE_VERIFIER: &str = "mobile_oidc_pkce_verifier";
+const SESSION_MOBILE_PROVIDER_REDIRECT_URI: &str = "mobile_oidc_provider_redirect_uri";
+const SESSION_MOBILE_APP_REDIRECT_URI: &str = "mobile_oidc_app_redirect_uri";
+const DEFAULT_MOBILE_REDIRECT_URI: &str = "furumi://auth/callback";
 
 // ---------------------------------------------------------------------------
 // Provider cache
@@ -247,13 +255,23 @@ pub struct OidcCallbackQuery {
     state: String,
 }
 
+#[derive(Deserialize)]
+pub struct MobileOidcStartQuery {
+    redirect_uri: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct MobileOidcCallbackQuery {
+    code: Option<String>,
+    state: Option<String>,
+    error: Option<String>,
+}
+
 pub async fn oidc_callback_handler(
     i18n: I18n,
     db: Database,
     session: Session,
-    cot::request::extractors::UrlQuery(query): cot::request::extractors::UrlQuery<
-        OidcCallbackQuery,
-    >,
+    UrlQuery(query): UrlQuery<OidcCallbackQuery>,
 ) -> cot::Result<cot::response::Response> {
     let (config, _) = AppConfig::load_with_db(&db).await;
 
@@ -462,6 +480,296 @@ pub async fn oidc_callback_handler(
 }
 
 // ---------------------------------------------------------------------------
+// Mobile OIDC flow
+// ---------------------------------------------------------------------------
+
+pub async fn oidc_mobile_start_handler(
+    origin: RequestOrigin,
+    db: Database,
+    session: Session,
+    UrlQuery(query): UrlQuery<MobileOidcStartQuery>,
+) -> cot::Result<cot::response::Response> {
+    let Some(app_redirect_uri) = safe_mobile_redirect_uri(query.redirect_uri.as_deref()) else {
+        crate::metrics::record_auth_attempt("mobile_oidc", "failure", "bad_redirect_uri");
+        return Ok(text_response(
+            cot::http::StatusCode::BAD_REQUEST,
+            "invalid mobile redirect_uri",
+        ));
+    };
+
+    let (config, _) = AppConfig::load_with_db(&db).await;
+
+    if !config.auth_sso_enabled
+        || config.oidc_issuer.is_empty()
+        || config.oidc_client_id.is_empty()
+        || config.oidc_client_secret.is_empty()
+    {
+        tracing::warn!("Mobile OIDC start requested but SSO is not configured");
+        crate::metrics::record_auth_attempt("mobile_oidc", "failure", "not_configured");
+        return Ok(mobile_redirect_error(
+            &app_redirect_uri,
+            "sso_not_configured",
+        ));
+    }
+
+    let http = oidc_http_client();
+    let client = match get_or_refresh_provider(&config, &http).await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Mobile OIDC provider error: {e}");
+            crate::metrics::record_auth_attempt("mobile_oidc", "failure", "provider_error");
+            return Ok(mobile_redirect_error(&app_redirect_uri, "provider_error"));
+        }
+    };
+
+    let provider_redirect_uri = format!("{}/auth/mobile/oidc/callback", origin.0);
+    let redirect_url = RedirectUrl::new(provider_redirect_uri.clone())
+        .map_err(|e| cot::Error::internal(format!("bad mobile redirect URI: {e}")))?;
+    let client = client.set_redirect_uri(redirect_url);
+
+    let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
+    let (auth_url, csrf_state, nonce) = client
+        .authorize_url(
+            openidconnect::AuthenticationFlow::<openidconnect::core::CoreResponseType>::AuthorizationCode,
+            CsrfToken::new_random,
+            Nonce::new_random,
+        )
+        .add_scope(Scope::new("email".to_string()))
+        .add_scope(Scope::new("profile".to_string()))
+        .set_pkce_challenge(pkce_challenge)
+        .url();
+
+    session
+        .insert(SESSION_MOBILE_CSRF_STATE, csrf_state.secret().clone())
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    session
+        .insert(SESSION_MOBILE_NONCE, nonce.secret().clone())
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    session
+        .insert(SESSION_MOBILE_PKCE_VERIFIER, pkce_verifier.secret().clone())
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    session
+        .insert(
+            SESSION_MOBILE_PROVIDER_REDIRECT_URI,
+            provider_redirect_uri.clone(),
+        )
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    session
+        .insert(SESSION_MOBILE_APP_REDIRECT_URI, app_redirect_uri)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    tracing::info!(
+        auth_url = %auth_url,
+        provider_redirect_uri = %provider_redirect_uri,
+        "Mobile OIDC start: redirecting to provider",
+    );
+
+    Ok(auth::redirect(auth_url.as_str()))
+}
+
+pub async fn oidc_mobile_callback_handler(
+    db: Database,
+    session: Session,
+    UrlQuery(query): UrlQuery<MobileOidcCallbackQuery>,
+) -> cot::Result<cot::response::Response> {
+    let app_redirect_uri = mobile_app_redirect_uri_from_session(&session).await?;
+
+    if query.error.is_some() {
+        tracing::warn!("Mobile OIDC callback returned provider error");
+        crate::metrics::record_auth_attempt("mobile_oidc", "failure", "provider_denied");
+        clear_mobile_oidc_session(&session).await?;
+        return Ok(mobile_redirect_error(&app_redirect_uri, "provider_denied"));
+    }
+
+    let Some(code) = query.code else {
+        crate::metrics::record_auth_attempt("mobile_oidc", "failure", "missing_code");
+        clear_mobile_oidc_session(&session).await?;
+        return Ok(mobile_redirect_error(&app_redirect_uri, "missing_code"));
+    };
+    let Some(state) = query.state else {
+        crate::metrics::record_auth_attempt("mobile_oidc", "failure", "missing_state");
+        clear_mobile_oidc_session(&session).await?;
+        return Ok(mobile_redirect_error(&app_redirect_uri, "missing_state"));
+    };
+
+    let saved_csrf: Option<String> = session
+        .get(SESSION_MOBILE_CSRF_STATE)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let saved_nonce: Option<String> = session
+        .get(SESSION_MOBILE_NONCE)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let saved_pkce: Option<String> = session
+        .get(SESSION_MOBILE_PKCE_VERIFIER)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let provider_redirect_uri: Option<String> = session
+        .get(SESSION_MOBILE_PROVIDER_REDIRECT_URI)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    let Some(saved_csrf) = saved_csrf else {
+        tracing::warn!("Mobile OIDC callback: no CSRF state in session");
+        crate::metrics::record_auth_attempt("mobile_oidc", "failure", "missing_state");
+        clear_mobile_oidc_session(&session).await?;
+        return Ok(mobile_redirect_error(&app_redirect_uri, "missing_state"));
+    };
+    if state != saved_csrf {
+        tracing::warn!("Mobile OIDC callback: CSRF state mismatch");
+        crate::metrics::record_auth_attempt("mobile_oidc", "failure", "csrf");
+        clear_mobile_oidc_session(&session).await?;
+        return Ok(mobile_redirect_error(&app_redirect_uri, "csrf"));
+    }
+
+    let Some(nonce_str) = saved_nonce else {
+        crate::metrics::record_auth_attempt("mobile_oidc", "failure", "missing_nonce");
+        clear_mobile_oidc_session(&session).await?;
+        return Ok(mobile_redirect_error(&app_redirect_uri, "missing_nonce"));
+    };
+    let Some(pkce_str) = saved_pkce else {
+        crate::metrics::record_auth_attempt("mobile_oidc", "failure", "missing_pkce");
+        clear_mobile_oidc_session(&session).await?;
+        return Ok(mobile_redirect_error(&app_redirect_uri, "missing_pkce"));
+    };
+    let Some(provider_redirect_uri) = provider_redirect_uri else {
+        crate::metrics::record_auth_attempt("mobile_oidc", "failure", "missing_redirect_uri");
+        clear_mobile_oidc_session(&session).await?;
+        return Ok(mobile_redirect_error(
+            &app_redirect_uri,
+            "missing_redirect_uri",
+        ));
+    };
+
+    let (config, _) = AppConfig::load_with_db(&db).await;
+    if !config.auth_sso_enabled
+        || config.oidc_issuer.is_empty()
+        || config.oidc_client_id.is_empty()
+        || config.oidc_client_secret.is_empty()
+    {
+        crate::metrics::record_auth_attempt("mobile_oidc", "failure", "not_configured");
+        clear_mobile_oidc_session(&session).await?;
+        return Ok(mobile_redirect_error(
+            &app_redirect_uri,
+            "sso_not_configured",
+        ));
+    }
+
+    let http = oidc_http_client();
+    let client = match get_or_refresh_provider(&config, &http).await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Mobile OIDC provider error during callback: {e}");
+            crate::metrics::record_auth_attempt("mobile_oidc", "failure", "provider_error");
+            clear_mobile_oidc_session(&session).await?;
+            return Ok(mobile_redirect_error(&app_redirect_uri, "provider_error"));
+        }
+    };
+    let redirect_url = RedirectUrl::new(provider_redirect_uri)
+        .map_err(|e| cot::Error::internal(format!("bad mobile redirect URI from session: {e}")))?;
+    let client = client.set_redirect_uri(redirect_url);
+
+    let token_request = match client.exchange_code(AuthorizationCode::new(code)) {
+        Ok(req) => req,
+        Err(e) => {
+            tracing::error!("Mobile OIDC token endpoint not configured: {e}");
+            crate::metrics::record_auth_attempt("mobile_oidc", "failure", "token_config");
+            clear_mobile_oidc_session(&session).await?;
+            return Ok(mobile_redirect_error(&app_redirect_uri, "oidc_error"));
+        }
+    };
+    let token_response = token_request
+        .set_pkce_verifier(PkceCodeVerifier::new(pkce_str))
+        .request_async(&http)
+        .await;
+    let token_response = match token_response {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!("Mobile OIDC token exchange failed: {e}");
+            crate::metrics::record_auth_attempt("mobile_oidc", "failure", "token_exchange");
+            clear_mobile_oidc_session(&session).await?;
+            return Ok(mobile_redirect_error(&app_redirect_uri, "oidc_error"));
+        }
+    };
+
+    use openidconnect::TokenResponse;
+    let id_token = match token_response.id_token() {
+        Some(t) => t,
+        None => {
+            tracing::error!("Mobile OIDC response missing ID token");
+            crate::metrics::record_auth_attempt("mobile_oidc", "failure", "missing_id_token");
+            clear_mobile_oidc_session(&session).await?;
+            return Ok(mobile_redirect_error(&app_redirect_uri, "oidc_error"));
+        }
+    };
+
+    let nonce = Nonce::new(nonce_str);
+    let claims = match id_token.claims(&client.id_token_verifier(), &nonce) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Mobile OIDC ID token verification failed: {e}");
+            crate::metrics::record_auth_attempt("mobile_oidc", "failure", "id_token_verify");
+            clear_mobile_oidc_session(&session).await?;
+            return Ok(mobile_redirect_error(&app_redirect_uri, "oidc_error"));
+        }
+    };
+
+    let sub = claims.subject().to_string();
+    let issuer = claims.issuer().to_string();
+    let email = claims.email().map(|e| e.to_string());
+    let name = claims
+        .name()
+        .and_then(|n| n.get(None))
+        .map(|n| n.to_string());
+    let groups = extract_groups_from_jwt(&id_token.to_string());
+
+    if !is_allowed_by_groups(&groups, &config.oidc_user_groups, &config.oidc_admin_groups) {
+        tracing::warn!(
+            "Mobile OIDC login denied by group allowlist: sub={sub}, groups={groups:?}, user_groups={:?}, admin_groups={:?}",
+            config.oidc_user_groups,
+            config.oidc_admin_groups,
+        );
+        crate::metrics::record_auth_attempt("mobile_oidc", "failure", "not_in_group");
+        clear_mobile_oidc_session(&session).await?;
+        return Ok(mobile_redirect_error(&app_redirect_uri, "access_denied"));
+    }
+
+    let user = match provision_user(
+        &db,
+        &issuer,
+        &sub,
+        email.as_deref(),
+        name.as_deref(),
+        &groups,
+        &config.oidc_admin_groups,
+    )
+    .await
+    {
+        Ok(u) => u,
+        Err(e) => {
+            tracing::error!("Mobile OIDC user provisioning failed: {e}");
+            crate::metrics::record_auth_attempt("mobile_oidc", "failure", "provisioning");
+            clear_mobile_oidc_session(&session).await?;
+            return Ok(mobile_redirect_error(&app_redirect_uri, "oidc_error"));
+        }
+    };
+
+    let exchange_code = auth::create_mobile_exchange_code(&db, user.id_val())
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    clear_mobile_oidc_session(&session).await?;
+
+    crate::metrics::record_auth_attempt("mobile_oidc", "success", "ok");
+    crate::metrics::record_session_created("mobile_oidc");
+    Ok(mobile_redirect_success(&app_redirect_uri, &exchange_code))
+}
+
+// ---------------------------------------------------------------------------
 // User provisioning
 // ---------------------------------------------------------------------------
 
@@ -614,6 +922,104 @@ async fn provision_user(
 fn redirect_login_with_error(message: &str) -> cot::Result<cot::response::Response> {
     let encoded = urlencoded(message);
     Ok(auth::redirect(&format!("/login?error={encoded}")))
+}
+
+fn text_response(status: cot::http::StatusCode, message: &str) -> cot::response::Response {
+    cot::http::Response::builder()
+        .status(status)
+        .body(cot::Body::fixed(message.to_owned()))
+        .expect("valid response")
+}
+
+async fn mobile_app_redirect_uri_from_session(session: &Session) -> cot::Result<String> {
+    let saved: Option<String> = session
+        .get(SESSION_MOBILE_APP_REDIRECT_URI)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    Ok(safe_mobile_redirect_uri(saved.as_deref())
+        .unwrap_or_else(|| DEFAULT_MOBILE_REDIRECT_URI.to_owned()))
+}
+
+async fn clear_mobile_oidc_session(session: &Session) -> cot::Result<()> {
+    let _: Option<String> = session
+        .remove(SESSION_MOBILE_CSRF_STATE)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let _: Option<String> = session
+        .remove(SESSION_MOBILE_NONCE)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let _: Option<String> = session
+        .remove(SESSION_MOBILE_PKCE_VERIFIER)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let _: Option<String> = session
+        .remove(SESSION_MOBILE_PROVIDER_REDIRECT_URI)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let _: Option<String> = session
+        .remove(SESSION_MOBILE_APP_REDIRECT_URI)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    Ok(())
+}
+
+fn safe_mobile_redirect_uri(raw: Option<&str>) -> Option<String> {
+    let value = raw
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(DEFAULT_MOBILE_REDIRECT_URI);
+    if value.len() > 2048 || value.bytes().any(|b| matches!(b, b'\r' | b'\n')) {
+        return None;
+    }
+
+    let lower = value.to_ascii_lowercase();
+    if lower.starts_with("furumi://") || lower.starts_with("furumusic://") {
+        return Some(value.to_owned());
+    }
+    None
+}
+
+fn mobile_redirect_success(app_redirect_uri: &str, code: &str) -> cot::response::Response {
+    auth::redirect(&append_query_param(app_redirect_uri, "code", code))
+}
+
+fn mobile_redirect_error(app_redirect_uri: &str, error: &str) -> cot::response::Response {
+    auth::redirect(&append_query_param(app_redirect_uri, "error", error))
+}
+
+fn append_query_param(uri: &str, key: &str, value: &str) -> String {
+    let (base, fragment) = uri.split_once('#').unwrap_or((uri, ""));
+    let separator = if base.contains('?') { '&' } else { '?' };
+    let mut out = format!("{base}{separator}{key}={}", urlencoded(value));
+    if !fragment.is_empty() {
+        out.push('#');
+        out.push_str(fragment);
+    }
+    out
+}
+
+fn extract_groups_from_jwt(token: &str) -> Vec<String> {
+    use base64::Engine;
+
+    let Some(payload_b64) = token.split('.').nth(1) else {
+        return Vec::new();
+    };
+    let Ok(payload_bytes) = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload_b64)
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(payload_b64))
+    else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&payload_bytes) else {
+        return Vec::new();
+    };
+    let Some(arr) = value.get("groups").and_then(|value| value.as_array()) else {
+        return Vec::new();
+    };
+    arr.iter()
+        .filter_map(|value| value.as_str().map(String::from))
+        .collect()
 }
 
 /// Minimal percent-encoding for query parameter values.

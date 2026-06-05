@@ -338,8 +338,50 @@ impl AppConfig {
     pub fn load() -> Self {
         let mut cfg = Self::default();
         cfg.apply_env_overrides();
+        cfg.apply_startup_db_overrides();
+        cfg.apply_env_overrides();
         cfg.normalize_host_paths();
         cfg
+    }
+
+    fn apply_startup_db_overrides(&mut self) {
+        if self.database_url.is_empty() {
+            return;
+        }
+        if tokio::runtime::Handle::try_current().is_ok() {
+            tracing::warn!("skipping startup DB config load from inside an existing Tokio runtime");
+            return;
+        }
+
+        let database_url = self.database_url.clone();
+        let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        else {
+            tracing::warn!("failed to create runtime for startup DB config load");
+            return;
+        };
+
+        let result = runtime.block_on(async move {
+            let pool = sqlx::postgres::PgPoolOptions::new()
+                .max_connections(1)
+                .connect(&database_url)
+                .await?;
+            sqlx::query_scalar::<_, String>(
+                "SELECT value FROM furumusic__config_entry WHERE key = 'swagger_enabled'",
+            )
+            .fetch_optional(&pool)
+            .await
+        });
+
+        match result {
+            Ok(Some(value)) => match value.parse::<bool>() {
+                Ok(value) => self.swagger_enabled = value,
+                Err(_) => tracing::warn!("ignoring invalid DB config value for swagger_enabled"),
+            },
+            Ok(None) => {}
+            Err(err) => tracing::warn!("failed to read startup DB config overrides: {err}"),
+        }
     }
 
     /// Build config with full 3-layer resolution (default → DB → env) and

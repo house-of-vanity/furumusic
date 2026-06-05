@@ -894,11 +894,12 @@ pub struct PlayerPageTemplate {
 // ---------------------------------------------------------------------------
 
 async fn me_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
 
@@ -972,11 +973,12 @@ fn request_origin(request: &cot::request::Request) -> Option<String> {
 }
 
 async fn lastfm_status_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let (config, _) = AppConfig::load_with_db(&db).await;
@@ -1007,12 +1009,13 @@ async fn lastfm_status_handler(
 }
 
 async fn lastfm_connect_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     request: cot::request::Request,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(redirect_response("/login"));
     };
     let (config, _) = AppConfig::load_with_db(&db).await;
@@ -1055,12 +1058,13 @@ async fn lastfm_connect_handler(
 }
 
 async fn lastfm_callback_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     query: cot::request::extractors::UrlQuery<LastfmCallbackQuery>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(redirect_response("/login"));
     };
     let Some(token) = query
@@ -1134,11 +1138,12 @@ async fn lastfm_callback_handler(
 }
 
 async fn lastfm_disconnect_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
@@ -1353,12 +1358,13 @@ async fn enqueue_lastfm_scrobble(
 }
 
 async fn lastfm_now_playing_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     Json(entry): Json<LastfmNowPlayingRequest>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let (config, _) = AppConfig::load_with_db(&db).await;
@@ -1425,12 +1431,13 @@ async fn lastfm_now_playing_handler(
 }
 
 async fn lastfm_scrobble_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     Json(entry): Json<LastfmScrobbleRequest>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let (config, _) = AppConfig::load_with_db(&db).await;
@@ -1453,11 +1460,12 @@ async fn lastfm_scrobble_handler(
 // ---------------------------------------------------------------------------
 
 async fn agent_queue_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
 ) -> cot::Result<cot::response::Response> {
-    let Some(_user) = auth::get_session_user(&session, &db).await else {
+    let Some(_user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
 
@@ -1483,12 +1491,13 @@ async fn agent_queue_handler(
 // ---------------------------------------------------------------------------
 
 async fn user_uploads_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     UrlQuery(query): UrlQuery<UserUploadsQuery>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let limit = query.limit.unwrap_or(120).clamp(1, 500);
@@ -1497,13 +1506,14 @@ async fn user_uploads_handler(
 }
 
 async fn user_upload_track_update_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     path: Path<PathTrackId>,
     Json(body): Json<UserUploadTrackUpdateRequest>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let track_id = path.0.track_id;
@@ -1680,13 +1690,14 @@ async fn user_upload_track_update_handler(
 }
 
 async fn user_upload_release_update_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     path: Path<PathId>,
     Json(body): Json<UserUploadReleaseUpdateRequest>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let release_id = path.0.id;
@@ -1790,12 +1801,13 @@ async fn user_upload_release_update_handler(
 }
 
 async fn user_upload_tracks_bulk_update_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     Json(body): Json<UserUploadBulkTrackUpdateRequest>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let mut track_ids = body
@@ -1932,13 +1944,14 @@ async fn user_upload_tracks_bulk_update_handler(
 }
 
 async fn user_upload_review_save_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     path: Path<PathId>,
     Json(body): Json<UserUploadReviewUpdateRequest>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let review_id = path.0.id;
@@ -1962,12 +1975,13 @@ async fn user_upload_review_save_handler(
 }
 
 async fn user_upload_review_delete_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     path: Path<PathId>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let review_id = path.0.id;
@@ -1992,13 +2006,14 @@ async fn user_upload_review_delete_handler(
 }
 
 async fn user_upload_review_approve_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     path: Path<PathId>,
     Json(body): Json<UserUploadReviewUpdateRequest>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let review_id = path.0.id;
@@ -2769,12 +2784,13 @@ fn input_path_filename(path: Option<&str>) -> String {
 // ---------------------------------------------------------------------------
 
 async fn artists_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     query: cot::request::extractors::UrlQuery<PaginationQuery>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
 
@@ -2923,12 +2939,13 @@ async fn artists_handler(
 // ---------------------------------------------------------------------------
 
 async fn artist_detail_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     path: Path<PathId>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(_user) = auth::get_session_user(&session, &db).await else {
+    let Some(_user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
 
@@ -3167,12 +3184,13 @@ async fn artist_detail_handler(
 // ---------------------------------------------------------------------------
 
 async fn release_detail_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     path: Path<PathId>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(_user) = auth::get_session_user(&session, &db).await else {
+    let Some(_user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
 
@@ -3263,11 +3281,12 @@ async fn release_detail_handler(
 // ---------------------------------------------------------------------------
 
 async fn playlists_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
 
@@ -3336,12 +3355,13 @@ async fn playlists_handler(
 // ---------------------------------------------------------------------------
 
 async fn playlist_detail_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     path: Path<PathId>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
 
@@ -3550,12 +3570,13 @@ async fn load_track_items_by_ids(pool: &sqlx::PgPool, ids: &[i64]) -> cot::Resul
 // ---------------------------------------------------------------------------
 
 async fn create_playlist_share_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     Json(body): Json<CreatePlaylistShareRequest>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
 
@@ -3618,12 +3639,13 @@ async fn create_playlist_share_handler(
 // ---------------------------------------------------------------------------
 
 async fn playlist_share_detail_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     path: Path<PathStringId>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(_user) = auth::get_session_user(&session, &db).await else {
+    let Some(_user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
 
@@ -3711,6 +3733,7 @@ async fn likes_playlist_handler(
 // ---------------------------------------------------------------------------
 
 async fn stream_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
@@ -3718,7 +3741,7 @@ async fn stream_handler(
     request: &cot::http::Request<Body>,
     path: Path<PathTrackId>,
 ) -> cot::Result<cot::http::Response<Body>> {
-    let Some(_user) = auth::get_session_user(&session, &db).await else {
+    let Some(_user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
 
@@ -3795,13 +3818,14 @@ async fn stream_handler(
 }
 
 async fn local_upload_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     config: AppConfig,
     scheduler_handle: Arc<tokio::sync::OnceCell<Arc<SchedulerHandle>>>,
     request: cot::request::Request,
 ) -> cot::Result<cot::http::Response<Body>> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
 
@@ -3984,16 +4008,27 @@ async fn read_file_range(path: &std::path::Path, start: u64, length: u64) -> cot
 // ---------------------------------------------------------------------------
 
 async fn cover_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     config: &AppConfig,
     path: Path<PathMediaFileId>,
 ) -> cot::Result<cot::http::Response<Body>> {
-    cover_response(session, db, pool, config, path.0.media_file_id, None).await
+    cover_response(
+        auth_ctx,
+        session,
+        db,
+        pool,
+        config,
+        path.0.media_file_id,
+        None,
+    )
+    .await
 }
 
 async fn cover_variant_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
@@ -4001,6 +4036,7 @@ async fn cover_variant_handler(
     path: Path<PathMediaFileVariant>,
 ) -> cot::Result<cot::http::Response<Body>> {
     cover_response(
+        auth_ctx,
         session,
         db,
         pool,
@@ -4012,6 +4048,7 @@ async fn cover_variant_handler(
 }
 
 async fn cover_response(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
@@ -4019,7 +4056,7 @@ async fn cover_response(
     media_file_id: i64,
     variant_name: Option<&str>,
 ) -> cot::Result<cot::http::Response<Body>> {
-    let Some(_user) = auth::get_session_user(&session, &db).await else {
+    let Some(_user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
 
@@ -4074,12 +4111,13 @@ async fn cover_response(
 // ---------------------------------------------------------------------------
 
 async fn devices_heartbeat_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     hub: Arc<PlayerDeviceHub>,
     Json(dto): Json<DeviceHeartbeatRequest>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let Some(device_id) = normalize_device_id(&dto.device_id) else {
@@ -4100,12 +4138,13 @@ async fn devices_heartbeat_handler(
 }
 
 async fn devices_poll_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     hub: Arc<PlayerDeviceHub>,
     Json(dto): Json<DeviceHeartbeatRequest>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let Some(device_id) = normalize_device_id(&dto.device_id) else {
@@ -4126,12 +4165,13 @@ async fn devices_poll_handler(
 }
 
 async fn devices_select_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     hub: Arc<PlayerDeviceHub>,
     Json(dto): Json<DeviceSelectRequest>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let Some(target_device_id) = normalize_device_id(&dto.device_id) else {
@@ -4153,12 +4193,13 @@ async fn devices_select_handler(
 }
 
 async fn devices_command_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     hub: Arc<PlayerDeviceHub>,
     Json(dto): Json<DeviceCommandRequest>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let command = dto.command.trim();
@@ -4227,12 +4268,13 @@ fn stamp_jam_queue_tracks(payload: &mut serde_json::Value, user_id: i64, user_na
 }
 
 async fn jam_users_search_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     UrlQuery(query): UrlQuery<JamUserSearchQuery>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
 
@@ -4286,13 +4328,14 @@ async fn jam_users_search_handler(
 }
 
 async fn jam_create_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     hub: Arc<PlayerDeviceHub>,
     Json(dto): Json<PlayerJamCreateRequest>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let Some(device_id) = normalize_device_id(&dto.device_id) else {
@@ -4348,12 +4391,13 @@ async fn load_jam_invitees(
 }
 
 async fn jam_join_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     hub: Arc<PlayerDeviceHub>,
     Json(dto): Json<PlayerJamJoinRequest>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let Some(jam_id) = normalize_device_id(&dto.jam_id) else {
@@ -4370,13 +4414,14 @@ async fn jam_join_handler(
 }
 
 async fn jam_invite_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     hub: Arc<PlayerDeviceHub>,
     Json(dto): Json<PlayerJamInviteRequest>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let Some(jam_id) = normalize_device_id(&dto.jam_id) else {
@@ -4394,12 +4439,13 @@ async fn jam_invite_handler(
 }
 
 async fn jam_leave_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     hub: Arc<PlayerDeviceHub>,
     Json(dto): Json<PlayerJamLeaveRequest>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let Some(jam_id) = normalize_device_id(&dto.jam_id) else {
@@ -4420,11 +4466,12 @@ async fn jam_leave_handler(
 // ---------------------------------------------------------------------------
 
 async fn get_state_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
 
@@ -4469,12 +4516,13 @@ async fn get_state_handler(
 // ---------------------------------------------------------------------------
 
 async fn put_state_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     Json(dto): Json<PlaybackStateDto>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
 
@@ -4511,12 +4559,13 @@ async fn put_state_handler(
 // ---------------------------------------------------------------------------
 
 async fn history_list_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     query: cot::request::extractors::UrlQuery<HistoryQuery>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
 
@@ -4664,12 +4713,13 @@ async fn history_list_handler(
 }
 
 async fn history_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     Json(entry): Json<HistoryEntry>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
 
@@ -4736,12 +4786,13 @@ async fn history_handler(
 // ---------------------------------------------------------------------------
 
 async fn search_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     query: cot::request::extractors::UrlQuery<SearchQuery>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(_user) = auth::get_session_user(&session, &db).await else {
+    let Some(_user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
 
@@ -5033,12 +5084,13 @@ async fn search_handler(
 // ---------------------------------------------------------------------------
 
 async fn create_playlist_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     Json(body): Json<CreatePlaylistRequest>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let title = body.title.trim().to_string();
@@ -5075,13 +5127,14 @@ async fn create_playlist_handler(
 // ---------------------------------------------------------------------------
 
 async fn update_playlist_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     path: Path<PathId>,
     Json(body): Json<UpdatePlaylistRequest>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let playlist_id = path.0.id;
@@ -5130,12 +5183,13 @@ async fn update_playlist_handler(
 // ---------------------------------------------------------------------------
 
 async fn delete_playlist_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     path: Path<PathId>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let playlist_id = path.0.id;
@@ -5174,13 +5228,14 @@ async fn delete_playlist_handler(
 // ---------------------------------------------------------------------------
 
 async fn add_tracks_to_playlist_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     path: Path<PathId>,
     Json(body): Json<AddTracksRequest>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let playlist_id = path.0.id;
@@ -5240,13 +5295,14 @@ async fn add_tracks_to_playlist_handler(
 // ---------------------------------------------------------------------------
 
 async fn remove_track_from_playlist_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     path: Path<PathId>,
     Json(body): Json<RemoveTrackRequest>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let playlist_id = path.0.id;
@@ -5293,12 +5349,13 @@ async fn remove_track_from_playlist_handler(
 // ---------------------------------------------------------------------------
 
 async fn toggle_like_track_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     path: Path<PathTrackId>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let track_id = path.0.track_id;
@@ -5339,12 +5396,13 @@ async fn toggle_like_track_handler(
 // ---------------------------------------------------------------------------
 
 async fn like_release_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     path: Path<PathId>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let release_id = path.0.id;
@@ -5411,11 +5469,12 @@ async fn like_release_handler(
 // ---------------------------------------------------------------------------
 
 async fn liked_ids_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let rows: Vec<(i64,)> =
@@ -5436,11 +5495,12 @@ async fn liked_ids_handler(
 // ---------------------------------------------------------------------------
 
 async fn followed_artists_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
 
@@ -5492,12 +5552,13 @@ async fn followed_artists_handler(
 // ---------------------------------------------------------------------------
 
 async fn toggle_follow_artist_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     path: Path<PathId>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
     let artist_id = path.0.id;
@@ -5992,12 +6053,13 @@ async fn build_release_radio_ids(
 }
 
 async fn radio_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     path: Path<PathRadioSeed>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(user) = auth::get_session_user(&session, &db).await else {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
 
@@ -6021,12 +6083,13 @@ async fn radio_handler(
 // ---------------------------------------------------------------------------
 
 async fn tracks_by_ids_handler(
+    auth_ctx: auth::AuthContext,
     session: Session,
     db: Database,
     pool: &sqlx::PgPool,
     Json(body): Json<TracksByIdsRequest>,
 ) -> cot::Result<cot::response::Response> {
-    let Some(_user) = auth::get_session_user(&session, &db).await else {
+    let Some(_user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
         return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
     };
 
@@ -6081,22 +6144,24 @@ impl App for PlayerApp {
                 {
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    get(move |session: Session, db: Database| {
-                        let pool = Arc::clone(&pool);
-                        let pool_config = Arc::clone(&pool_config);
-                        async move {
-                            let pg_pool = pool
-                                .get_or_init(|| async {
-                                    sqlx::postgres::PgPoolOptions::new()
-                                        .max_connections(5)
-                                        .connect(&pool_config.database_url)
-                                        .await
-                                        .expect("player pool")
-                                })
-                                .await;
-                            me_handler(session, db, pg_pool).await
-                        }
-                    })
+                    get(
+                        move |auth_ctx: auth::AuthContext, session: Session, db: Database| {
+                            let pool = Arc::clone(&pool);
+                            let pool_config = Arc::clone(&pool_config);
+                            async move {
+                                let pg_pool = pool
+                                    .get_or_init(|| async {
+                                        sqlx::postgres::PgPoolOptions::new()
+                                            .max_connections(5)
+                                            .connect(&pool_config.database_url)
+                                            .await
+                                            .expect("player pool")
+                                    })
+                                    .await;
+                                me_handler(auth_ctx, session, db, pg_pool).await
+                            }
+                        },
+                    )
                 },
                 "player_me",
             ),
@@ -6105,7 +6170,7 @@ impl App for PlayerApp {
                 get({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database| {
+                    move |auth_ctx: auth::AuthContext, session: Session, db: Database| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -6118,7 +6183,7 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            lastfm_status_handler(session, db, pg_pool).await
+                            lastfm_status_handler(auth_ctx, session, db, pg_pool).await
                         }
                     }
                 }),
@@ -6129,7 +6194,10 @@ impl App for PlayerApp {
                 get({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database, request: cot::request::Request| {
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          request: cot::request::Request| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -6142,7 +6210,7 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            lastfm_connect_handler(session, db, pg_pool, request).await
+                            lastfm_connect_handler(auth_ctx, session, db, pg_pool, request).await
                         }
                     }
                 }),
@@ -6153,7 +6221,8 @@ impl App for PlayerApp {
                 get({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session,
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
                           db: Database,
                           query: cot::request::extractors::UrlQuery<LastfmCallbackQuery>| {
                         let pool = Arc::clone(&pool);
@@ -6168,7 +6237,7 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            lastfm_callback_handler(session, db, pg_pool, query).await
+                            lastfm_callback_handler(auth_ctx, session, db, pg_pool, query).await
                         }
                     }
                 }),
@@ -6179,7 +6248,7 @@ impl App for PlayerApp {
                 post({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database| {
+                    move |auth_ctx: auth::AuthContext, session: Session, db: Database| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -6192,7 +6261,7 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            lastfm_disconnect_handler(session, db, pg_pool).await
+                            lastfm_disconnect_handler(auth_ctx, session, db, pg_pool).await
                         }
                     }
                 }),
@@ -6203,7 +6272,10 @@ impl App for PlayerApp {
                 post({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database, json: Json<LastfmNowPlayingRequest>| {
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          json: Json<LastfmNowPlayingRequest>| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -6216,7 +6288,7 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            lastfm_now_playing_handler(session, db, pg_pool, json).await
+                            lastfm_now_playing_handler(auth_ctx, session, db, pg_pool, json).await
                         }
                     }
                 }),
@@ -6227,7 +6299,10 @@ impl App for PlayerApp {
                 post({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database, json: Json<LastfmScrobbleRequest>| {
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          json: Json<LastfmScrobbleRequest>| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -6240,7 +6315,7 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            lastfm_scrobble_handler(session, db, pg_pool, json).await
+                            lastfm_scrobble_handler(auth_ctx, session, db, pg_pool, json).await
                         }
                     }
                 }),
@@ -6251,22 +6326,24 @@ impl App for PlayerApp {
                 {
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    get(move |session: Session, db: Database| {
-                        let pool = Arc::clone(&pool);
-                        let pool_config = Arc::clone(&pool_config);
-                        async move {
-                            let pg_pool = pool
-                                .get_or_init(|| async {
-                                    sqlx::postgres::PgPoolOptions::new()
-                                        .max_connections(5)
-                                        .connect(&pool_config.database_url)
-                                        .await
-                                        .expect("player pool")
-                                })
-                                .await;
-                            agent_queue_handler(session, db, pg_pool).await
-                        }
-                    })
+                    get(
+                        move |auth_ctx: auth::AuthContext, session: Session, db: Database| {
+                            let pool = Arc::clone(&pool);
+                            let pool_config = Arc::clone(&pool_config);
+                            async move {
+                                let pg_pool = pool
+                                    .get_or_init(|| async {
+                                        sqlx::postgres::PgPoolOptions::new()
+                                            .max_connections(5)
+                                            .connect(&pool_config.database_url)
+                                            .await
+                                            .expect("player pool")
+                                    })
+                                    .await;
+                                agent_queue_handler(auth_ctx, session, db, pg_pool).await
+                            }
+                        },
+                    )
                 },
                 "player_agent_queue",
             ),
@@ -6278,40 +6355,44 @@ impl App for PlayerApp {
                     let pool_config = Arc::clone(&pool_config);
                     let torrent_service = Arc::clone(&torrent_service);
                     let scheduler_handle = Arc::clone(&self.scheduler_handle);
-                    get(move |session: Session, db: Database| {
-                        let pool = Arc::clone(&pool);
-                        let pool_config = Arc::clone(&pool_config);
-                        let torrent_service = Arc::clone(&torrent_service);
-                        let scheduler_handle = Arc::clone(&scheduler_handle);
-                        async move {
-                            let Some(user) = auth::get_session_user(&session, &db).await else {
-                                return Ok(json_error(
-                                    StatusCode::UNAUTHORIZED,
-                                    "not authenticated",
-                                ));
-                            };
-                            let pg_pool = pool
-                                .get_or_init(|| async {
-                                    sqlx::postgres::PgPoolOptions::new()
-                                        .max_connections(5)
-                                        .connect(&pool_config.database_url)
-                                        .await
-                                        .expect("player pool")
-                                })
-                                .await;
-                            let service = torrent_service
-                                .get_or_init(|| async {
-                                    Arc::new(TorrentService::new(Arc::clone(&scheduler_handle)))
-                                })
-                                .await;
-                            match service.list(pg_pool, user.id).await {
-                                Ok(items) => Json(items).into_response(),
-                                Err(err) => {
-                                    Ok(json_error(StatusCode::BAD_REQUEST, &err.to_string()))
+                    get(
+                        move |auth_ctx: auth::AuthContext, session: Session, db: Database| {
+                            let pool = Arc::clone(&pool);
+                            let pool_config = Arc::clone(&pool_config);
+                            let torrent_service = Arc::clone(&torrent_service);
+                            let scheduler_handle = Arc::clone(&scheduler_handle);
+                            async move {
+                                let Some(user) =
+                                    auth::get_request_user(&auth_ctx, &session, &db).await
+                                else {
+                                    return Ok(json_error(
+                                        StatusCode::UNAUTHORIZED,
+                                        "not authenticated",
+                                    ));
+                                };
+                                let pg_pool = pool
+                                    .get_or_init(|| async {
+                                        sqlx::postgres::PgPoolOptions::new()
+                                            .max_connections(5)
+                                            .connect(&pool_config.database_url)
+                                            .await
+                                            .expect("player pool")
+                                    })
+                                    .await;
+                                let service = torrent_service
+                                    .get_or_init(|| async {
+                                        Arc::new(TorrentService::new(Arc::clone(&scheduler_handle)))
+                                    })
+                                    .await;
+                                match service.list(pg_pool, user.id).await {
+                                    Ok(items) => Json(items).into_response(),
+                                    Err(err) => {
+                                        Ok(json_error(StatusCode::BAD_REQUEST, &err.to_string()))
+                                    }
                                 }
                             }
-                        }
-                    })
+                        },
+                    )
                 },
                 "player_torrent_list",
             ),
@@ -6327,13 +6408,18 @@ impl App for PlayerApp {
                         let pool_config = Arc::clone(&pool_config);
                         let torrent_service = Arc::clone(&torrent_service);
                         let scheduler_handle = Arc::clone(&scheduler_handle);
-                        move |session: Session, db: Database, path: Path<PathStringId>| {
+                        move |auth_ctx: auth::AuthContext,
+                              session: Session,
+                              db: Database,
+                              path: Path<PathStringId>| {
                             let pool = Arc::clone(&pool);
                             let pool_config = Arc::clone(&pool_config);
                             let torrent_service = Arc::clone(&torrent_service);
                             let scheduler_handle = Arc::clone(&scheduler_handle);
                             async move {
-                                let Some(user) = auth::get_session_user(&session, &db).await else {
+                                let Some(user) =
+                                    auth::get_request_user(&auth_ctx, &session, &db).await
+                                else {
                                     return Ok(json_error(
                                         StatusCode::UNAUTHORIZED,
                                         "not authenticated",
@@ -6363,13 +6449,18 @@ impl App for PlayerApp {
                         }
                     })
                     .delete(
-                        move |session: Session, db: Database, path: Path<PathStringId>| {
+                        move |auth_ctx: auth::AuthContext,
+                              session: Session,
+                              db: Database,
+                              path: Path<PathStringId>| {
                             let pool = Arc::clone(&pool);
                             let pool_config = Arc::clone(&pool_config);
                             let torrent_service = Arc::clone(&torrent_service);
                             let scheduler_handle = Arc::clone(&scheduler_handle);
                             async move {
-                                let Some(user) = auth::get_session_user(&session, &db).await else {
+                                let Some(user) =
+                                    auth::get_request_user(&auth_ctx, &session, &db).await
+                                else {
                                     return Ok(json_error(
                                         StatusCode::UNAUTHORIZED,
                                         "not authenticated",
@@ -6411,13 +6502,18 @@ impl App for PlayerApp {
                     let torrent_service = Arc::clone(&torrent_service);
                     let scheduler_handle = Arc::clone(&self.scheduler_handle);
                     post(
-                        move |session: Session, db: Database, json: Json<TorrentPreviewRequest>| {
+                        move |auth_ctx: auth::AuthContext,
+                              session: Session,
+                              db: Database,
+                              json: Json<TorrentPreviewRequest>| {
                             let pool = Arc::clone(&pool);
                             let pool_config = Arc::clone(&pool_config);
                             let torrent_service = Arc::clone(&torrent_service);
                             let scheduler_handle = Arc::clone(&scheduler_handle);
                             async move {
-                                let Some(user) = auth::get_session_user(&session, &db).await else {
+                                let Some(user) =
+                                    auth::get_request_user(&auth_ctx, &session, &db).await
+                                else {
                                     return Ok(json_error(
                                         StatusCode::UNAUTHORIZED,
                                         "not authenticated",
@@ -6454,11 +6550,15 @@ impl App for PlayerApp {
                 {
                     let scheduler_handle = Arc::clone(&self.scheduler_handle);
                     post(
-                        move |session: Session, db: Database, request: cot::request::Request| {
+                        move |auth_ctx: auth::AuthContext,
+                              session: Session,
+                              db: Database,
+                              request: cot::request::Request| {
                             let scheduler_handle = Arc::clone(&scheduler_handle);
                             async move {
                                 let (live_config, _) = AppConfig::load_with_db(&db).await;
                                 local_upload_handler(
+                                    auth_ctx,
                                     session,
                                     db,
                                     live_config,
@@ -6477,7 +6577,10 @@ impl App for PlayerApp {
                 get({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database, query: UrlQuery<UserUploadsQuery>| {
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          query: UrlQuery<UserUploadsQuery>| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -6490,7 +6593,7 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            user_uploads_handler(session, db, pg_pool, query).await
+                            user_uploads_handler(auth_ctx, session, db, pg_pool, query).await
                         }
                     }
                 }),
@@ -6501,7 +6604,8 @@ impl App for PlayerApp {
                 post({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session,
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
                           db: Database,
                           path: Path<PathTrackId>,
                           json: Json<UserUploadTrackUpdateRequest>| {
@@ -6517,7 +6621,10 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            user_upload_track_update_handler(session, db, pg_pool, path, json).await
+                            user_upload_track_update_handler(
+                                auth_ctx, session, db, pg_pool, path, json,
+                            )
+                            .await
                         }
                     }
                 }),
@@ -6528,7 +6635,8 @@ impl App for PlayerApp {
                 post({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session,
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
                           db: Database,
                           json: Json<UserUploadBulkTrackUpdateRequest>| {
                         let pool = Arc::clone(&pool);
@@ -6543,7 +6651,10 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            user_upload_tracks_bulk_update_handler(session, db, pg_pool, json).await
+                            user_upload_tracks_bulk_update_handler(
+                                auth_ctx, session, db, pg_pool, json,
+                            )
+                            .await
                         }
                     }
                 }),
@@ -6554,7 +6665,8 @@ impl App for PlayerApp {
                 post({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session,
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
                           db: Database,
                           path: Path<PathId>,
                           json: Json<UserUploadReleaseUpdateRequest>| {
@@ -6570,8 +6682,10 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            user_upload_release_update_handler(session, db, pg_pool, path, json)
-                                .await
+                            user_upload_release_update_handler(
+                                auth_ctx, session, db, pg_pool, path, json,
+                            )
+                            .await
                         }
                     }
                 }),
@@ -6582,7 +6696,8 @@ impl App for PlayerApp {
                 post({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session,
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
                           db: Database,
                           path: Path<PathId>,
                           json: Json<UserUploadReviewUpdateRequest>| {
@@ -6598,7 +6713,10 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            user_upload_review_save_handler(session, db, pg_pool, path, json).await
+                            user_upload_review_save_handler(
+                                auth_ctx, session, db, pg_pool, path, json,
+                            )
+                            .await
                         }
                     }
                 }),
@@ -6609,7 +6727,10 @@ impl App for PlayerApp {
                 delete({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database, path: Path<PathId>| {
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          path: Path<PathId>| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -6622,7 +6743,8 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            user_upload_review_delete_handler(session, db, pg_pool, path).await
+                            user_upload_review_delete_handler(auth_ctx, session, db, pg_pool, path)
+                                .await
                         }
                     }
                 }),
@@ -6633,7 +6755,8 @@ impl App for PlayerApp {
                 post({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session,
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
                           db: Database,
                           path: Path<PathId>,
                           json: Json<UserUploadReviewUpdateRequest>| {
@@ -6649,8 +6772,10 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            user_upload_review_approve_handler(session, db, pg_pool, path, json)
-                                .await
+                            user_upload_review_approve_handler(
+                                auth_ctx, session, db, pg_pool, path, json,
+                            )
+                            .await
                         }
                     }
                 }),
@@ -6664,7 +6789,8 @@ impl App for PlayerApp {
                     let torrent_service = Arc::clone(&torrent_service);
                     let scheduler_handle = Arc::clone(&self.scheduler_handle);
                     post(
-                        move |session: Session,
+                        move |auth_ctx: auth::AuthContext,
+                              session: Session,
                               db: Database,
                               path: Path<PathStringId>,
                               json: Json<TorrentStartRequest>| {
@@ -6673,7 +6799,9 @@ impl App for PlayerApp {
                             let torrent_service = Arc::clone(&torrent_service);
                             let scheduler_handle = Arc::clone(&scheduler_handle);
                             async move {
-                                let Some(user) = auth::get_session_user(&session, &db).await else {
+                                let Some(user) =
+                                    auth::get_request_user(&auth_ctx, &session, &db).await
+                                else {
                                     return Ok(json_error(
                                         StatusCode::UNAUTHORIZED,
                                         "not authenticated",
@@ -6723,13 +6851,18 @@ impl App for PlayerApp {
                     let torrent_service = Arc::clone(&torrent_service);
                     let scheduler_handle = Arc::clone(&self.scheduler_handle);
                     post(
-                        move |session: Session, db: Database, path: Path<PathStringId>| {
+                        move |auth_ctx: auth::AuthContext,
+                              session: Session,
+                              db: Database,
+                              path: Path<PathStringId>| {
                             let pool = Arc::clone(&pool);
                             let pool_config = Arc::clone(&pool_config);
                             let torrent_service = Arc::clone(&torrent_service);
                             let scheduler_handle = Arc::clone(&scheduler_handle);
                             async move {
-                                let Some(user) = auth::get_session_user(&session, &db).await else {
+                                let Some(user) =
+                                    auth::get_request_user(&auth_ctx, &session, &db).await
+                                else {
                                     return Ok(json_error(
                                         StatusCode::UNAUTHORIZED,
                                         "not authenticated",
@@ -6769,13 +6902,18 @@ impl App for PlayerApp {
                     let torrent_service = Arc::clone(&torrent_service);
                     let scheduler_handle = Arc::clone(&self.scheduler_handle);
                     get(
-                        move |session: Session, db: Database, path: Path<PathStringId>| {
+                        move |auth_ctx: auth::AuthContext,
+                              session: Session,
+                              db: Database,
+                              path: Path<PathStringId>| {
                             let pool = Arc::clone(&pool);
                             let pool_config = Arc::clone(&pool_config);
                             let torrent_service = Arc::clone(&torrent_service);
                             let scheduler_handle = Arc::clone(&scheduler_handle);
                             async move {
-                                let Some(user) = auth::get_session_user(&session, &db).await else {
+                                let Some(user) =
+                                    auth::get_request_user(&auth_ctx, &session, &db).await
+                                else {
                                     return Ok(json_error(
                                         StatusCode::UNAUTHORIZED,
                                         "not authenticated",
@@ -6813,7 +6951,9 @@ impl App for PlayerApp {
                 {
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    get(move |session: Session, db: Database,
+                    get(move |auth_ctx: auth::AuthContext,
+                              session: Session,
+                              db: Database,
                               query: cot::request::extractors::UrlQuery<PaginationQuery>| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
@@ -6827,7 +6967,7 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            artists_handler(session, db, pg_pool, query).await
+                            artists_handler(auth_ctx, session, db, pg_pool, query).await
                         }
                     })
                 },
@@ -6839,57 +6979,11 @@ impl App for PlayerApp {
                 {
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    get(move |session: Session, db: Database, path: Path<PathId>| {
-                        let pool = Arc::clone(&pool);
-                        let pool_config = Arc::clone(&pool_config);
-                        async move {
-                            let pg_pool = pool
-                                .get_or_init(|| async {
-                                    sqlx::postgres::PgPoolOptions::new()
-                                        .max_connections(5)
-                                        .connect(&pool_config.database_url)
-                                        .await
-                                        .expect("player pool")
-                                })
-                                .await;
-                            artist_detail_handler(session, db, pg_pool, path).await
-                        }
-                    })
-                },
-                "player_artist_detail",
-            ),
-            // -- Release detail --
-            Route::with_handler_and_name(
-                "/releases/{id}",
-                {
-                    let pool = Arc::clone(&pool);
-                    let pool_config = Arc::clone(&pool_config);
-                    get(move |session: Session, db: Database, path: Path<PathId>| {
-                        let pool = Arc::clone(&pool);
-                        let pool_config = Arc::clone(&pool_config);
-                        async move {
-                            let pg_pool = pool
-                                .get_or_init(|| async {
-                                    sqlx::postgres::PgPoolOptions::new()
-                                        .max_connections(5)
-                                        .connect(&pool_config.database_url)
-                                        .await
-                                        .expect("player pool")
-                                })
-                                .await;
-                            release_detail_handler(session, db, pg_pool, path).await
-                        }
-                    })
-                },
-                "player_release_detail",
-            ),
-            Route::with_handler_and_name(
-                "/radio/{kind}/{id}",
-                {
-                    let pool = Arc::clone(&pool);
-                    let pool_config = Arc::clone(&pool_config);
                     get(
-                        move |session: Session, db: Database, path: Path<PathRadioSeed>| {
+                        move |auth_ctx: auth::AuthContext,
+                              session: Session,
+                              db: Database,
+                              path: Path<PathId>| {
                             let pool = Arc::clone(&pool);
                             let pool_config = Arc::clone(&pool_config);
                             async move {
@@ -6902,7 +6996,66 @@ impl App for PlayerApp {
                                             .expect("player pool")
                                     })
                                     .await;
-                                radio_handler(session, db, pg_pool, path).await
+                                artist_detail_handler(auth_ctx, session, db, pg_pool, path).await
+                            }
+                        },
+                    )
+                },
+                "player_artist_detail",
+            ),
+            // -- Release detail --
+            Route::with_handler_and_name(
+                "/releases/{id}",
+                {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    get(
+                        move |auth_ctx: auth::AuthContext,
+                              session: Session,
+                              db: Database,
+                              path: Path<PathId>| {
+                            let pool = Arc::clone(&pool);
+                            let pool_config = Arc::clone(&pool_config);
+                            async move {
+                                let pg_pool = pool
+                                    .get_or_init(|| async {
+                                        sqlx::postgres::PgPoolOptions::new()
+                                            .max_connections(5)
+                                            .connect(&pool_config.database_url)
+                                            .await
+                                            .expect("player pool")
+                                    })
+                                    .await;
+                                release_detail_handler(auth_ctx, session, db, pg_pool, path).await
+                            }
+                        },
+                    )
+                },
+                "player_release_detail",
+            ),
+            Route::with_handler_and_name(
+                "/radio/{kind}/{id}",
+                {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    get(
+                        move |auth_ctx: auth::AuthContext,
+                              session: Session,
+                              db: Database,
+                              path: Path<PathRadioSeed>| {
+                            let pool = Arc::clone(&pool);
+                            let pool_config = Arc::clone(&pool_config);
+                            async move {
+                                let pg_pool = pool
+                                    .get_or_init(|| async {
+                                        sqlx::postgres::PgPoolOptions::new()
+                                            .max_connections(5)
+                                            .connect(&pool_config.database_url)
+                                            .await
+                                            .expect("player pool")
+                                    })
+                                    .await;
+                                radio_handler(auth_ctx, session, db, pg_pool, path).await
                             }
                         },
                     )
@@ -6915,7 +7068,7 @@ impl App for PlayerApp {
                 get({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database| {
+                    move |auth_ctx: auth::AuthContext, session: Session, db: Database| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -6928,14 +7081,17 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            playlists_handler(session, db, pg_pool).await
+                            playlists_handler(auth_ctx, session, db, pg_pool).await
                         }
                     }
                 })
                 .post({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database, json: Json<CreatePlaylistRequest>| {
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          json: Json<CreatePlaylistRequest>| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -6948,7 +7104,7 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            create_playlist_handler(session, db, pg_pool, json).await
+                            create_playlist_handler(auth_ctx, session, db, pg_pool, json).await
                         }
                     }
                 }),
@@ -6960,7 +7116,10 @@ impl App for PlayerApp {
                 post({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database, json: Json<CreatePlaylistShareRequest>| {
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          json: Json<CreatePlaylistShareRequest>| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -6973,7 +7132,8 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            create_playlist_share_handler(session, db, pg_pool, json).await
+                            create_playlist_share_handler(auth_ctx, session, db, pg_pool, json)
+                                .await
                         }
                     }
                 }),
@@ -6984,7 +7144,10 @@ impl App for PlayerApp {
                 get({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database, path: Path<PathStringId>| {
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          path: Path<PathStringId>| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -6997,7 +7160,8 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            playlist_share_detail_handler(session, db, pg_pool, path).await
+                            playlist_share_detail_handler(auth_ctx, session, db, pg_pool, path)
+                                .await
                         }
                     }
                 }),
@@ -7009,7 +7173,10 @@ impl App for PlayerApp {
                 get({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database, path: Path<PathId>| {
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          path: Path<PathId>| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -7022,14 +7189,15 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            playlist_detail_handler(session, db, pg_pool, path).await
+                            playlist_detail_handler(auth_ctx, session, db, pg_pool, path).await
                         }
                     }
                 })
                 .put({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session,
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
                           db: Database,
                           path: Path<PathId>,
                           json: Json<UpdatePlaylistRequest>| {
@@ -7045,14 +7213,18 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            update_playlist_handler(session, db, pg_pool, path, json).await
+                            update_playlist_handler(auth_ctx, session, db, pg_pool, path, json)
+                                .await
                         }
                     }
                 })
                 .delete({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database, path: Path<PathId>| {
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          path: Path<PathId>| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -7065,7 +7237,7 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            delete_playlist_handler(session, db, pg_pool, path).await
+                            delete_playlist_handler(auth_ctx, session, db, pg_pool, path).await
                         }
                     }
                 }),
@@ -7077,7 +7249,8 @@ impl App for PlayerApp {
                 post({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session,
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
                           db: Database,
                           path: Path<PathId>,
                           json: Json<AddTracksRequest>| {
@@ -7093,14 +7266,18 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            add_tracks_to_playlist_handler(session, db, pg_pool, path, json).await
+                            add_tracks_to_playlist_handler(
+                                auth_ctx, session, db, pg_pool, path, json,
+                            )
+                            .await
                         }
                     }
                 })
                 .delete({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session,
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
                           db: Database,
                           path: Path<PathId>,
                           json: Json<RemoveTrackRequest>| {
@@ -7116,8 +7293,10 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            remove_track_from_playlist_handler(session, db, pg_pool, path, json)
-                                .await
+                            remove_track_from_playlist_handler(
+                                auth_ctx, session, db, pg_pool, path, json,
+                            )
+                            .await
                         }
                     }
                 }),
@@ -7129,7 +7308,7 @@ impl App for PlayerApp {
                 get({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database| {
+                    move |auth_ctx: auth::AuthContext, session: Session, db: Database| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -7142,7 +7321,7 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            liked_ids_handler(session, db, pg_pool).await
+                            liked_ids_handler(auth_ctx, session, db, pg_pool).await
                         }
                     }
                 }),
@@ -7154,7 +7333,10 @@ impl App for PlayerApp {
                 post({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database, path: Path<PathTrackId>| {
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          path: Path<PathTrackId>| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -7167,7 +7349,7 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            toggle_like_track_handler(session, db, pg_pool, path).await
+                            toggle_like_track_handler(auth_ctx, session, db, pg_pool, path).await
                         }
                     }
                 }),
@@ -7179,7 +7361,10 @@ impl App for PlayerApp {
                 post({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database, path: Path<PathId>| {
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          path: Path<PathId>| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -7192,7 +7377,7 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            like_release_handler(session, db, pg_pool, path).await
+                            like_release_handler(auth_ctx, session, db, pg_pool, path).await
                         }
                     }
                 }),
@@ -7204,7 +7389,7 @@ impl App for PlayerApp {
                 get({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database| {
+                    move |auth_ctx: auth::AuthContext, session: Session, db: Database| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -7217,7 +7402,7 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            followed_artists_handler(session, db, pg_pool).await
+                            followed_artists_handler(auth_ctx, session, db, pg_pool).await
                         }
                     }
                 }),
@@ -7229,7 +7414,10 @@ impl App for PlayerApp {
                 post({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database, path: Path<PathId>| {
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          path: Path<PathId>| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -7242,7 +7430,7 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            toggle_follow_artist_handler(session, db, pg_pool, path).await
+                            toggle_follow_artist_handler(auth_ctx, session, db, pg_pool, path).await
                         }
                     }
                 }),
@@ -7255,7 +7443,8 @@ impl App for PlayerApp {
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
                     get(
-                        move |session: Session,
+                        move |auth_ctx: auth::AuthContext,
+                              session: Session,
                               db: Database,
                               path: Path<PathTrackId>,
                               request: cot::request::Request| {
@@ -7272,8 +7461,16 @@ impl App for PlayerApp {
                                     })
                                     .await;
                                 let (live_config, _) = AppConfig::load_with_db(&db).await;
-                                stream_handler(session, db, pg_pool, &live_config, &request, path)
-                                    .await
+                                stream_handler(
+                                    auth_ctx,
+                                    session,
+                                    db,
+                                    pg_pool,
+                                    &live_config,
+                                    &request,
+                                    path,
+                                )
+                                .await
                             }
                         },
                     )
@@ -7287,7 +7484,10 @@ impl App for PlayerApp {
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
                     get(
-                        move |session: Session, db: Database, path: Path<PathMediaFileVariant>| {
+                        move |auth_ctx: auth::AuthContext,
+                              session: Session,
+                              db: Database,
+                              path: Path<PathMediaFileVariant>| {
                             let pool = Arc::clone(&pool);
                             let pool_config = Arc::clone(&pool_config);
                             async move {
@@ -7301,8 +7501,15 @@ impl App for PlayerApp {
                                     })
                                     .await;
                                 let (live_config, _) = AppConfig::load_with_db(&db).await;
-                                cover_variant_handler(session, db, pg_pool, &live_config, path)
-                                    .await
+                                cover_variant_handler(
+                                    auth_ctx,
+                                    session,
+                                    db,
+                                    pg_pool,
+                                    &live_config,
+                                    path,
+                                )
+                                .await
                             }
                         },
                     )
@@ -7315,7 +7522,10 @@ impl App for PlayerApp {
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
                     get(
-                        move |session: Session, db: Database, path: Path<PathMediaFileId>| {
+                        move |auth_ctx: auth::AuthContext,
+                              session: Session,
+                              db: Database,
+                              path: Path<PathMediaFileId>| {
                             let pool = Arc::clone(&pool);
                             let pool_config = Arc::clone(&pool_config);
                             async move {
@@ -7329,7 +7539,8 @@ impl App for PlayerApp {
                                     })
                                     .await;
                                 let (live_config, _) = AppConfig::load_with_db(&db).await;
-                                cover_handler(session, db, pg_pool, &live_config, path).await
+                                cover_handler(auth_ctx, session, db, pg_pool, &live_config, path)
+                                    .await
                             }
                         },
                     )
@@ -7341,9 +7552,14 @@ impl App for PlayerApp {
                 "/devices/heartbeat",
                 post({
                     let device_hub = Arc::clone(&device_hub);
-                    move |session: Session, db: Database, json: Json<DeviceHeartbeatRequest>| {
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          json: Json<DeviceHeartbeatRequest>| {
                         let device_hub = Arc::clone(&device_hub);
-                        async move { devices_heartbeat_handler(session, db, device_hub, json).await }
+                        async move {
+                            devices_heartbeat_handler(auth_ctx, session, db, device_hub, json).await
+                        }
                     }
                 }),
                 "player_devices_heartbeat",
@@ -7352,9 +7568,14 @@ impl App for PlayerApp {
                 "/devices/poll",
                 post({
                     let device_hub = Arc::clone(&device_hub);
-                    move |session: Session, db: Database, json: Json<DeviceHeartbeatRequest>| {
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          json: Json<DeviceHeartbeatRequest>| {
                         let device_hub = Arc::clone(&device_hub);
-                        async move { devices_poll_handler(session, db, device_hub, json).await }
+                        async move {
+                            devices_poll_handler(auth_ctx, session, db, device_hub, json).await
+                        }
                     }
                 }),
                 "player_devices_poll",
@@ -7363,9 +7584,14 @@ impl App for PlayerApp {
                 "/devices/active",
                 post({
                     let device_hub = Arc::clone(&device_hub);
-                    move |session: Session, db: Database, json: Json<DeviceSelectRequest>| {
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          json: Json<DeviceSelectRequest>| {
                         let device_hub = Arc::clone(&device_hub);
-                        async move { devices_select_handler(session, db, device_hub, json).await }
+                        async move {
+                            devices_select_handler(auth_ctx, session, db, device_hub, json).await
+                        }
                     }
                 }),
                 "player_devices_active",
@@ -7374,9 +7600,14 @@ impl App for PlayerApp {
                 "/devices/command",
                 post({
                     let device_hub = Arc::clone(&device_hub);
-                    move |session: Session, db: Database, json: Json<DeviceCommandRequest>| {
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          json: Json<DeviceCommandRequest>| {
                         let device_hub = Arc::clone(&device_hub);
-                        async move { devices_command_handler(session, db, device_hub, json).await }
+                        async move {
+                            devices_command_handler(auth_ctx, session, db, device_hub, json).await
+                        }
                     }
                 }),
                 "player_devices_command",
@@ -7386,7 +7617,10 @@ impl App for PlayerApp {
                 get({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database, query: UrlQuery<JamUserSearchQuery>| {
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          query: UrlQuery<JamUserSearchQuery>| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -7399,7 +7633,7 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            jam_users_search_handler(session, db, pg_pool, query).await
+                            jam_users_search_handler(auth_ctx, session, db, pg_pool, query).await
                         }
                     }
                 }),
@@ -7411,7 +7645,10 @@ impl App for PlayerApp {
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
                     let device_hub = Arc::clone(&device_hub);
-                    move |session: Session, db: Database, json: Json<PlayerJamCreateRequest>| {
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          json: Json<PlayerJamCreateRequest>| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         let device_hub = Arc::clone(&device_hub);
@@ -7425,7 +7662,8 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            jam_create_handler(session, db, pg_pool, device_hub, json).await
+                            jam_create_handler(auth_ctx, session, db, pg_pool, device_hub, json)
+                                .await
                         }
                     }
                 }),
@@ -7435,9 +7673,12 @@ impl App for PlayerApp {
                 "/jams/join",
                 post({
                     let device_hub = Arc::clone(&device_hub);
-                    move |session: Session, db: Database, json: Json<PlayerJamJoinRequest>| {
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          json: Json<PlayerJamJoinRequest>| {
                         let device_hub = Arc::clone(&device_hub);
-                        async move { jam_join_handler(session, db, device_hub, json).await }
+                        async move { jam_join_handler(auth_ctx, session, db, device_hub, json).await }
                     }
                 }),
                 "player_jams_join",
@@ -7448,7 +7689,10 @@ impl App for PlayerApp {
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
                     let device_hub = Arc::clone(&device_hub);
-                    move |session: Session, db: Database, json: Json<PlayerJamInviteRequest>| {
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          json: Json<PlayerJamInviteRequest>| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         let device_hub = Arc::clone(&device_hub);
@@ -7462,7 +7706,8 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            jam_invite_handler(session, db, pg_pool, device_hub, json).await
+                            jam_invite_handler(auth_ctx, session, db, pg_pool, device_hub, json)
+                                .await
                         }
                     }
                 }),
@@ -7472,9 +7717,12 @@ impl App for PlayerApp {
                 "/jams/leave",
                 post({
                     let device_hub = Arc::clone(&device_hub);
-                    move |session: Session, db: Database, json: Json<PlayerJamLeaveRequest>| {
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          json: Json<PlayerJamLeaveRequest>| {
                         let device_hub = Arc::clone(&device_hub);
-                        async move { jam_leave_handler(session, db, device_hub, json).await }
+                        async move { jam_leave_handler(auth_ctx, session, db, device_hub, json).await }
                     }
                 }),
                 "player_jams_leave",
@@ -7485,7 +7733,7 @@ impl App for PlayerApp {
                 get({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database| {
+                    move |auth_ctx: auth::AuthContext, session: Session, db: Database| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -7498,14 +7746,17 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            get_state_handler(session, db, pg_pool).await
+                            get_state_handler(auth_ctx, session, db, pg_pool).await
                         }
                     }
                 })
                 .put({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database, json: Json<PlaybackStateDto>| {
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          json: Json<PlaybackStateDto>| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -7518,7 +7769,7 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            put_state_handler(session, db, pg_pool, json).await
+                            put_state_handler(auth_ctx, session, db, pg_pool, json).await
                         }
                     }
                 })
@@ -7526,7 +7777,10 @@ impl App for PlayerApp {
                     // POST handler for sendBeacon (used on page unload)
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database, json: Json<PlaybackStateDto>| {
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          json: Json<PlaybackStateDto>| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -7539,7 +7793,7 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            put_state_handler(session, db, pg_pool, json).await
+                            put_state_handler(auth_ctx, session, db, pg_pool, json).await
                         }
                     }
                 }),
@@ -7551,7 +7805,8 @@ impl App for PlayerApp {
                 get({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session,
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
                           db: Database,
                           query: cot::request::extractors::UrlQuery<HistoryQuery>| {
                         let pool = Arc::clone(&pool);
@@ -7566,14 +7821,17 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            history_list_handler(session, db, pg_pool, query).await
+                            history_list_handler(auth_ctx, session, db, pg_pool, query).await
                         }
                     }
                 })
                 .post({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database, json: Json<HistoryEntry>| {
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          json: Json<HistoryEntry>| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -7586,7 +7844,7 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            history_handler(session, db, pg_pool, json).await
+                            history_handler(auth_ctx, session, db, pg_pool, json).await
                         }
                     }
                 }),
@@ -7598,7 +7856,9 @@ impl App for PlayerApp {
                 get({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database,
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
                           query: cot::request::extractors::UrlQuery<SearchQuery>| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
@@ -7612,7 +7872,7 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            search_handler(session, db, pg_pool, query).await
+                            search_handler(auth_ctx, session, db, pg_pool, query).await
                         }
                     }
                 }),
@@ -7624,7 +7884,10 @@ impl App for PlayerApp {
                 post({
                     let pool = Arc::clone(&pool);
                     let pool_config = Arc::clone(&pool_config);
-                    move |session: Session, db: Database, json: Json<TracksByIdsRequest>| {
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          json: Json<TracksByIdsRequest>| {
                         let pool = Arc::clone(&pool);
                         let pool_config = Arc::clone(&pool_config);
                         async move {
@@ -7637,7 +7900,7 @@ impl App for PlayerApp {
                                         .expect("player pool")
                                 })
                                 .await;
-                            tracks_by_ids_handler(session, db, pg_pool, json).await
+                            tracks_by_ids_handler(auth_ctx, session, db, pg_pool, json).await
                         }
                     }
                 }),
