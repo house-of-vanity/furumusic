@@ -959,42 +959,43 @@
                 </div>
             </div>
             <div class="queue-tracks">
-                <template x-if="$store.queue.tracks.length === 0">
+                <template x-if="$store.queue.displayItems().length === 0">
                     <div class="empty-state">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
                         <p>{{ t.player_queue_empty }}</p>
                     </div>
                 </template>
-                <template x-for="(track, idx) in $store.queue.tracks" :key="idx + '-' + track.id">
+                <template x-for="item in $store.queue.displayItems()" :key="item.key">
                     <div class="queue-track"
-                         :data-queue-index="idx"
-                         :class="{ active: idx === $store.queue.currentIndex, dragging: $store.queue._dragIdx === idx, 'foreign-jam-track': $store.queue.isForeignJamTrack(track) }"
-                         :style="$store.queue.isForeignJamTrack(track) ? $store.queue.contributorStyle(track) : ''"
-                         @click="$store.queue.playFromIndex(idx)"
-                         draggable="true"
-                         @dragstart="$store.queue._dragIdx = idx; $event.dataTransfer.effectAllowed = 'move'"
+                         :data-queue-index="item.index"
+                         :class="{ active: item.state === 'current', current: item.state === 'current', played: item.state === 'played', dragging: $store.queue._dragIdx === item.index, synthetic: item.synthetic, 'foreign-jam-track': $store.queue.isForeignJamTrack(item.track) }"
+                         :style="$store.queue.isForeignJamTrack(item.track) ? $store.queue.contributorStyle(item.track) : ''"
+                         @click="item.index >= 0 ? $store.queue.playFromIndex(item.index) : $store.player.play(item.track)"
+                         :draggable="!item.synthetic"
+                         @dragstart="if (item.synthetic) { $event.preventDefault(); } else { $store.queue._dragIdx = item.index; $event.dataTransfer.effectAllowed = 'move'; }"
                          @dragend="$store.queue._dragIdx = null; document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'))"
                          @dragover.prevent="$event.dataTransfer.dropEffect = 'move'; $event.currentTarget.classList.add('drag-over')"
                          @dragleave="$event.currentTarget.classList.remove('drag-over')"
-                         @drop.prevent="$event.currentTarget.classList.remove('drag-over'); if ($store.queue._dragIdx !== null) { $store.queue.moveTrack($store.queue._dragIdx, idx); $store.queue._dragIdx = null; }">
+                         @drop.prevent="$event.currentTarget.classList.remove('drag-over'); if (!item.synthetic && $store.queue._dragIdx !== null) { $store.queue.moveTrack($store.queue._dragIdx, item.index); $store.queue._dragIdx = null; }">
                         <div class="queue-drag-handle"
+                             x-show="!item.synthetic"
                              @mousedown.stop
                              @click.stop
-                             @pointerdown.stop="$store.queue.startPointerReorder($event, idx)">
+                             @pointerdown.stop="$store.queue.startPointerReorder($event, item.index)">
                             <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>
                         </div>
                         <div class="queue-track-cover">
-                            <template x-if="track.cover_url">
-                                <img :src="track.cover_url" :alt="track.title" loading="lazy">
+                            <template x-if="item.track.cover_url">
+                                <img :src="item.track.cover_url" :alt="item.track.title" loading="lazy">
                             </template>
-                            <template x-if="!track.cover_url">
+                            <template x-if="!item.track.cover_url">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
                             </template>
                         </div>
                         <div class="queue-track-info">
-                            <div class="queue-track-title" x-text="track.title"></div>
+                            <div class="queue-track-title" x-text="item.track.title"></div>
                             <div class="queue-track-artist">
-                                <template x-for="(artist, artistIdx) in $store.library.trackArtistLinks(track)" :key="artist.label + '-' + artist.id + '-' + artistIdx">
+                                <template x-for="(artist, artistIdx) in $store.library.trackArtistLinks(item.track)" :key="artist.label + '-' + artist.id + '-' + artistIdx">
                                     <span>
                                         <template x-if="artistIdx > 0"><span>, </span></template>
                                         <a class="artist-link" @click.stop="$store.library.openArtist(artist.id)" x-text="artist.label"></a>
@@ -1004,15 +1005,15 @@
                         </div>
                         <div class="queue-track-actions">
                             <button class="queue-track-remove info-btn popularity-info-btn"
-                                    :class="{ 'has-popularity': $store.library.hasPopularity(track), 'no-popularity': !$store.library.hasPopularity(track) }"
-                                    :style="$store.library.popularityStyle(track)"
-                                    @click.stop="$store.library.openTrackInfo(track)"
-                                    :title="$store.library.trackInfoTitle(track)"
+                                    :class="{ 'has-popularity': $store.library.hasPopularity(item.track), 'no-popularity': !$store.library.hasPopularity(item.track) }"
+                                    :style="$store.library.popularityStyle(item.track)"
+                                    @click.stop="$store.library.openTrackInfo(item.track)"
+                                    :title="$store.library.trackInfoTitle(item.track)"
                                     aria-label="{{ t.player_track_info }}">
-                                <span x-show="$store.library.hasPopularity(track)" x-text="$store.library.popularityLabel(track)"></span>
-                                <span x-show="!$store.library.hasPopularity(track)" class="info-letter">i</span>
+                                <span x-show="$store.library.hasPopularity(item.track)" x-text="$store.library.popularityLabel(item.track)"></span>
+                                <span x-show="!$store.library.hasPopularity(item.track)" class="info-letter">i</span>
                             </button>
-                            <button class="queue-track-remove" @click.stop="$store.queue.remove(idx)" title="{{ t.player_remove }}">
+                            <button class="queue-track-remove" x-show="!item.synthetic" @click.stop="$store.queue.remove(item.index)" title="{{ t.player_remove }}">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                             </button>
                         </div>
@@ -1292,27 +1293,27 @@
             </div>
             <div class="mobile-expanded-queue">
             <div class="mobile-expanded-queue-title">{{ t.player_queue }}</div>
-            <template x-if="$store.queue.upcoming().length === 0">
+            <template x-if="$store.queue.displayItems().length === 0">
                 <div class="mobile-expanded-queue-empty">{{ t.player_queue_empty }}</div>
             </template>
-            <template x-for="(track, idx) in $store.queue.upcoming()" :key="'mobile-expanded-queue-' + track.id + '-' + idx">
+            <template x-for="item in $store.queue.displayItems()" :key="'mobile-expanded-queue-' + item.key">
                 <button class="mobile-expanded-queue-row"
-                        :class="{ 'foreign-jam-track': $store.queue.isForeignJamTrack(track) }"
-                        :style="$store.queue.isForeignJamTrack(track) ? $store.queue.contributorStyle(track) : ''"
+                        :class="{ current: item.state === 'current', played: item.state === 'played', 'foreign-jam-track': $store.queue.isForeignJamTrack(item.track) }"
+                        :style="$store.queue.isForeignJamTrack(item.track) ? $store.queue.contributorStyle(item.track) : ''"
                         type="button"
-                        @click="$store.queue.playFromIndex($store.queue.currentIndex + idx + 1)">
+                        @click="item.index >= 0 ? $store.queue.playFromIndex(item.index) : $store.player.play(item.track)">
                     <div class="mobile-expanded-queue-cover">
-                        <template x-if="track.cover_url">
-                            <img :src="track.cover_url" :alt="track.title" loading="lazy">
+                        <template x-if="item.track.cover_url">
+                            <img :src="item.track.cover_url" :alt="item.track.title" loading="lazy">
                         </template>
-                        <template x-if="!track.cover_url">
+                        <template x-if="!item.track.cover_url">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
                         </template>
                     </div>
                     <div class="mobile-expanded-queue-info">
-                        <div class="mobile-expanded-queue-name" x-text="track.title"></div>
+                        <div class="mobile-expanded-queue-name" x-text="item.track.title"></div>
                         <div class="mobile-expanded-queue-artist">
-                            <template x-for="(artist, artistIdx) in $store.library.trackArtistLinks(track)" :key="artist.label + '-' + artist.id + '-' + artistIdx">
+                            <template x-for="(artist, artistIdx) in $store.library.trackArtistLinks(item.track)" :key="artist.label + '-' + artist.id + '-' + artistIdx">
                                 <span>
                                     <template x-if="artistIdx > 0"><span>, </span></template>
                                     <span x-text="artist.label"></span>
@@ -1320,7 +1321,7 @@
                             </template>
                         </div>
                     </div>
-                    <span class="mobile-expanded-queue-time" x-text="formatTime(track.duration_seconds)"></span>
+                    <span class="mobile-expanded-queue-time" x-text="formatTime(item.track.duration_seconds)"></span>
                 </button>
             </template>
             </div>

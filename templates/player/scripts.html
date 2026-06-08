@@ -822,6 +822,7 @@ document.addEventListener('alpine:init', () => {
 
         _playLocal(track, options = {}) {
             this.currentTrack = track;
+            Alpine.store('queue')?.syncCurrentIndexToTrack(track);
             this._localSourceTrackId = track.id;
             this._historyRecorded = false;
             this._resetPlaybackTracking();
@@ -1138,6 +1139,7 @@ document.addEventListener('alpine:init', () => {
         _mirrorRemoteTrack(track, playing, positionSeconds = null) {
             if (!track) return;
             this.currentTrack = track;
+            Alpine.store('queue')?.syncCurrentIndexToTrack(track);
             this.isPlaying = !!playing;
             if (positionSeconds !== null) this.currentTime = Math.max(0, Number(positionSeconds || 0));
             this.duration = Number(track.duration_seconds || this.duration || 0);
@@ -1158,6 +1160,7 @@ document.addEventListener('alpine:init', () => {
             const track = state.track || queue?.tracks?.[queue.currentIndex] || null;
             if (track) {
                 this.currentTrack = track;
+                queue?.syncCurrentIndexToTrack(track);
             }
             this.shuffle = !!state.shuffle;
             this.repeatMode = state.repeat_mode || 'off';
@@ -1359,6 +1362,7 @@ document.addEventListener('alpine:init', () => {
                                     : tracks[idx];
                                 if (currentTrack) {
                                     this.currentTrack = currentTrack;
+                                    queue.syncCurrentIndexToTrack(currentTrack);
                                     this._localSourceTrackId = currentTrack.id;
                                     this._historyRecorded = false;
                                     this._resetPlaybackTracking();
@@ -1974,6 +1978,56 @@ document.addEventListener('alpine:init', () => {
         upcoming(limit = 12) {
             const start = Math.max(0, this.currentIndex + 1);
             return this.tracks.slice(start, start + limit);
+        },
+
+        effectiveCurrentIndex() {
+            const currentTrack = Alpine.store('player')?.currentTrack || null;
+            if (currentTrack?.id) {
+                return this.tracks.findIndex(track => Number(track?.id) === Number(currentTrack.id));
+            }
+            if (!this.tracks.length) return -1;
+            return Math.max(0, Math.min(Number(this.currentIndex || 0), this.tracks.length - 1));
+        },
+
+        queueItemState(index) {
+            const current = this.effectiveCurrentIndex();
+            if (current < 0) return 'upcoming';
+            if (index < current) return 'played';
+            if (index === current) return 'current';
+            return 'upcoming';
+        },
+
+        displayItems() {
+            const current = this.effectiveCurrentIndex();
+            const playerTrack = Alpine.store('player')?.currentTrack || null;
+            const items = this.tracks.map((track, index) => ({
+                track,
+                index,
+                key: `${index}-${track?.id || 'track'}`,
+                state: current >= 0
+                    ? (index < current ? 'played' : (index === current ? 'current' : 'upcoming'))
+                    : 'upcoming',
+                synthetic: false,
+            }));
+
+            if (playerTrack?.id && current < 0) {
+                items.unshift({
+                    track: playerTrack,
+                    index: -1,
+                    key: `current-${playerTrack.id}`,
+                    state: 'current',
+                    synthetic: true,
+                });
+            }
+
+            return items;
+        },
+
+        syncCurrentIndexToTrack(track) {
+            if (!track?.id || !this.tracks.length) return -1;
+            const index = this.tracks.findIndex(item => Number(item?.id) === Number(track.id));
+            if (index >= 0) this.currentIndex = index;
+            return index;
         },
 
         addToEnd(tracks) {
