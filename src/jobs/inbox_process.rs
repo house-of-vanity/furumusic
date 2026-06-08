@@ -494,7 +494,12 @@ async fn process_folder_batch(
         .await
         {
             Ok(Ok(results)) => {
-                crate::metrics::record_agent_rag("artist", "ok", rag_start.elapsed(), results.len());
+                crate::metrics::record_agent_rag(
+                    "artist",
+                    "ok",
+                    rag_start.elapsed(),
+                    results.len(),
+                );
                 for a in results {
                     if !all_similar_artists
                         .iter()
@@ -525,7 +530,12 @@ async fn process_folder_batch(
         .await
         {
             Ok(Ok(results)) => {
-                crate::metrics::record_agent_rag("release", "ok", rag_start.elapsed(), results.len());
+                crate::metrics::record_agent_rag(
+                    "release",
+                    "ok",
+                    rag_start.elapsed(),
+                    results.len(),
+                );
                 for r in results {
                     if !all_similar_releases
                         .iter()

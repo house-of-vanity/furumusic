@@ -96,17 +96,11 @@ fn generate_missing_variants_sync(
             image::ExtendedColorType::Rgb8,
         );
         match result {
-            Ok(()) => crate::metrics::record_agent_cover_variant(
-                variant.name,
-                "ok",
-                start.elapsed(),
-            ),
+            Ok(()) => {
+                crate::metrics::record_agent_cover_variant(variant.name, "ok", start.elapsed())
+            }
             Err(err) => {
-                crate::metrics::record_agent_cover_variant(
-                    variant.name,
-                    "error",
-                    start.elapsed(),
-                );
+                crate::metrics::record_agent_cover_variant(variant.name, "error", start.elapsed());
                 return Err(err.into());
             }
         }

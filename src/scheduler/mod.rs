@@ -1372,6 +1372,7 @@ async fn run_scheduled_job(
     if !live_config.agent_enabled
         && job_name != "lastfm_popularity"
         && job_name != "lastfm_scrobble"
+        && job_name != "archive_cleanup"
         && job_name != "artwork_backfill"
     {
         tracing::warn!(job = job_name, "Skipping: agent_enabled=false");

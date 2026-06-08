@@ -128,7 +128,11 @@ impl Job for InboxDiscoverJob {
                             v
                         }
                         Err(e) => {
-                            crate::metrics::record_agent_file_hash(hash_start.elapsed(), 0, "error");
+                            crate::metrics::record_agent_file_hash(
+                                hash_start.elapsed(),
+                                0,
+                                "error",
+                            );
                             log.warn(&format!("Failed to hash {}: {e}", file_path.display()));
                             continue;
                         }

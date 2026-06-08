@@ -1,3 +1,4 @@
+pub mod archive_cleanup;
 pub mod artwork_backfill;
 pub mod inbox_discover;
 pub mod inbox_process;

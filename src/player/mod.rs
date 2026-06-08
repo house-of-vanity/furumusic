@@ -804,6 +804,10 @@ fn normalize_device_id(raw: &str) -> Option<String> {
 }
 
 fn device_name_from_user_agent(user_agent: Option<&str>) -> String {
+    if let Some(name) = native_device_name_from_user_agent(user_agent) {
+        return name;
+    }
+
     let ua = user_agent.unwrap_or_default().to_ascii_lowercase();
     let browser = if ua.contains("edg/") || ua.contains("edgios/") || ua.contains("edga/") {
         "Edge"
@@ -838,14 +842,80 @@ fn device_name_from_user_agent(user_agent: Option<&str>) -> String {
     format!("{browser} on {os}")
 }
 
+fn native_device_name_from_user_agent(user_agent: Option<&str>) -> Option<String> {
+    let raw = user_agent?.trim();
+    for token in raw.split_ascii_whitespace() {
+        let Some((product, version)) = token.split_once('/') else {
+            continue;
+        };
+        if !product.eq_ignore_ascii_case("FurumiAndroid") {
+            continue;
+        }
+
+        let version = sanitize_user_agent_version(version);
+        return Some(match version.as_deref() {
+            Some(version) => format!("Furumi Android {version}"),
+            None => "Furumi Android".to_string(),
+        });
+    }
+    None
+}
+
+fn sanitize_user_agent_version(version: &str) -> Option<String> {
+    let version = version
+        .chars()
+        .take(32)
+        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_'))
+        .collect::<String>();
+    if version.is_empty() {
+        None
+    } else {
+        Some(version)
+    }
+}
+
 fn device_kind_from_user_agent(user_agent: Option<&str>) -> &'static str {
     let ua = user_agent.unwrap_or_default().to_ascii_lowercase();
+    if ua.contains("furumiandroid/") {
+        return if ua.contains("tablet") || (ua.contains("android") && !ua.contains("mobile")) {
+            "tablet"
+        } else {
+            "phone"
+        };
+    }
     if ua.contains("iphone") || (ua.contains("android") && ua.contains("mobile")) {
         "phone"
     } else if ua.contains("ipad") || ua.contains("tablet") || ua.contains("android") {
         "tablet"
     } else {
         "computer"
+    }
+}
+
+#[cfg(test)]
+mod device_tests {
+    use super::*;
+
+    #[test]
+    fn detects_furumi_android_native_client() {
+        let user_agent = Some("FurumiAndroid/1.0 Android Mobile");
+
+        assert_eq!(
+            device_name_from_user_agent(user_agent),
+            "Furumi Android 1.0"
+        );
+        assert_eq!(device_kind_from_user_agent(user_agent), "phone");
+    }
+
+    #[test]
+    fn keeps_browser_fallback_for_generic_android_user_agents() {
+        let user_agent = Some("Mozilla/5.0 Android Mobile");
+
+        assert_eq!(
+            device_name_from_user_agent(user_agent),
+            "Browser on Android"
+        );
+        assert_eq!(device_kind_from_user_agent(user_agent), "phone");
     }
 }
 
