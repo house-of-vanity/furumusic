@@ -848,15 +848,19 @@ fn native_device_name_from_user_agent(user_agent: Option<&str>) -> Option<String
         let Some((product, version)) = token.split_once('/') else {
             continue;
         };
-        if !product.eq_ignore_ascii_case("FurumiAndroid") {
-            continue;
-        }
-
         let version = sanitize_user_agent_version(version);
-        return Some(match version.as_deref() {
-            Some(version) => format!("Furumi Android {version}"),
-            None => "Furumi Android".to_string(),
-        });
+        if product.eq_ignore_ascii_case("FurumiAndroid") {
+            return Some(match version.as_deref() {
+                Some(v) => format!("Furumi Android {v}"),
+                None => "Furumi Android".to_string(),
+            });
+        }
+        if product.eq_ignore_ascii_case("FurumiMacOS") {
+            return Some(match version.as_deref() {
+                Some(v) => format!("Furumi MacOS {v}"),
+                None => "Furumi MacOS".to_string(),
+            });
+        }
     }
     None
 }
@@ -882,6 +886,9 @@ fn device_kind_from_user_agent(user_agent: Option<&str>) -> &'static str {
         } else {
             "phone"
         };
+    }
+    if ua.contains("furumimac") {
+        return "computer";
     }
     if ua.contains("iphone") || (ua.contains("android") && ua.contains("mobile")) {
         "phone"

@@ -981,11 +981,151 @@ fn safe_mobile_redirect_uri(raw: Option<&str>) -> Option<String> {
 }
 
 fn mobile_redirect_success(app_redirect_uri: &str, code: &str) -> cot::response::Response {
-    auth::redirect(&append_query_param(app_redirect_uri, "code", code))
+    let deep_link = append_query_param(app_redirect_uri, "code", code);
+    mobile_deep_link_page(
+        "success",
+        "Sign-in complete",
+        "Furumi should open automatically. You can close this window after the app opens.",
+        None,
+        &deep_link,
+    )
 }
 
 fn mobile_redirect_error(app_redirect_uri: &str, error: &str) -> cot::response::Response {
-    auth::redirect(&append_query_param(app_redirect_uri, "error", error))
+    let deep_link = append_query_param(app_redirect_uri, "error", error);
+    mobile_deep_link_page(
+        "error",
+        "Sign-in failed",
+        "Furumi should open automatically and show the sign-in error. You can close this window after the app opens.",
+        Some(error),
+        &deep_link,
+    )
+}
+
+fn mobile_deep_link_page(
+    state: &str,
+    title: &str,
+    message: &str,
+    detail: Option<&str>,
+    deep_link: &str,
+) -> cot::response::Response {
+    let state_class = html_escape(state);
+    let title_html = html_escape(title);
+    let message_html = html_escape(message);
+    let detail_html = detail
+        .map(|value| format!(r#"<p class="detail">Reason: {}</p>"#, html_escape(value)))
+        .unwrap_or_default();
+    let deep_link_html = html_escape(deep_link);
+    let deep_link_js =
+        serde_json::to_string(deep_link).expect("serializing URL string cannot fail");
+
+    let html = format!(
+        r#"<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{title_html}</title>
+  <style>
+    :root {{
+      color-scheme: light dark;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #101114;
+      color: #f5f2ea;
+    }}
+    body {{
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      box-sizing: border-box;
+    }}
+    main {{
+      width: min(420px, 100%);
+      text-align: center;
+    }}
+    .mark {{
+      width: 54px;
+      height: 54px;
+      margin: 0 auto 18px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      font-size: 18px;
+      font-weight: 700;
+      background: #2f7d52;
+      color: white;
+    }}
+    .mark.error {{
+      background: #9d3d42;
+    }}
+    h1 {{
+      margin: 0 0 10px;
+      font-size: 26px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }}
+    p {{
+      margin: 0;
+      color: #c9c2b7;
+      font-size: 15px;
+      line-height: 1.55;
+    }}
+    .detail {{
+      margin-top: 12px;
+      color: #f1b3b7;
+      overflow-wrap: anywhere;
+    }}
+    a {{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 44px;
+      margin-top: 24px;
+      padding: 0 18px;
+      border-radius: 8px;
+      background: #e8d8a8;
+      color: #17150f;
+      font-weight: 700;
+      text-decoration: none;
+    }}
+    .hint {{
+      margin-top: 14px;
+      font-size: 13px;
+      color: #89847c;
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <div class="mark {state_class}" aria-hidden="true">{mark}</div>
+    <h1>{title_html}</h1>
+    <p>{message_html}</p>
+    {detail_html}
+    <a href="{deep_link_html}">Open Furumi</a>
+    <p class="hint">If nothing happens, use the button above.</p>
+  </main>
+  <script>
+    const deepLink = {deep_link_js};
+    window.setTimeout(() => {{
+      window.location.href = deepLink;
+    }}, 100);
+    window.setTimeout(() => {{
+      window.close();
+    }}, 1800);
+  </script>
+</body>
+</html>"#,
+        mark = if state == "error" { "!" } else { "OK" }
+    );
+
+    cot::http::Response::builder()
+        .status(cot::http::StatusCode::OK)
+        .header(cot::http::header::CONTENT_TYPE, "text/html; charset=utf-8")
+        .header(cot::http::header::CACHE_CONTROL, "no-store")
+        .body(cot::Body::fixed(html))
+        .expect("valid response")
 }
 
 fn append_query_param(uri: &str, key: &str, value: &str) -> String {
@@ -995,6 +1135,21 @@ fn append_query_param(uri: &str, key: &str, value: &str) -> String {
     if !fragment.is_empty() {
         out.push('#');
         out.push_str(fragment);
+    }
+    out
+}
+
+fn html_escape(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(ch),
+        }
     }
     out
 }
@@ -1037,4 +1192,42 @@ fn urlencoded(s: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mobile_oidc_append_query_param_preserves_fragment() {
+        assert_eq!(
+            append_query_param("furumi://auth/callback#done", "code", "a b"),
+            "furumi://auth/callback?code=a%20b#done"
+        );
+        assert_eq!(
+            append_query_param("furumi://auth/callback?desktop=1", "error", "oidc_error"),
+            "furumi://auth/callback?desktop=1&error=oidc_error"
+        );
+    }
+
+    #[test]
+    fn mobile_oidc_html_escape_escapes_page_values() {
+        assert_eq!(
+            html_escape(r#"<tag attr="x&y">'text'</tag>"#),
+            "&lt;tag attr=&quot;x&amp;y&quot;&gt;&#39;text&#39;&lt;/tag&gt;"
+        );
+    }
+
+    #[test]
+    fn mobile_oidc_redirect_uri_allows_only_furumi_schemes() {
+        assert_eq!(
+            safe_mobile_redirect_uri(Some("furumi://auth/callback")).as_deref(),
+            Some("furumi://auth/callback")
+        );
+        assert_eq!(
+            safe_mobile_redirect_uri(Some("furumusic://auth/callback")).as_deref(),
+            Some("furumusic://auth/callback")
+        );
+        assert!(safe_mobile_redirect_uri(Some("https://example.com/callback")).is_none());
+    }
 }
