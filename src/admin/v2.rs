@@ -110,12 +110,28 @@ pub(super) struct UpdateLibraryItemRequest {
     #[serde(default, deserialize_with = "deserialize_optional_stringish")]
     disc_number: Option<String>,
     artist_ids: Option<Vec<i64>>,
+    release_tracks: Option<Vec<ReleaseTrackUpdateRequest>>,
 }
 
 #[derive(Debug, Deserialize)]
 pub(super) struct LibraryItemDetailQuery {
     kind: String,
     id: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct TrackSearchQuery {
+    search: Option<String>,
+    limit: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReleaseTrackUpdateRequest {
+    id: i64,
+    #[serde(default, deserialize_with = "deserialize_optional_stringish")]
+    track_number: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_stringish")]
+    disc_number: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -538,6 +554,7 @@ struct LibraryItemDetailDto {
     selected_artist_ids: Vec<i64>,
     artists: Vec<ArtistOptionDto>,
     releases: Vec<ReleaseOptionDto>,
+    release_tracks: Vec<ReleaseTrackDto>,
     available_covers: Vec<AvailableCoverDto>,
     metadata_tags: Vec<MetadataTagDto>,
 }
@@ -553,6 +570,19 @@ struct ReleaseOptionDto {
     id: i64,
     title: String,
     subtitle: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct ReleaseTrackDto {
+    id: i64,
+    title: String,
+    artists: String,
+    release_id: Option<i64>,
+    release_title: Option<String>,
+    track_number: Option<i32>,
+    disc_number: Option<i32>,
+    duration_seconds: f64,
+    is_hidden: bool,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -649,6 +679,19 @@ struct LibraryItemRow {
     secondary_count: i64,
     tertiary_count: i64,
     updated_at: Option<String>,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct ReleaseTrackRow {
+    id: i64,
+    title: String,
+    artists: String,
+    release_id: Option<i64>,
+    release_title: Option<String>,
+    track_number: Option<i32>,
+    disc_number: Option<i32>,
+    duration_seconds: f64,
+    is_hidden: bool,
 }
 
 pub async fn page(admin: AuthenticatedUser, i18n: I18n) -> cot::Result<Html> {
@@ -1289,6 +1332,21 @@ pub async fn library_item_detail(
         return Ok(response);
     }
     let kind = normalize_library_kind(Some(query.kind.as_str()));
+    if kind == "releases" && query.id == 0 {
+        let item = LibraryItemDto {
+            id: 0,
+            kind: kind.clone(),
+            title: String::new(),
+            subtitle: String::new(),
+            is_hidden: Some(false),
+            tags: Vec::new(),
+            updated_at: None,
+        };
+        let detail = load_library_item_detail(pool, &kind, item)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
+        return Json(detail).into_response();
+    }
     let Some(item) = fetch_library_item(pool, &kind, query.id)
         .await
         .map_err(|e| cot::Error::internal(e.to_string()))?
@@ -1299,6 +1357,25 @@ pub async fn library_item_detail(
         .await
         .map_err(|e| cot::Error::internal(e.to_string()))?;
     Json(detail).into_response()
+}
+
+pub async fn track_search(
+    session: Session,
+    db: Database,
+    pool: &PgPool,
+    query: TrackSearchQuery,
+) -> cot::Result<cot::response::Response> {
+    if let Err(response) = require_admin_json(&session, &db).await {
+        return Ok(response);
+    }
+
+    let Some(search) = clean_search(query.search.as_deref()) else {
+        return Json(Vec::<ReleaseTrackDto>::new()).into_response();
+    };
+    let tracks = search_tracks(pool, &search, query.limit.unwrap_or(16).clamp(1, 40))
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    Json(tracks).into_response()
 }
 
 pub async fn update_library_item(
@@ -1318,6 +1395,19 @@ pub async fn update_library_item(
     }
 
     let now = now_string();
+    if kind == "releases" && body.id == 0 {
+        let release_id = create_release_library_item(pool, &body, title, &now)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
+        let Some(item) = fetch_library_item(pool, &kind, release_id)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?
+        else {
+            return Ok(json_error(StatusCode::NOT_FOUND, "library item not found"));
+        };
+        return Json(item).into_response();
+    }
+
     let affected = match kind.as_str() {
         "artists" => {
             sqlx::query(
@@ -1421,22 +1511,9 @@ pub async fn update_library_item(
             let mut seen_artist_ids = HashSet::new();
             artist_ids.retain(|id| *id > 0 && seen_artist_ids.insert(*id));
             if kind == "releases" {
-                sqlx::query("DELETE FROM furumusic__release_artist WHERE release_id = $1")
-                    .bind(body.id)
-                    .execute(pool)
+                set_release_artists(pool, body.id, &artist_ids)
                     .await
                     .map_err(|e| cot::Error::internal(e.to_string()))?;
-                for (position, artist_id) in artist_ids.iter().enumerate() {
-                    sqlx::query(
-                        "INSERT INTO furumusic__release_artist (release_id, artist_id, position) VALUES ($1, $2, $3)",
-                    )
-                    .bind(body.id)
-                    .bind(*artist_id)
-                    .bind(position as i32)
-                    .execute(pool)
-                    .await
-                    .map_err(|e| cot::Error::internal(e.to_string()))?;
-                }
             } else {
                 sqlx::query(
                     "DELETE FROM furumusic__track_artist WHERE track_id = $1 AND role = 'main'",
@@ -1457,6 +1534,14 @@ pub async fn update_library_item(
                     .map_err(|e| cot::Error::internal(e.to_string()))?;
                 }
             }
+        }
+    }
+
+    if kind == "releases" {
+        if let Some(release_tracks) = body.release_tracks.as_deref() {
+            update_release_tracks(pool, body.id, release_tracks, &now)
+                .await
+                .map_err(|e| cot::Error::internal(e.to_string()))?;
         }
     }
 
@@ -2647,13 +2732,13 @@ async fn fetch_library_item(
         "tracks" => {
             sqlx::query_as::<_, LibraryItemRow>(
                 "SELECT t.id, t.title::text AS title, \
-                        CONCAT(r.title::text, COALESCE(' / #' || t.track_number::text, '')) AS subtitle, \
+                        CONCAT(COALESCE(r.title::text, 'No release'), COALESCE(' / #' || t.track_number::text, '')) AS subtitle, \
                         t.is_hidden, COUNT(DISTINCT ta.artist_id)::bigint AS primary_count, \
                         COUNT(DISTINCT ph.id)::bigint AS secondary_count, \
                         COUNT(DISTINCT pt.playlist_id)::bigint AS tertiary_count, \
                         t.updated_at::text AS updated_at \
                  FROM furumusic__track t \
-                 JOIN furumusic__release r ON r.id = t.release_id \
+                 LEFT JOIN furumusic__release r ON r.id = t.release_id \
                  LEFT JOIN furumusic__track_artist ta ON ta.track_id = t.id \
                  LEFT JOIN furumusic__play_history ph ON ph.track_id = t.id \
                  LEFT JOIN furumusic__playlist_track pt ON pt.track_id = t.id \
@@ -2704,6 +2789,7 @@ async fn load_library_item_detail(
         selected_artist_ids: Vec::new(),
         artists: Vec::new(),
         releases: Vec::new(),
+        release_tracks: Vec::new(),
         available_covers: Vec::new(),
         metadata_tags: load_metadata_tags(pool, kind, item.id).await?,
         item,
@@ -2744,16 +2830,22 @@ async fn load_library_item_detail(
             .map(|row| row.id)
             .collect();
             detail.artists = load_artist_options(pool).await?;
+            if detail.item.id > 0 {
+                detail.release_tracks = load_release_tracks(pool, detail.item.id).await?;
+            }
         }
         "tracks" => {
-            let row: Option<(i64, Option<i32>, Option<i32>, Option<i32>)> = sqlx::query_as(
-                "SELECT release_id, track_number, disc_number, year FROM furumusic__track WHERE id = $1",
+            let row: Option<(Option<i64>, Option<i32>, Option<i32>, Option<i32>)> = sqlx::query_as(
+                "SELECT r.id AS release_id, t.track_number, t.disc_number, t.year \
+                 FROM furumusic__track t \
+                 LEFT JOIN furumusic__release r ON r.id = t.release_id \
+                 WHERE t.id = $1",
             )
             .bind(detail.item.id)
             .fetch_optional(pool)
             .await?;
             if let Some((release_id, track_number, disc_number, year)) = row {
-                detail.release_id = Some(release_id);
+                detail.release_id = release_id;
                 detail.track_number = track_number;
                 detail.disc_number = disc_number;
                 detail.year = year;
@@ -2901,6 +2993,210 @@ async fn load_release_options(pool: &PgPool) -> anyhow::Result<Vec<ReleaseOption
         .collect())
 }
 
+async fn create_release_library_item(
+    pool: &PgPool,
+    body: &UpdateLibraryItemRequest,
+    title: &str,
+    now: &str,
+) -> anyhow::Result<i64> {
+    let release_type = body
+        .release_type
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("album");
+    let year = body
+        .year
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .and_then(|value| value.parse::<i32>().ok());
+    let release_id: i64 = sqlx::query_scalar(
+        "INSERT INTO furumusic__release \
+           (title, title_sort, release_type, year, cover_file_id, total_tracks, total_discs, is_hidden, model_name, created_at, updated_at) \
+         VALUES ($1, $2, $3, $4, NULL, NULL, NULL, $5, NULL, $6, $6) \
+         RETURNING id",
+    )
+    .bind(title)
+    .bind(normalize_name(title))
+    .bind(release_type)
+    .bind(year)
+    .bind(body.hidden)
+    .bind(now)
+    .fetch_one(pool)
+    .await?;
+
+    if let Some(artist_ids) = body.artist_ids.as_deref() {
+        set_release_artists(pool, release_id, artist_ids).await?;
+    }
+    if let Some(release_tracks) = body.release_tracks.as_deref() {
+        update_release_tracks(pool, release_id, release_tracks, now).await?;
+    }
+
+    Ok(release_id)
+}
+
+async fn set_release_artists(
+    pool: &PgPool,
+    release_id: i64,
+    artist_ids: &[i64],
+) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM furumusic__release_artist WHERE release_id = $1")
+        .bind(release_id)
+        .execute(pool)
+        .await?;
+
+    let mut seen_artist_ids = HashSet::new();
+    let unique_artist_ids = artist_ids
+        .iter()
+        .copied()
+        .filter(|id| *id > 0 && seen_artist_ids.insert(*id))
+        .collect::<Vec<_>>();
+
+    for (position, artist_id) in unique_artist_ids.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO furumusic__release_artist (release_id, artist_id, position) VALUES ($1, $2, $3)",
+        )
+        .bind(release_id)
+        .bind(*artist_id)
+        .bind(position as i32)
+        .execute(pool)
+        .await?;
+    }
+
+    Ok(())
+}
+
+async fn load_release_tracks(
+    pool: &PgPool,
+    release_id: i64,
+) -> anyhow::Result<Vec<ReleaseTrackDto>> {
+    let rows = sqlx::query_as::<_, ReleaseTrackRow>(
+        "SELECT t.id, t.title::text AS title, \
+                COALESCE(NULLIF(STRING_AGG(DISTINCT a.name::text, ', '), ''), 'Unknown artist') AS artists, \
+                NULLIF(t.release_id, 0) AS release_id, r.title::text AS release_title, \
+                t.track_number, t.disc_number, t.duration_seconds, t.is_hidden \
+         FROM furumusic__track t \
+         LEFT JOIN furumusic__release r ON r.id = t.release_id \
+         LEFT JOIN furumusic__track_artist ta ON ta.track_id = t.id AND ta.role = 'main' \
+         LEFT JOIN furumusic__artist a ON a.id = ta.artist_id \
+         WHERE t.release_id = $1 \
+         GROUP BY t.id, r.id, r.title \
+         ORDER BY t.disc_number NULLS FIRST, t.track_number NULLS LAST, t.title ASC, t.id ASC",
+    )
+    .bind(release_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(release_track_dto).collect())
+}
+
+async fn search_tracks(
+    pool: &PgPool,
+    search: &str,
+    limit: i64,
+) -> anyhow::Result<Vec<ReleaseTrackDto>> {
+    let pattern = format!("%{search}%");
+    let starts_with = format!("{search}%");
+    let rows = sqlx::query_as::<_, ReleaseTrackRow>(
+        "SELECT t.id, t.title::text AS title, \
+                COALESCE(NULLIF(STRING_AGG(DISTINCT a.name::text, ', '), ''), 'Unknown artist') AS artists, \
+                NULLIF(t.release_id, 0) AS release_id, r.title::text AS release_title, \
+                t.track_number, t.disc_number, t.duration_seconds, t.is_hidden \
+         FROM furumusic__track t \
+         LEFT JOIN furumusic__release r ON r.id = t.release_id \
+         LEFT JOIN furumusic__track_artist ta ON ta.track_id = t.id AND ta.role = 'main' \
+         LEFT JOIN furumusic__artist a ON a.id = ta.artist_id \
+         WHERE t.title ILIKE $1 OR COALESCE(r.title::text, '') ILIKE $1 OR COALESCE(a.name::text, '') ILIKE $1 \
+         GROUP BY t.id, r.id, r.title \
+         ORDER BY CASE \
+                    WHEN LOWER(t.title::text) = LOWER($2) THEN 0 \
+                    WHEN t.title ILIKE $3 THEN 1 \
+                    ELSE 2 \
+                  END, \
+                  t.title_sort ASC, t.id ASC \
+         LIMIT $4",
+    )
+    .bind(pattern)
+    .bind(search)
+    .bind(starts_with)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(release_track_dto).collect())
+}
+
+async fn update_release_tracks(
+    pool: &PgPool,
+    release_id: i64,
+    tracks: &[ReleaseTrackUpdateRequest],
+    now: &str,
+) -> anyhow::Result<()> {
+    let mut seen_ids = HashSet::new();
+    let selected = tracks
+        .iter()
+        .filter(|track| track.id > 0 && seen_ids.insert(track.id))
+        .collect::<Vec<_>>();
+    let selected_ids = selected.iter().map(|track| track.id).collect::<Vec<_>>();
+
+    let mut tx = pool.begin().await?;
+    if selected_ids.is_empty() {
+        sqlx::query(
+            "UPDATE furumusic__track \
+             SET release_id = 0, updated_at = $2 \
+             WHERE release_id = $1",
+        )
+        .bind(release_id)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?;
+    } else {
+        sqlx::query(
+            "UPDATE furumusic__track \
+             SET release_id = 0, updated_at = $2 \
+             WHERE release_id = $1 AND id <> ALL($3)",
+        )
+        .bind(release_id)
+        .bind(now)
+        .bind(&selected_ids)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    for track in selected {
+        let track_number = parse_optional_admin_i32(track.track_number.as_deref(), 1, 9999);
+        let disc_number = parse_optional_admin_i32(track.disc_number.as_deref(), 1, 999);
+        sqlx::query(
+            "UPDATE furumusic__track \
+             SET release_id = $1, track_number = $2, disc_number = $3, updated_at = $4 \
+             WHERE id = $5",
+        )
+        .bind(release_id)
+        .bind(track_number)
+        .bind(disc_number)
+        .bind(now)
+        .bind(track.id)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+    Ok(())
+}
+
+fn release_track_dto(row: ReleaseTrackRow) -> ReleaseTrackDto {
+    ReleaseTrackDto {
+        id: row.id,
+        title: row.title,
+        artists: row.artists,
+        release_id: row.release_id,
+        release_title: row.release_title,
+        track_number: row.track_number,
+        disc_number: row.disc_number,
+        duration_seconds: row.duration_seconds,
+        is_hidden: row.is_hidden,
+    }
+}
+
 async fn artist_available_covers(
     pool: &PgPool,
     artist_id: i64,
@@ -2943,7 +3239,7 @@ async fn library_ids_by_filter(
         "tracks" => QueryBuilder::<Postgres>::new(
             "SELECT DISTINCT t.id \
              FROM furumusic__track t \
-             JOIN furumusic__release r ON r.id = t.release_id \
+             LEFT JOIN furumusic__release r ON r.id = t.release_id \
              LEFT JOIN furumusic__track_artist ta ON ta.track_id = t.id \
              LEFT JOIN furumusic__artist a ON a.id = ta.artist_id WHERE 1=1",
         ),
@@ -3182,7 +3478,7 @@ async fn count_library(
         "tracks" => QueryBuilder::<Postgres>::new(
             "SELECT COUNT(DISTINCT t.id) AS count \
              FROM furumusic__track t \
-             JOIN furumusic__release r ON r.id = t.release_id \
+             LEFT JOIN furumusic__release r ON r.id = t.release_id \
              LEFT JOIN furumusic__track_artist ta ON ta.track_id = t.id \
              LEFT JOIN furumusic__artist a ON a.id = ta.artist_id WHERE 1=1",
         ),
@@ -3319,13 +3615,13 @@ async fn load_track_items(
 ) -> anyhow::Result<Vec<LibraryItemRow>> {
     let mut qb = QueryBuilder::<Postgres>::new(
         "SELECT t.id, t.title::text AS title, \
-                CONCAT(r.title::text, COALESCE(' / #' || t.track_number::text, '')) AS subtitle, \
+                CONCAT(COALESCE(r.title::text, 'No release'), COALESCE(' / #' || t.track_number::text, '')) AS subtitle, \
                 t.is_hidden, COUNT(DISTINCT ta.artist_id)::bigint AS primary_count, \
                 COUNT(DISTINCT ph.id)::bigint AS secondary_count, \
                 COUNT(DISTINCT pt.playlist_id)::bigint AS tertiary_count, \
                 t.updated_at::text AS updated_at \
          FROM furumusic__track t \
-         JOIN furumusic__release r ON r.id = t.release_id \
+         LEFT JOIN furumusic__release r ON r.id = t.release_id \
          LEFT JOIN furumusic__track_artist ta ON ta.track_id = t.id \
          LEFT JOIN furumusic__artist a ON a.id = ta.artist_id \
          LEFT JOIN furumusic__play_history ph ON ph.track_id = t.id \
@@ -3341,7 +3637,7 @@ async fn load_track_items(
         qb.push_bind(pattern);
         qb.push(")");
     }
-    qb.push(" GROUP BY t.id, r.title ORDER BY r.title ASC, t.disc_number NULLS FIRST, t.track_number NULLS FIRST, t.title ASC LIMIT ");
+    qb.push(" GROUP BY t.id, r.title ORDER BY COALESCE(r.title::text, '') ASC, t.disc_number NULLS FIRST, t.track_number NULLS FIRST, t.title ASC LIMIT ");
     qb.push_bind(limit);
     qb.push(" OFFSET ");
     qb.push_bind(offset);

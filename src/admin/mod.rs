@@ -556,6 +556,32 @@ impl App for AdminApp {
                 "admin_v2_library_item_detail",
             ),
             Route::with_handler_and_name(
+                "/v2/api/library/tracks/search",
+                {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    get(move |session: Session,
+                              db: Database,
+                              query: UrlQuery<v2::TrackSearchQuery>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("admin pool")
+                                })
+                                .await;
+                            v2::track_search(session, db, pg_pool, query.0).await
+                        }
+                    })
+                },
+                "admin_v2_library_tracks_search",
+            ),
+            Route::with_handler_and_name(
                 "/v2/api/library/item/image",
                 {
                     let pool = Arc::clone(&pool);

@@ -1193,6 +1193,77 @@ tbody tr:hover {
     gap: 12px;
 }
 
+.release-track-search-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.release-track-list {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-primary);
+    overflow: hidden;
+}
+
+.release-track-head,
+.release-track-row {
+    display: grid;
+    grid-template-columns: 72px 82px minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, .9fr) 70px 36px;
+    gap: 8px;
+    align-items: center;
+    padding: 8px;
+}
+
+.release-track-head {
+    min-height: 34px;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-subdued);
+    font-size: 10px;
+    font-weight: 850;
+    text-transform: uppercase;
+}
+
+.release-track-row {
+    min-height: 48px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.release-track-row:last-child {
+    border-bottom: 0;
+}
+
+.release-track-row:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.release-track-row input {
+    width: 100%;
+    height: 30px;
+    min-height: 30px;
+    padding: 0 8px;
+}
+
+.release-track-title,
+.release-track-meta {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.release-track-title {
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 750;
+}
+
+.release-track-meta {
+    color: var(--text-subdued);
+    font-size: 11px;
+}
+
 .image-actions {
     display: flex;
     align-items: center;
@@ -1836,6 +1907,10 @@ tbody tr:hover {
                                 <i data-lucide="square-pen"></i>
                                 Edit
                             </button>
+                            <button class="btn primary" x-show="libraryKind === 'releases'" @click="openReleaseCreator()">
+                                <i data-lucide="plus"></i>
+                                New release
+                            </button>
                             <button class="btn warn" @click="mockAction('Merge wizard will open from this action slot')">
                                 <i data-lucide="git-merge"></i>
                                 Merge
@@ -2419,8 +2494,8 @@ tbody tr:hover {
         <section class="modal">
             <div class="modal-head">
                 <div class="panel-title">
-                    <strong x-text="activeLibraryItem?.title || 'Editor'"></strong>
-                    <span x-text="activeLibraryItem?.kind || 'Library entity'"></span>
+                    <strong x-text="editorTitle()"></strong>
+                    <span x-text="editorSubtitle()"></span>
                 </div>
                 <button class="icon-btn" @click="editorOpen = false">
                     <i data-lucide="x"></i>
@@ -2452,6 +2527,54 @@ tbody tr:hover {
                             <label>Year</label>
                             <input type="number" min="0" max="3000" x-model="editorDraft.year" />
                         </div>
+                    </div>
+
+                    <div class="field" x-show="isReleaseEditor()">
+                        <label>Release tracks</label>
+                        <div class="release-track-search-row">
+                            <div class="artist-picker">
+                                <input class="search" placeholder="Search track" x-model="releaseTrackSearch" @input.debounce.300ms="searchReleaseTracks()" @keydown.enter.prevent="addBestReleaseTrack()" @keydown.escape="clearReleaseTrackSearch()" />
+                                <div class="artist-results" x-show="releaseTrackSearchOpen()" x-transition>
+                                    <template x-for="track in availableReleaseTrackResults()" :key="track.id">
+                                        <button class="artist-result" type="button" @click="addReleaseTrack(track)">
+                                            <span x-text="track.title"></span>
+                                            <small x-text="releaseTrackSearchMeta(track)"></small>
+                                        </button>
+                                    </template>
+                                    <div class="artist-result muted" x-show="releaseTrackSearchLoading">Searching...</div>
+                                    <div class="artist-result muted" x-show="!releaseTrackSearchLoading && availableReleaseTrackResults().length === 0">No matching tracks</div>
+                                </div>
+                            </div>
+                            <button class="btn" type="button" @click="addBestReleaseTrack()" :disabled="!releaseTrackSearch.trim()">
+                                <i data-lucide="plus"></i>
+                                Add
+                            </button>
+                        </div>
+                        <div class="release-track-list" x-show="releaseTracks().length">
+                            <div class="release-track-head">
+                                <span>Disc</span>
+                                <span>Track #</span>
+                                <span>Title</span>
+                                <span>Artists</span>
+                                <span>Current release</span>
+                                <span>Time</span>
+                                <span></span>
+                            </div>
+                            <template x-for="track in releaseTracks()" :key="track.id">
+                                <div class="release-track-row">
+                                    <input type="number" min="1" max="999" x-model="track.disc_number" />
+                                    <input type="number" min="1" max="9999" x-model="track.track_number" />
+                                    <div class="release-track-title" x-text="track.title"></div>
+                                    <div class="release-track-meta" x-text="track.artists || 'Unknown artist'"></div>
+                                    <div class="release-track-meta" x-text="releaseTrackOrigin(track)"></div>
+                                    <div class="release-track-meta" x-text="trackDuration(track.duration_seconds)"></div>
+                                    <button class="icon-btn" type="button" @click="removeReleaseTrack(track.id)" title="Remove from release">
+                                        <i data-lucide="x"></i>
+                                    </button>
+                                </div>
+                            </template>
+                        </div>
+                        <div class="empty" x-show="!releaseTracks().length">No tracks attached</div>
                     </div>
 
                     <div class="editor-grid" x-show="isTrackEditor()">
@@ -2585,9 +2708,9 @@ tbody tr:hover {
                     <div class="toolbar">
                         <button class="btn primary" @click="saveLibraryItem()" :disabled="!editorCanSave()">
                             <i :data-lucide="editorSaving ? 'loader-circle' : 'save'"></i>
-                            <span x-text="editorSaving ? 'Saving...' : 'Save'"></span>
+                            <span x-text="editorSaving ? 'Saving...' : (editorIsNewRelease() ? 'Create' : 'Save')"></span>
                         </button>
-                        <button class="btn danger" @click="deleteLibraryItem(activeLibraryItem)" :disabled="editorSaving || editorImageUploading">
+                        <button class="btn danger" x-show="!editorIsNewRelease()" @click="deleteLibraryItem(activeLibraryItem)" :disabled="editorSaving || editorImageUploading">
                             <i data-lucide="trash-2"></i>
                             Delete
                         </button>
@@ -2682,8 +2805,12 @@ function adminV2() {
         editorImageFile: null,
         editorArtistToAdd: '',
         editorReleaseToAdd: '',
+        releaseTrackSearch: '',
+        releaseTrackSearchResults: [],
+        releaseTrackSearchLoading: false,
+        releaseTrackSearchToken: 0,
         editorDetail: null,
-        editorDraft: { title: '', hidden: 'false', release_type: 'album', year: '', release_id: null, track_number: '', disc_number: '', artist_ids: [] },
+        editorDraft: { title: '', hidden: 'false', release_type: 'album', year: '', release_id: null, track_number: '', disc_number: '', artist_ids: [], release_tracks: [] },
         settings: { values: {}, sources: {}, lastfm_api_key_configured: false, lastfm_shared_secret_configured: false, lastfm_scrobbling_configured: false },
         settingsDraft: {
             auth_password_enabled: false,
@@ -3396,14 +3523,28 @@ function adminV2() {
                 release_id: null,
                 track_number: '',
                 disc_number: '',
-                artist_ids: []
+                artist_ids: [],
+                release_tracks: []
             };
             this.editorDetail = null;
             this.editorImageFile = null;
             this.editorArtistToAdd = '';
             this.editorReleaseToAdd = '';
+            this.clearReleaseTrackSearch();
             this.editorOpen = true;
             this.loadEditorDetail(item);
+        },
+
+        openReleaseCreator() {
+            this.libraryKind = 'releases';
+            this.openEditor({
+                id: 0,
+                kind: 'releases',
+                title: '',
+                subtitle: 'New release',
+                is_hidden: false,
+                tags: []
+            });
         },
 
         async loadEditorDetail(item) {
@@ -3422,11 +3563,13 @@ function adminV2() {
                     release_id: detail.release_id || null,
                     track_number: detail.track_number || '',
                     disc_number: detail.disc_number || '',
-                    artist_ids: Array.isArray(detail.selected_artist_ids) ? detail.selected_artist_ids.slice() : []
+                    artist_ids: Array.isArray(detail.selected_artist_ids) ? detail.selected_artist_ids.slice() : [],
+                    release_tracks: Array.isArray(detail.release_tracks) ? detail.release_tracks.map(track => this.normalizeReleaseTrack(track)) : []
                 };
                 this.editorImageFile = null;
                 this.editorArtistToAdd = '';
                 this.editorReleaseToAdd = '';
+                this.clearReleaseTrackSearch();
             } catch (error) {
                 this.showToast(error.message);
             } finally {
@@ -3449,8 +3592,22 @@ function adminV2() {
             return this.activeLibraryItem && this.activeLibraryItem.kind === 'tracks';
         },
 
+        editorIsNewRelease() {
+            return this.isReleaseEditor() && Number(this.activeLibraryItem.id || 0) === 0;
+        },
+
+        editorTitle() {
+            if (this.editorIsNewRelease()) return 'New release';
+            return this.activeLibraryItem?.title || 'Editor';
+        },
+
+        editorSubtitle() {
+            if (this.editorIsNewRelease()) return 'Create release and attach tracks';
+            return this.activeLibraryItem?.kind || 'Library entity';
+        },
+
         canEditLibraryImage() {
-            return this.isArtistEditor() || this.isReleaseEditor();
+            return this.isArtistEditor() || (this.isReleaseEditor() && !this.editorIsNewRelease());
         },
 
         canShowMetadataTags() {
@@ -3497,6 +3654,7 @@ function adminV2() {
 
         editorCanSave() {
             if (!this.activeLibraryItem || !this.editorDetail || this.editorLoading || this.editorSaving) return false;
+            if (!String(this.editorDraft.title || '').trim()) return false;
             if (this.isTrackEditor() && !this.editorDraft.release_id) return false;
             return true;
         },
@@ -3603,6 +3761,146 @@ function adminV2() {
             this.editorDraft.release_id = Number(release.id);
             this.editorReleaseToAdd = '';
             return true;
+        },
+
+        normalizeReleaseTrack(track = {}) {
+            const trackNumber = track.track_number;
+            const discNumber = track.disc_number;
+            return {
+                id: Number(track.id),
+                title: track.title || `Track #${track.id}`,
+                artists: track.artists || '',
+                release_id: track.release_id == null ? null : Number(track.release_id),
+                release_title: track.release_title || '',
+                track_number: trackNumber == null ? '' : String(trackNumber),
+                disc_number: discNumber == null ? '' : String(discNumber),
+                duration_seconds: Number(track.duration_seconds || 0),
+                is_hidden: Boolean(track.is_hidden)
+            };
+        },
+
+        releaseTracks() {
+            if (!Array.isArray(this.editorDraft.release_tracks)) {
+                this.editorDraft.release_tracks = [];
+            }
+            return this.editorDraft.release_tracks;
+        },
+
+        releaseTrackPayload() {
+            return this.releaseTracks().map(track => ({
+                id: Number(track.id),
+                track_number: track.track_number || '',
+                disc_number: track.disc_number || ''
+            }));
+        },
+
+        releaseTrackIds() {
+            return new Set(this.releaseTracks().map(track => Number(track.id)));
+        },
+
+        releaseTrackSearchOpen() {
+            return this.isReleaseEditor() && String(this.releaseTrackSearch || '').trim().length > 0;
+        },
+
+        availableReleaseTrackResults() {
+            const selected = this.releaseTrackIds();
+            return (this.releaseTrackSearchResults || []).filter(track => !selected.has(Number(track.id)));
+        },
+
+        clearReleaseTrackSearch() {
+            this.releaseTrackSearch = '';
+            this.releaseTrackSearchResults = [];
+            this.releaseTrackSearchLoading = false;
+            this.releaseTrackSearchToken += 1;
+        },
+
+        async searchReleaseTracks() {
+            const query = String(this.releaseTrackSearch || '').trim();
+            if (!query) {
+                this.releaseTrackSearchResults = [];
+                this.releaseTrackSearchLoading = false;
+                return;
+            }
+            const token = this.releaseTrackSearchToken + 1;
+            this.releaseTrackSearchToken = token;
+            this.releaseTrackSearchLoading = true;
+            try {
+                const params = new URLSearchParams({ search: query, limit: '16' });
+                const rows = await this.request(`${this.apiBase}/library/tracks/search?${params.toString()}`);
+                if (this.releaseTrackSearchToken !== token) return;
+                this.releaseTrackSearchResults = Array.isArray(rows) ? rows.map(track => this.normalizeReleaseTrack(track)) : [];
+            } catch (error) {
+                if (this.releaseTrackSearchToken === token) this.showToast(error.message);
+            } finally {
+                if (this.releaseTrackSearchToken === token) {
+                    this.releaseTrackSearchLoading = false;
+                    this.icons();
+                }
+            }
+        },
+
+        async addBestReleaseTrack() {
+            if (!String(this.releaseTrackSearch || '').trim()) return;
+            if (!this.availableReleaseTrackResults().length && !this.releaseTrackSearchLoading) {
+                await this.searchReleaseTracks();
+            }
+            const track = this.availableReleaseTrackResults()[0];
+            if (!track) {
+                this.showToast('Choose a track from search results');
+                return;
+            }
+            this.addReleaseTrack(track);
+        },
+
+        addReleaseTrack(track) {
+            if (!track) return;
+            const normalized = this.normalizeReleaseTrack(track);
+            if (this.releaseTrackIds().has(Number(normalized.id))) {
+                this.showToast('Track already in release');
+                return;
+            }
+            this.editorDraft.release_tracks = this.releaseTracks().concat([normalized]);
+            this.clearReleaseTrackSearch();
+            this.$nextTick(() => this.icons());
+        },
+
+        removeReleaseTrack(id) {
+            this.editorDraft.release_tracks = this.releaseTracks().filter(track => Number(track.id) !== Number(id));
+        },
+
+        releaseTrackOrigin(track) {
+            const releaseId = Number(track && track.release_id ? track.release_id : 0);
+            const currentId = Number(this.activeLibraryItem && this.activeLibraryItem.id ? this.activeLibraryItem.id : 0);
+            if (releaseId && releaseId === currentId) return this.editorDraft.title || track.release_title || 'This release';
+            if (track && track.release_title) return track.release_title;
+            if (releaseId) return `Missing release #${releaseId}`;
+            return 'No release';
+        },
+
+        releaseTrackSearchMeta(track) {
+            const parts = [];
+            if (track.artists) parts.push(track.artists);
+            parts.push(this.releaseTrackOrigin(track));
+            const number = this.releaseTrackNumberLabel(track);
+            if (number) parts.push(number);
+            return parts.join(' / ');
+        },
+
+        releaseTrackNumberLabel(track) {
+            const disc = String((track && track.disc_number) || '').trim();
+            const number = String((track && track.track_number) || '').trim();
+            if (disc && number) return `D${disc} #${number}`;
+            if (number) return `#${number}`;
+            if (disc) return `D${disc}`;
+            return '';
+        },
+
+        trackDuration(seconds) {
+            const total = Math.round(Number(seconds || 0));
+            if (!total) return '-';
+            const minutes = Math.floor(total / 60);
+            const rest = String(total % 60).padStart(2, '0');
+            return `${minutes}:${rest}`;
         },
 
         setEditorImageFile(event) {
@@ -3729,6 +4027,7 @@ function adminV2() {
             if (!this.editorCanSave()) return;
             this.editorSaving = true;
             try {
+                const wasNewRelease = this.editorIsNewRelease();
                 const updated = await this.request(`${this.apiBase}/library/item`, {
                     method: 'POST',
                     body: JSON.stringify({
@@ -3741,13 +4040,15 @@ function adminV2() {
                         release_id: this.editorDraft.release_id ? Number(this.editorDraft.release_id) : null,
                         track_number: this.editorDraft.track_number || '',
                         disc_number: this.editorDraft.disc_number || '',
-                        artist_ids: this.editorDraft.artist_ids || []
+                        artist_ids: this.editorDraft.artist_ids || [],
+                        release_tracks: this.isReleaseEditor() ? this.releaseTrackPayload() : null
                     })
                 });
                 this.replaceLibraryItem(updated);
                 this.activeLibraryItem = updated;
                 if (this.editorDetail) this.editorDetail.item = updated;
-                this.showToast('Saved');
+                if (this.isReleaseEditor()) await this.loadEditorDetail(updated);
+                this.showToast(wasNewRelease ? 'Release created' : 'Saved');
                 await this.refreshCountsOnly();
             } catch (error) {
                 this.showToast(error.message);
@@ -3768,9 +4069,18 @@ function adminV2() {
         },
 
         replaceLibraryItem(updated) {
-            this.library.items = this.library.items.map(item =>
-                item.kind === updated.kind && item.id === updated.id ? updated : item
-            );
+            let replaced = false;
+            this.library.items = this.library.items.map(item => {
+                if (item.kind === updated.kind && Number(item.id) === Number(updated.id)) {
+                    replaced = true;
+                    return updated;
+                }
+                return item;
+            });
+            if (!replaced && updated.kind === this.libraryKind) {
+                this.library.items = [updated].concat(this.library.items || []);
+                this.library.total = Number(this.library.total || 0) + 1;
+            }
         },
 
         async refreshCountsOnly() {
