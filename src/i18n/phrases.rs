@@ -373,6 +373,7 @@ translations! {
     player_repeat:           "Repeat"                          , "Повтор";
     player_volume:           "Volume"                          , "Громкость";
     player_appears_on:       "Appears on"                      , "Участвует в";
+    player_top_tracks:       "Popular tracks"                  , "Популярные треки";
     player_albums:           "Albums"                          , "Альбомы";
     player_eps:              "EPs"                             , "EP";
     player_singles:          "Singles"                         , "Синглы";

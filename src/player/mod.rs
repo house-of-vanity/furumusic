@@ -3201,40 +3201,44 @@ async fn artist_detail_handler(
         .collect();
 
     let top_tracks = sqlx::query_as::<_, PlaylistTrackRow>(
-        r#"SELECT t.id, t.title::text as title, t.track_number, t.disc_number,
-                  t.duration_seconds, t.cover_file_id,
-                  r.cover_file_id as release_cover_file_id,
-                  r.id as release_id,
-                  r.title::text as release_title,
-                  r.year as release_year,
-                  COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
-                  mf.audio_format,
-                  mf.audio_bitrate,
-                  mf.audio_sample_rate,
-                  mf.audio_bit_depth,
-                  mf.file_size_bytes,
-                  t.lastfm_listeners,
-                  t.lastfm_playcount,
-                  t.lastfm_rating,
-                  t.lastfm_updated_at
-           FROM furumusic__track t
-           JOIN furumusic__release r ON r.id = t.release_id
-           LEFT JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
-           WHERE t.is_hidden = false
-             AND r.is_hidden = false
-             AND EXISTS (
-                 SELECT 1
-                   FROM furumusic__track_artist ta
-                  WHERE ta.track_id = t.id
-                    AND ta.artist_id = $1
-                    AND ta.role <> 'featuring'
-             )
-           ORDER BY COALESCE(t.lastfm_rating, 0) DESC,
-                    COALESCE(t.lastfm_playcount, 0) DESC,
-                    COALESCE(t.lastfm_listeners, 0) DESC,
-                    r.year DESC NULLS LAST,
-                    t.track_number NULLS LAST,
-                    t.id
+        r#"SELECT * FROM (
+               SELECT DISTINCT ON (lower(t.title::text))
+                      t.id, t.title::text as title, t.track_number, t.disc_number,
+                      t.duration_seconds, t.cover_file_id,
+                      r.cover_file_id as release_cover_file_id,
+                      r.id as release_id,
+                      r.title::text as release_title,
+                      r.year as release_year,
+                      COALESCE(mf.uploader_name, 'UFO')::text AS uploader_name,
+                      mf.audio_format,
+                      mf.audio_bitrate,
+                      mf.audio_sample_rate,
+                      mf.audio_bit_depth,
+                      mf.file_size_bytes,
+                      t.lastfm_listeners,
+                      t.lastfm_playcount,
+                      t.lastfm_rating,
+                      t.lastfm_updated_at
+               FROM furumusic__track t
+               JOIN furumusic__release r ON r.id = t.release_id
+               LEFT JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
+               WHERE t.is_hidden = false
+                 AND r.is_hidden = false
+                 AND EXISTS (
+                     SELECT 1
+                       FROM furumusic__track_artist ta
+                      WHERE ta.track_id = t.id
+                        AND ta.artist_id = $1
+                        AND ta.role <> 'featuring'
+                 )
+               ORDER BY lower(t.title::text), COALESCE(t.lastfm_rating, 0) DESC
+           ) deduped
+           ORDER BY COALESCE(lastfm_rating, 0) DESC,
+                    COALESCE(lastfm_playcount, 0) DESC,
+                    COALESCE(lastfm_listeners, 0) DESC,
+                    release_year DESC NULLS LAST,
+                    track_number NULLS LAST,
+                    id
            LIMIT 50"#,
     )
     .bind(artist_id)

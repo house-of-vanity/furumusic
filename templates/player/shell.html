@@ -620,6 +620,83 @@
                             </div>
                         </div>
                     </div>
+                    <template x-if="$store.library.currentArtist.top_tracks && $store.library.currentArtist.top_tracks.length > 0">
+                        <section class="artist-release-group">
+                            <h2 class="artist-release-group-title">{{ t.player_top_tracks }}</h2>
+                            <div class="track-list-header">
+                                <span>#</span>
+                                <span>{{ t.player_title }}</span>
+                                <span></span>
+                                <span></span>
+                                <span style="text-align:right">{{ t.player_duration }}</span>
+                            </div>
+                            <template x-for="(track, idx) in $store.library.currentArtist.top_tracks" :key="track.id">
+                                <div class="track-row artist-appearance-row"
+                                     :class="{ playing: $store.player.currentTrack && $store.player.currentTrack.id === track.id }"
+                                     @dblclick="$store.queue.playRelease($store.library.currentArtist.top_tracks, idx)">
+                                    <span class="track-num" x-text="idx + 1"></span>
+                                    <div class="track-info">
+                                        <button class="artist-appearance-cover"
+                                                type="button"
+                                                @click.stop="$store.library.openRelease(track.release_id)"
+                                                :title="track.release_title"
+                                                aria-label="{{ t.player_release }}">
+                                            <template x-if="track.cover_url">
+                                                <img :src="track.cover_url" :alt="track.release_title" loading="lazy">
+                                            </template>
+                                            <template x-if="!track.cover_url">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="12" r="4"/></svg>
+                                            </template>
+                                        </button>
+                                        <div class="artist-appearance-copy">
+                                            <div class="track-title">
+                                                <span x-text="track.title"></span>
+                                                <span style="color:var(--text-subdued)"> · </span>
+                                                <a class="artist-link" @click.stop="$store.library.openRelease(track.release_id)" x-text="track.release_title"></a>
+                                            </div>
+                                            <div class="track-artists-inline">
+                                                <template x-for="(artist, artistIdx) in $store.library.trackArtistLinks(track)" :key="artist.label + '-' + artist.id + '-' + artistIdx">
+                                                    <span>
+                                                        <template x-if="artistIdx > 0"><span>, </span></template>
+                                                        <a class="artist-link" @click.stop="$store.library.openArtist(artist.id)" x-text="artist.label"></a>
+                                                    </span>
+                                                </template>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <span></span>
+                                    <div class="track-actions">
+                                        <button class="track-action-btn info-btn popularity-info-btn"
+                                                :class="{ 'has-popularity': $store.library.hasPopularity(track), 'no-popularity': !$store.library.hasPopularity(track) }"
+                                                :style="$store.library.popularityStyle(track)"
+                                                @click.stop="$store.library.openTrackInfo(track)"
+                                                :title="$store.library.trackInfoTitle(track)"
+                                                aria-label="{{ t.player_track_info }}">
+                                            <span x-show="$store.library.hasPopularity(track)" x-text="$store.library.popularityLabel(track)"></span>
+                                            <span x-show="!$store.library.hasPopularity(track)" class="info-letter">i</span>
+                                        </button>
+                                        <button class="like-btn" :class="{ liked: $store.likes.has(track.id) }" @click.stop="$store.likes.toggle(track.id)" title="{{ t.player_like }}">
+                                            <svg viewBox="0 0 24 24" :fill="$store.likes.has(track.id) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z"/></svg>
+                                        </button>
+                                        <button class="track-action-btn queue-insert-btn queue-next-btn" @click.stop="$store.queue.addNextInQueue([track])" title="{{ t.player_play_next }}">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h10M5 12h7M5 18h10"/><path d="M17 9l4 3-4 3" fill="currentColor" stroke="none"/></svg>
+                                        </button>
+                                        <button class="track-action-btn queue-insert-btn queue-end-btn" @click.stop="$store.queue.addToEnd([track])" title="{{ t.player_add_to_queue }}">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 6h14M5 12h14M5 18h7"/><path d="M17 15l4 3-4 3" fill="currentColor" stroke="none"/></svg>
+                                        </button>
+                                        <button class="track-action-btn track-share-btn" @click.stop="$store.sharing.copyTrack(track, $event.currentTarget)" title="{{ t.player_share_track }}" aria-label="{{ t.player_share_track }}">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.6l6.8-3.9M8.6 13.4l6.8 3.9"/></svg>
+                                        </button>
+                                        <button class="track-action-btn playlist-add-btn" @click.stop="$store.playlists.showPicker([track.id])" title="{{ t.player_add_to_playlist }}">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+                                        </button>
+                                    </div>
+                                    <span class="track-duration" x-text="formatTime(track.duration_seconds)"></span>
+                                </div>
+                            </template>
+                        </section>
+                    </template>
+
                     <template x-for="group in $store.library.artistReleaseGroups()" :key="group.type">
                         <section class="artist-release-group">
                             <h2 class="artist-release-group-title" x-text="group.label"></h2>
