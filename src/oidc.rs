@@ -977,27 +977,54 @@ fn safe_mobile_redirect_uri(raw: Option<&str>) -> Option<String> {
     if lower.starts_with("furumi://") || lower.starts_with("furumusic://") {
         return Some(value.to_owned());
     }
+    if is_loopback_http_redirect(&lower) {
+        return Some(value.to_owned());
+    }
     None
+}
+
+/// RFC 8252 §7.3: native apps without a custom URL scheme (the CLI client)
+/// receive the callback on a loopback listener with an ephemeral port.
+fn is_loopback_http_redirect(lower: &str) -> bool {
+    let Some(rest) = lower.strip_prefix("http://") else {
+        return false;
+    };
+    let host_port = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let Some((host, port)) = host_port.rsplit_once(':') else {
+        return false;
+    };
+    matches!(host, "127.0.0.1" | "localhost" | "[::1]")
+        && !port.is_empty()
+        && port.len() <= 5
+        && port.bytes().all(|b| b.is_ascii_digit())
 }
 
 fn mobile_redirect_success(app_redirect_uri: &str, code: &str) -> cot::response::Response {
     let deep_link = append_query_param(app_redirect_uri, "code", code);
+    if is_loopback_http_redirect(&app_redirect_uri.to_ascii_lowercase()) {
+        return auth::redirect(&deep_link);
+    }
     mobile_deep_link_page(
         "success",
         "Sign-in complete",
-        "Furumi should open automatically. You can close this window after the app opens.",
+        "Furumi should open automatically. If it doesn't, use the button or copy the code below.",
         None,
+        Some(code),
         &deep_link,
     )
 }
 
 fn mobile_redirect_error(app_redirect_uri: &str, error: &str) -> cot::response::Response {
     let deep_link = append_query_param(app_redirect_uri, "error", error);
+    if is_loopback_http_redirect(&app_redirect_uri.to_ascii_lowercase()) {
+        return auth::redirect(&deep_link);
+    }
     mobile_deep_link_page(
         "error",
         "Sign-in failed",
-        "Furumi should open automatically and show the sign-in error. You can close this window after the app opens.",
+        "Furumi should open automatically and show the sign-in error.",
         Some(error),
+        None,
         &deep_link,
     )
 }
@@ -1007,6 +1034,7 @@ fn mobile_deep_link_page(
     title: &str,
     message: &str,
     detail: Option<&str>,
+    code: Option<&str>,
     deep_link: &str,
 ) -> cot::response::Response {
     let state_class = html_escape(state);
@@ -1014,6 +1042,15 @@ fn mobile_deep_link_page(
     let message_html = html_escape(message);
     let detail_html = detail
         .map(|value| format!(r#"<p class="detail">Reason: {}</p>"#, html_escape(value)))
+        .unwrap_or_default();
+    let code_html = code
+        .map(|value| {
+            format!(
+                r#"<p class="hint">Signing in from a terminal? Paste this code there:</p>
+    <input class="code" readonly value="{}" onclick="this.select()">"#,
+                html_escape(value)
+            )
+        })
         .unwrap_or_default();
     let deep_link_html = html_escape(deep_link);
     let deep_link_js =
@@ -1095,6 +1132,19 @@ fn mobile_deep_link_page(
       font-size: 13px;
       color: #89847c;
     }}
+    .code {{
+      width: 100%;
+      margin-top: 8px;
+      padding: 10px 12px;
+      box-sizing: border-box;
+      border: 1px solid #3a3c42;
+      border-radius: 8px;
+      background: #1a1c20;
+      color: #e8d8a8;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      text-align: center;
+    }}
   </style>
 </head>
 <body>
@@ -1105,15 +1155,13 @@ fn mobile_deep_link_page(
     {detail_html}
     <a href="{deep_link_html}">Open Furumi</a>
     <p class="hint">If nothing happens, use the button above.</p>
+    {code_html}
   </main>
   <script>
     const deepLink = {deep_link_js};
     window.setTimeout(() => {{
       window.location.href = deepLink;
     }}, 100);
-    window.setTimeout(() => {{
-      window.close();
-    }}, 1800);
   </script>
 </body>
 </html>"#,
@@ -1229,5 +1277,26 @@ mod tests {
             Some("furumusic://auth/callback")
         );
         assert!(safe_mobile_redirect_uri(Some("https://example.com/callback")).is_none());
+    }
+
+    #[test]
+    fn mobile_oidc_redirect_uri_allows_loopback_http() {
+        assert_eq!(
+            safe_mobile_redirect_uri(Some("http://127.0.0.1:8753/callback")).as_deref(),
+            Some("http://127.0.0.1:8753/callback")
+        );
+        assert_eq!(
+            safe_mobile_redirect_uri(Some("http://localhost:1234/callback")).as_deref(),
+            Some("http://localhost:1234/callback")
+        );
+        assert_eq!(
+            safe_mobile_redirect_uri(Some("http://[::1]:1234/callback")).as_deref(),
+            Some("http://[::1]:1234/callback")
+        );
+        // Non-loopback hosts, missing ports and https stay rejected.
+        assert!(safe_mobile_redirect_uri(Some("http://127.0.0.1/callback")).is_none());
+        assert!(safe_mobile_redirect_uri(Some("http://evil.com:80/callback")).is_none());
+        assert!(safe_mobile_redirect_uri(Some("https://127.0.0.1:80/callback")).is_none());
+        assert!(safe_mobile_redirect_uri(Some("http://127.0.0.1:notaport/x")).is_none());
     }
 }
