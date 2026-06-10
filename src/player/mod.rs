@@ -861,6 +861,12 @@ fn native_device_name_from_user_agent(user_agent: Option<&str>) -> Option<String
                 None => "Furumi MacOS".to_string(),
             });
         }
+        if product.eq_ignore_ascii_case("FurumiTUI") || product.eq_ignore_ascii_case("furumi-tui") {
+            return Some(match version.as_deref() {
+                Some(v) => format!("Furumi TUI {v}"),
+                None => "Furumi TUI".to_string(),
+            });
+        }
     }
     None
 }
@@ -890,6 +896,9 @@ fn device_kind_from_user_agent(user_agent: Option<&str>) -> &'static str {
     if ua.contains("furumimac") {
         return "computer";
     }
+    if ua.contains("furumitui/") || ua.contains("furumi-tui/") {
+        return "computer";
+    }
     if ua.contains("iphone") || (ua.contains("android") && ua.contains("mobile")) {
         "phone"
     } else if ua.contains("ipad") || ua.contains("tablet") || ua.contains("android") {
@@ -912,6 +921,22 @@ mod device_tests {
             "Furumi Android 1.0"
         );
         assert_eq!(device_kind_from_user_agent(user_agent), "phone");
+    }
+
+    #[test]
+    fn detects_furumi_tui_native_client() {
+        let user_agent = Some("FurumiTUI/0.1.0 macos");
+
+        assert_eq!(device_name_from_user_agent(user_agent), "Furumi TUI 0.1.0");
+        assert_eq!(device_kind_from_user_agent(user_agent), "computer");
+    }
+
+    #[test]
+    fn detects_furumi_tui_http_user_agent_token() {
+        let user_agent = Some("furumi-tui/0.1.0 (macos)");
+
+        assert_eq!(device_name_from_user_agent(user_agent), "Furumi TUI 0.1.0");
+        assert_eq!(device_kind_from_user_agent(user_agent), "computer");
     }
 
     #[test]
