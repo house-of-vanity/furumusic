@@ -12,6 +12,21 @@ const AUDIO_EXTENSIONS: &[&str] = &[
     "mp3", "flac", "ogg", "opus", "aac", "m4a", "wav", "ape", "wv", "wma", "tta", "aiff", "aif",
 ];
 
+/// How long a `failed` review must stay untouched before discover
+/// automatically requeues it (instead of creating a new row per attempt).
+const FAILED_RETRY_COOLDOWN_SECS: i64 = 3600;
+
+/// Leftover files that are safe to purge from inbox folders that no longer
+/// contain any audio (covers, playlists, rip logs and similar sidecar files).
+const JUNK_EXTENSIONS: &[&str] = &[
+    "jpg", "jpeg", "png", "gif", "webp", "bmp", "m3u", "m3u8", "cue", "log", "txt", "nfo", "sfv",
+    "md5", "accurip", "url", "ini", "pdf",
+];
+const JUNK_FILENAMES: &[&str] = &[".ds_store", "thumbs.db", "desktop.ini"];
+
+/// Junk younger than this is kept — an upload might still be in progress.
+const JUNK_MIN_AGE: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
+
 pub struct InboxDiscoverJob;
 
 #[async_trait::async_trait]
@@ -76,6 +91,10 @@ impl Job for InboxDiscoverJob {
         let mut audio_files = Vec::new();
         collect_audio_files(inbox, &mut audio_files).await?;
 
+        // Purge leftover junk (covers, playlists, logs) from subtrees that no
+        // longer contain audio, so processed uploads don't linger forever.
+        cleanup_inbox_junk(inbox, JUNK_MIN_AGE).await;
+
         log.info(&format!("Found {} audio files in inbox", audio_files.len()));
         if audio_files.is_empty() {
             return Ok(());
@@ -87,6 +106,7 @@ impl Job for InboxDiscoverJob {
         let mut discovered = 0u64;
         let mut skipped_hash = 0u64;
         let mut skipped_existing = 0u64;
+        let mut requeued = 0u64;
 
         for (_folder, files) in &groups {
             for file_path in files {
@@ -94,13 +114,34 @@ impl Job for InboxDiscoverJob {
                     crate::media_paths::path_for_root(&config.agent_inbox_dir, file_path)
                         .unwrap_or_else(|| file_path.to_string_lossy().to_string());
 
-                // Skip if a PendingReview already exists for this path
-                match PendingReview::exists_for_path(&ctx.db, &input_path_str).await {
-                    Ok(true) => {
-                        skipped_existing += 1;
+                // One review row per path: any existing row blocks creating a
+                // new one. A stale "failed" row is requeued in place instead,
+                // so retries don't multiply rows. "rejected" stays rejected.
+                match PendingReview::latest_for_path(&ctx.pool, &input_path_str).await {
+                    Ok(None) => {}
+                    Ok(Some((id, status, updated_at))) => {
+                        if status == "failed" {
+                            let stale = chrono::DateTime::parse_from_rfc3339(&updated_at)
+                                .map(|t| {
+                                    chrono::Utc::now().signed_duration_since(t).num_seconds()
+                                        >= FAILED_RETRY_COOLDOWN_SECS
+                                })
+                                .unwrap_or(true);
+                            if stale {
+                                match PendingReview::requeue_by_ids(&ctx.db, &[id]).await {
+                                    Ok(()) => requeued += 1,
+                                    Err(e) => log.warn(&format!(
+                                        "Failed to requeue review {id} for {input_path_str}: {e}"
+                                    )),
+                                }
+                            } else {
+                                skipped_existing += 1;
+                            }
+                        } else {
+                            skipped_existing += 1;
+                        }
                         continue;
                     }
-                    Ok(false) => {}
                     Err(e) => {
                         log.warn(&format!(
                             "Error checking existing review for {}: {e}",
@@ -215,8 +256,8 @@ impl Job for InboxDiscoverJob {
         }
 
         log.info(&format!(
-            "Discovered {} new files, skipped {} (hash known), skipped {} (already queued)",
-            discovered, skipped_hash, skipped_existing
+            "Discovered {} new files, requeued {} failed, skipped {} (hash known), skipped {} (already tracked)",
+            discovered, requeued, skipped_hash, skipped_existing
         ));
         crate::metrics::record_agent_discover_files(
             audio_files.len() as u64,
@@ -227,7 +268,7 @@ impl Job for InboxDiscoverJob {
 
         // Trigger inbox_process in background if new files were discovered
         // and no orchestrator is already running
-        if discovered > 0 {
+        if discovered + requeued > 0 {
             if crate::jobs::inbox_process::is_orchestrator_running() {
                 log.info(
                     "New files discovered but inbox_process already running, it will pick them up",
@@ -298,4 +339,76 @@ pub async fn collect_audio_files(dir: &Path, audio: &mut Vec<PathBuf>) -> anyhow
 pub fn is_audio_file(name: &str) -> bool {
     let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
     AUDIO_EXTENSIONS.contains(&ext.as_str())
+}
+
+fn is_junk_file(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    // macOS AppleDouble sidecars ("._track.mp3") and well-known junk names
+    if lower.starts_with("._") || JUNK_FILENAMES.contains(&lower.as_str()) {
+        return true;
+    }
+    let ext = lower.rsplit('.').next().unwrap_or("");
+    JUNK_EXTENSIONS.contains(&ext)
+}
+
+/// Remove leftover sidecar files (covers, playlists, rip logs) from inbox
+/// subtrees that no longer contain any audio, then prune emptied directories.
+///
+/// Junk younger than `min_age` is kept in case an upload is still in
+/// progress, and unknown file types are never touched. Returns `true` when
+/// `dir` still contains something worth keeping (so the caller must not
+/// remove it).
+async fn cleanup_inbox_junk(dir: &Path, min_age: std::time::Duration) -> bool {
+    let mut entries = match tokio::fs::read_dir(dir).await {
+        Ok(e) => e,
+        Err(_) => return true,
+    };
+
+    let mut has_audio = false;
+    let mut keep_other = false;
+    let mut junk: Vec<PathBuf> = Vec::new();
+
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let ft = match entry.file_type().await {
+            Ok(ft) => ft,
+            Err(_) => {
+                keep_other = true;
+                continue;
+            }
+        };
+        if ft.is_dir() {
+            if Box::pin(cleanup_inbox_junk(&entry.path(), min_age)).await {
+                keep_other = true;
+            } else {
+                let _ = tokio::fs::remove_dir(&entry.path()).await;
+            }
+        } else if !name.starts_with('.') && is_audio_file(&name) {
+            // dotfiles are invisible to discovery, so they don't count as audio
+            has_audio = true;
+        } else if is_junk_file(&name) {
+            junk.push(entry.path());
+        } else {
+            keep_other = true;
+        }
+    }
+
+    if has_audio {
+        return true;
+    }
+
+    let mut junk_left = false;
+    for path in junk {
+        let old_enough = tokio::fs::metadata(&path)
+            .await
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age >= min_age);
+        if !old_enough || tokio::fs::remove_file(&path).await.is_err() {
+            junk_left = true;
+        }
+    }
+
+    keep_other || junk_left
 }

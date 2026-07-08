@@ -496,14 +496,24 @@ impl PendingReview {
             .await
     }
 
-    pub async fn exists_for_path(db: &Database, path: &str) -> cot::db::Result<bool> {
-        let all = Self::objects().all(db).await?;
-        let exists = all.iter().any(|r| {
-            let s = r.status.as_str();
-            // "rejected" and "failed" reviews should not block re-discovery
-            s != "rejected" && s != "failed" && r.input_path.as_deref() == Some(path)
-        });
-        Ok(exists)
+    /// Latest review row for an inbox path: `(id, status, updated_at)`.
+    ///
+    /// Used by inbox_discover to decide whether a file needs a new review,
+    /// a requeue of its existing row, or nothing at all — without creating
+    /// a fresh row per retry.
+    pub async fn latest_for_path(
+        pool: &sqlx::PgPool,
+        path: &str,
+    ) -> anyhow::Result<Option<(i64, String, String)>> {
+        let row: Option<(i64, String, String)> = sqlx::query_as(
+            "SELECT id, status::text, updated_at::text \
+             FROM furumusic__pending_review WHERE input_path = $1 \
+             ORDER BY id DESC LIMIT 1",
+        )
+        .bind(path)
+        .fetch_optional(pool)
+        .await?;
+        Ok(row)
     }
 
     /// Mark all "processing" reviews as "failed" — called at scheduler

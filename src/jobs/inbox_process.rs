@@ -12,6 +12,11 @@ static ORCHESTRATOR_RUNNING: AtomicBool = AtomicBool::new(false);
 /// PostgreSQL advisory locks use a 64-bit key; this is an arbitrary unique value.
 const ORCHESTRATOR_ADVISORY_LOCK_ID: i64 = 0x4655_5255_4D55_5349; // "FURUMUSI" in hex
 
+/// Maximum number of files sent to the LLM in a single batch call.
+/// Folders with more files are processed in chunks of this size, otherwise
+/// the model's completion window overflows and the JSON response is cut off.
+const MAX_LLM_BATCH_FILES: usize = 20;
+
 /// Check if an orchestrator is currently running (used by inbox_discover to avoid redundant triggers).
 pub fn is_orchestrator_running() -> bool {
     ORCHESTRATOR_RUNNING.load(Ordering::SeqCst)
@@ -214,14 +219,25 @@ impl Job for InboxProcessJob {
                     folder_rel, file_count,
                 ));
 
-                let (ok, fail) =
-                    process_folder_batch(&ctx.db, &config, &ctx.pool, &folder_rel, reviews, log)
-                        .await;
+                // Large folders are split into chunks: a single LLM call for
+                // 100+ files overflows the completion window and the whole
+                // batch fails with a truncated-JSON parse error.
+                for chunk in reviews.chunks(MAX_LLM_BATCH_FILES) {
+                    let (ok, fail) = process_folder_batch(
+                        &ctx.db,
+                        &config,
+                        &ctx.pool,
+                        &folder_rel,
+                        chunk.to_vec(),
+                        log,
+                    )
+                    .await;
 
-                total_ok += ok;
-                total_fail += fail;
+                    total_ok += ok;
+                    total_fail += fail;
+                }
                 log.info(&format!(
-                    "Folder done: {ok} ok, {fail} err. Total so far: {total_ok} ok, {total_fail} err"
+                    "Folder done. Total so far: {total_ok} ok, {total_fail} err"
                 ));
             }
         }
@@ -344,6 +360,7 @@ async fn process_folder_batch(
     log.info("Phase 1: extracting metadata...");
     let mut prepared: Vec<PreparedFile> = Vec::with_capacity(file_count);
     let mut failed_reviews: Vec<PendingReview> = Vec::new();
+    let mut merged_count = 0u64;
 
     for mut review in reviews {
         let stored_input_path = review.input_path_str().to_owned();
@@ -355,15 +372,48 @@ async fn process_folder_batch(
             .unwrap_or("unknown")
             .to_owned();
 
-        // Set status → processing
-        let _ = review.set_processing(db).await;
-
         // Parse context_json
         let mut context: serde_json::Value = review
             .context_json
             .as_deref()
             .and_then(|s| serde_json::from_str(s).ok())
             .unwrap_or_default();
+
+        // Resolve duplicates and missing sources before any expensive work.
+        let sha = context
+            .get("sha256")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_owned();
+        let file_exists = file_path.exists();
+        if !sha.is_empty()
+            && crate::agent::rag::file_hash_exists(pool, &sha)
+                .await
+                .unwrap_or(false)
+        {
+            // Identical content is already in the library — drop the inbox
+            // copy (same as mover::Merged) and close the review.
+            if file_exists {
+                let _ = tokio::fs::remove_file(&file_path).await;
+            }
+            let _ = PendingReview::delete_by_ids(db, &[review.id_val()]).await;
+            log.info(&format!(
+                "{filename}: content already in library (sha256 match) — merged duplicate"
+            ));
+            crate::metrics::record_agent_file_processed("ok", "merged_duplicate");
+            merged_count += 1;
+            continue;
+        }
+        if !file_exists {
+            let msg = format!("{filename}: source file missing: {stored_input_path}");
+            log.error(&msg);
+            let _ = review.set_failed(db, &msg).await;
+            failed_reviews.push(review);
+            continue;
+        }
+
+        // Set status → processing
+        let _ = review.set_processing(db).await;
 
         // Extract metadata (with 60s timeout)
         let path_for_meta = file_path.to_path_buf();
@@ -444,15 +494,16 @@ async fn process_folder_batch(
     }
 
     log.info(&format!(
-        "Phase 1 done: {} prepared, {} failed metadata",
+        "Phase 1 done: {} prepared, {} merged duplicates, {} failed",
         prepared.len(),
+        merged_count,
         failed_reviews.len(),
     ));
 
     if prepared.is_empty() {
         let duration_ms = batch_start.elapsed().as_millis() as i64;
         let _ = run.set_completed(db, duration_ms, &log.output()).await;
-        return (0, failed_reviews.len() as u64);
+        return (merged_count, failed_reviews.len() as u64);
     }
 
     // Phase 2: RAG lookup (collect unique artist/album queries from all files)
@@ -648,16 +699,17 @@ async fn process_folder_batch(
             let err_msg = format!("Batch LLM call failed: {e}");
             log.error(&err_msg);
             // Mark all files as failed
+            let prepared_count = prepared.len() as u64;
             for mut p in prepared {
                 let _ = p.review.set_failed(db, &err_msg).await;
                 crate::metrics::record_agent_file_processed("failed", "failed");
             }
-            let total_fail_count = failed_reviews.len() as u64 + file_count as u64;
+            let total_fail_count = failed_reviews.len() as u64 + prepared_count;
             let duration_ms = batch_start.elapsed().as_millis() as i64;
             let _ = run
                 .set_failed(db, duration_ms, &log.output(), &err_msg)
                 .await;
-            return (0, total_fail_count);
+            return (merged_count, total_fail_count);
         }
     };
 
@@ -681,7 +733,7 @@ async fn process_folder_batch(
     let completion_per_file = batch_result.completion_tokens / prepared.len().max(1) as u64;
     let duration_per_file = batch_result.duration_ms as i64 / prepared.len().max(1) as i64;
 
-    let mut ok_count = 0u64;
+    let mut ok_count = merged_count;
     let mut fail_count = failed_reviews.len() as u64;
 
     for mut p in prepared {

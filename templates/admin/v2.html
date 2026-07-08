@@ -1613,7 +1613,7 @@ tbody tr:hover {
                             </button>
                             <button class="btn" @click="selectReviewFilter()" :disabled="reviews.total === 0">
                                 <i data-lucide="list-checks"></i>
-                                Select filter
+                                <span x-text="`Select all (${fmt(reviews.total)})`"></span>
                             </button>
                             <button class="btn" @click="clearReviewSelection()" :disabled="selectedReviewCount() === 0">
                                 <i data-lucide="x"></i>
