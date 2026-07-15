@@ -883,6 +883,7 @@ const KNOWN_HTTP_ROUTES: &[&str] = &[
     "/api/player/lastfm/now-playing",
     "/api/player/lastfm/scrobble",
     "/api/player/agent-queue",
+    "/api/player/offline/manifest",
     "/api/player/torrents",
     "/api/player/torrents/session/{id}",
     "/api/player/torrents/preview",

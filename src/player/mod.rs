@@ -1049,6 +1049,192 @@ async fn me_handler(
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/player/offline/manifest
+// ---------------------------------------------------------------------------
+
+async fn offline_manifest_handler(
+    auth_ctx: auth::AuthContext,
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+
+    let generated_at = now_iso_string();
+
+    let track_rows = sqlx::query_as::<_, OfflineTrackManifestRow>(
+        r#"SELECT t.id,
+                  GREATEST(
+                      t.updated_at::text,
+                      r.updated_at::text,
+                      mf.created_at::text,
+                      COALESCE(cover_mf.created_at::text, ''),
+                      COALESCE((
+                          SELECT MAX(a.updated_at::text)
+                            FROM furumusic__track_artist ta
+                            JOIN furumusic__artist a ON a.id = ta.artist_id
+                           WHERE ta.track_id = t.id
+                      ), ''),
+                      COALESCE((
+                          SELECT MAX(a.updated_at::text)
+                            FROM furumusic__release_artist ra
+                            JOIN furumusic__artist a ON a.id = ra.artist_id
+                           WHERE ra.release_id = r.id
+                      ), '')
+                  ) AS updated_at,
+                  mf.id AS audio_file_id,
+                  mf.sha256_hash::text AS audio_hash,
+                  mf.file_size_bytes AS audio_size_bytes,
+                  mf.mime_type::text AS audio_mime_type,
+                  mf.created_at::text AS audio_updated_at,
+                  cover_mf.id AS cover_file_id,
+                  cover_mf.sha256_hash::text AS cover_hash,
+                  cover_mf.created_at::text AS cover_updated_at
+           FROM furumusic__track t
+           JOIN furumusic__release r ON r.id = t.release_id
+           JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
+           LEFT JOIN furumusic__media_file cover_mf
+                  ON cover_mf.id = COALESCE(t.cover_file_id, r.cover_file_id)
+           WHERE t.is_hidden = false AND r.is_hidden = false
+           ORDER BY t.id"#,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    let liked_track_ids = sqlx::query_scalar::<_, i64>(
+        r#"SELECT ult.track_id
+           FROM furumusic__user_liked_track ult
+           JOIN furumusic__track t ON t.id = ult.track_id AND t.is_hidden = false
+           JOIN furumusic__release r ON r.id = t.release_id AND r.is_hidden = false
+           WHERE ult.user_id = $1
+           ORDER BY ult.created_at DESC"#,
+    )
+    .bind(user.id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    let likes_updated_at = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT MAX(created_at::text) FROM furumusic__user_liked_track WHERE user_id = $1",
+    )
+    .bind(user.id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?
+    .unwrap_or_else(|| generated_at.clone());
+
+    let playlist_rows = sqlx::query_as::<_, OfflinePlaylistManifestRow>(
+        r#"SELECT p.id,
+                  p.title::text AS title,
+                  p.description,
+                  p.updated_at::text AS updated_at,
+                  (p.owner_id = $1) AS is_own,
+                  COALESCE(NULLIF(u.display_name, ''), u.username)::text AS owner_name,
+                  p.is_public,
+                  EXISTS (
+                      SELECT 1 FROM furumusic__saved_playlist sp
+                       WHERE sp.user_id = $1 AND sp.playlist_id = p.id
+                  ) AS is_saved,
+                  COALESCE(
+                      array_agg(pt.track_id ORDER BY pt.position)
+                          FILTER (WHERE t.id IS NOT NULL AND r.id IS NOT NULL),
+                      ARRAY[]::bigint[]
+                  ) AS track_ids
+           FROM furumusic__playlist p
+           JOIN furumusic__user u ON u.id = p.owner_id
+           LEFT JOIN furumusic__playlist_track pt ON pt.playlist_id = p.id
+           LEFT JOIN furumusic__track t ON t.id = pt.track_id AND t.is_hidden = false
+           LEFT JOIN furumusic__release r ON r.id = t.release_id AND r.is_hidden = false
+           WHERE p.owner_id = $1
+              OR EXISTS (
+                  SELECT 1 FROM furumusic__saved_playlist sp
+                   WHERE sp.user_id = $1 AND sp.playlist_id = p.id
+              )
+              OR p.is_public = true
+           GROUP BY p.id, u.display_name, u.username
+           ORDER BY
+              CASE WHEN p.owner_id = $1 THEN 0 WHEN p.is_public THEN 2 ELSE 1 END,
+              p.title"#,
+    )
+    .bind(user.id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    let followed_artist_ids = sqlx::query_scalar::<_, i64>(
+        r#"SELECT ufa.artist_id
+           FROM furumusic__user_followed_artist ufa
+           JOIN furumusic__artist a ON a.id = ufa.artist_id AND a.is_hidden = false
+           WHERE ufa.user_id = $1
+           ORDER BY ufa.created_at DESC"#,
+    )
+    .bind(user.id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    let tracks = track_rows
+        .into_iter()
+        .map(|row| OfflineTrackManifestItem {
+            id: row.id,
+            updated_at: row.updated_at,
+            stream_url: format!("/api/player/stream/{}", row.id),
+            audio_file_id: row.audio_file_id,
+            audio_hash: row.audio_hash,
+            audio_size_bytes: row.audio_size_bytes,
+            audio_mime_type: row.audio_mime_type,
+            audio_updated_at: row.audio_updated_at,
+            cover_file_id: row.cover_file_id,
+            cover_url: cover_variant_url(row.cover_file_id, "medium"),
+            cover_hash: row.cover_hash,
+            cover_updated_at: row.cover_updated_at,
+        })
+        .collect();
+
+    let mut playlists = vec![OfflinePlaylistManifestItem {
+        id: -1,
+        title: "Likes".to_string(),
+        description: None,
+        updated_at: likes_updated_at,
+        is_own: true,
+        owner_name: None,
+        is_public: false,
+        is_saved: false,
+        kind: "likes".to_string(),
+        track_ids: liked_track_ids.clone(),
+    }];
+
+    playlists.extend(
+        playlist_rows
+            .into_iter()
+            .map(|row| OfflinePlaylistManifestItem {
+                id: row.id,
+                title: row.title,
+                description: row.description,
+                updated_at: row.updated_at,
+                is_own: row.is_own,
+                owner_name: Some(row.owner_name),
+                is_public: row.is_public,
+                is_saved: row.is_saved,
+                kind: "user".to_string(),
+                track_ids: row.track_ids,
+            }),
+    );
+
+    Json(OfflineManifestResponse {
+        generated_at,
+        tracks,
+        playlists,
+        liked_track_ids,
+        followed_artist_ids,
+    })
+    .into_response()
+}
+
+// ---------------------------------------------------------------------------
 // Last.fm account + scrobbling
 // ---------------------------------------------------------------------------
 
@@ -3855,7 +4041,11 @@ async fn stream_handler(
 
     // Look up track → audio_file_id → MediaFile
     let media = sqlx::query_as::<_, MediaFileRow>(
-        r#"SELECT mf.file_path, mf.mime_type::text as mime_type, mf.file_size_bytes
+        r#"SELECT mf.file_path,
+                  mf.mime_type::text as mime_type,
+                  mf.file_size_bytes,
+                  mf.sha256_hash::text AS sha256_hash,
+                  mf.created_at::text AS created_at
            FROM furumusic__track t
            JOIN furumusic__media_file mf ON mf.id = t.audio_file_id
            WHERE t.id = $1"#,
@@ -3880,6 +4070,7 @@ async fn stream_handler(
     }
 
     let file_size = media.file_size_bytes as u64;
+    let etag = media_etag("audio", track_id, &media.sha256_hash, None);
 
     // Parse Range header
     let range_header = request.headers().get(RANGE).and_then(|v| v.to_str().ok());
@@ -3899,6 +4090,9 @@ async fn stream_handler(
                 .header(ACCEPT_RANGES, "bytes")
                 .header(CONTENT_RANGE, format!("bytes {start}-{end}/{file_size}"))
                 .header(CONTENT_LENGTH, chunk_size.to_string())
+                .header("ETag", etag.as_str())
+                .header("X-Furumi-Content-Sha256", media.sha256_hash.as_str())
+                .header("X-Furumi-Content-Updated-At", media.created_at.as_str())
                 .body(Body::fixed(data))
                 .expect("valid response");
 
@@ -3917,6 +4111,9 @@ async fn stream_handler(
         .header(CONTENT_TYPE, media.mime_type.as_str())
         .header(ACCEPT_RANGES, "bytes")
         .header(CONTENT_LENGTH, file_size.to_string())
+        .header("ETag", etag.as_str())
+        .header("X-Furumi-Content-Sha256", media.sha256_hash.as_str())
+        .header("X-Furumi-Content-Updated-At", media.created_at.as_str())
         .body(Body::fixed(data))
         .expect("valid response");
 
@@ -4167,7 +4364,12 @@ async fn cover_response(
     };
 
     let media = sqlx::query_as::<_, MediaFileRow>(
-        "SELECT file_path, mime_type::text as mime_type, file_size_bytes FROM furumusic__media_file WHERE id = $1",
+        r#"SELECT file_path,
+                  mime_type::text as mime_type,
+                  file_size_bytes,
+                  sha256_hash::text AS sha256_hash,
+                  created_at::text AS created_at
+           FROM furumusic__media_file WHERE id = $1"#,
     )
     .bind(media_file_id)
     .fetch_optional(pool)
@@ -4185,31 +4387,42 @@ async fn cover_response(
         return Ok(json_error(StatusCode::NOT_FOUND, "file not found on disk"));
     }
 
-    let (response_path, content_type) = variant_name
+    let (response_path, content_type, etag_variant) = variant_name
         .and_then(crate::agent::cover_variants::variant_by_name)
         .map(|variant| {
             let variant_path = crate::agent::cover_variants::variant_path(&full_path, variant);
             if variant_path.exists() {
-                (variant_path, "image/jpeg")
+                (variant_path, "image/jpeg", Some(variant.name))
             } else {
-                (full_path.clone(), media.mime_type.as_str())
+                (full_path.clone(), media.mime_type.as_str(), None)
             }
         })
-        .unwrap_or_else(|| (full_path.clone(), media.mime_type.as_str()));
+        .unwrap_or_else(|| (full_path.clone(), media.mime_type.as_str(), None));
 
     let data = tokio::fs::read(&response_path)
         .await
         .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let etag = media_etag("cover", media_file_id, &media.sha256_hash, etag_variant);
 
     let response = cot::http::Response::builder()
         .status(StatusCode::OK)
         .header(CONTENT_TYPE, content_type)
         .header(CONTENT_LENGTH, data.len().to_string())
+        .header("ETag", etag.as_str())
+        .header("X-Furumi-Content-Sha256", media.sha256_hash.as_str())
+        .header("X-Furumi-Content-Updated-At", media.created_at.as_str())
         .header("Cache-Control", "public, max-age=86400")
         .body(Body::fixed(data))
         .expect("valid response");
 
     Ok(response)
+}
+
+fn media_etag(kind: &str, id: i64, sha256_hash: &str, variant: Option<&str>) -> String {
+    match variant {
+        Some(variant) => format!("\"{kind}-{id}-{variant}-{sha256_hash}\""),
+        None => format!("\"{kind}-{id}-{sha256_hash}\""),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -6270,6 +6483,32 @@ impl App for PlayerApp {
                     )
                 },
                 "player_me",
+            ),
+            Route::with_handler_and_name(
+                "/offline/manifest",
+                {
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    get(
+                        move |auth_ctx: auth::AuthContext, session: Session, db: Database| {
+                            let pool = Arc::clone(&pool);
+                            let pool_config = Arc::clone(&pool_config);
+                            async move {
+                                let pg_pool = pool
+                                    .get_or_init(|| async {
+                                        sqlx::postgres::PgPoolOptions::new()
+                                            .max_connections(5)
+                                            .connect(&pool_config.database_url)
+                                            .await
+                                            .expect("player pool")
+                                    })
+                                    .await;
+                                offline_manifest_handler(auth_ctx, session, db, pg_pool).await
+                            }
+                        },
+                    )
+                },
+                "player_offline_manifest",
             ),
             Route::with_handler_and_name(
                 "/lastfm/status",

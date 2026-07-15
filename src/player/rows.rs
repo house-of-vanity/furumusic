@@ -56,6 +56,8 @@ pub(super) struct MediaFileRow {
     pub(super) file_path: String,
     pub(super) mime_type: String,
     pub(super) file_size_bytes: i64,
+    pub(super) sha256_hash: String,
+    pub(super) created_at: String,
 }
 
 #[derive(sqlx::FromRow)]
@@ -286,4 +288,31 @@ pub(super) struct ReleaseInfoRow {
     pub(super) release_type: String,
     pub(super) year: Option<i32>,
     pub(super) cover_file_id: Option<i64>,
+}
+
+#[derive(sqlx::FromRow)]
+pub(super) struct OfflineTrackManifestRow {
+    pub(super) id: i64,
+    pub(super) updated_at: String,
+    pub(super) audio_file_id: i64,
+    pub(super) audio_hash: String,
+    pub(super) audio_size_bytes: i64,
+    pub(super) audio_mime_type: String,
+    pub(super) audio_updated_at: String,
+    pub(super) cover_file_id: Option<i64>,
+    pub(super) cover_hash: Option<String>,
+    pub(super) cover_updated_at: Option<String>,
+}
+
+#[derive(sqlx::FromRow)]
+pub(super) struct OfflinePlaylistManifestRow {
+    pub(super) id: i64,
+    pub(super) title: String,
+    pub(super) description: Option<String>,
+    pub(super) updated_at: String,
+    pub(super) is_own: bool,
+    pub(super) owner_name: String,
+    pub(super) is_public: bool,
+    pub(super) is_saved: bool,
+    pub(super) track_ids: Vec<i64>,
 }

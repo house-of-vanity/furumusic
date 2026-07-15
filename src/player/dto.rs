@@ -326,6 +326,45 @@ pub(super) struct UserProfile {
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
+pub(super) struct OfflineManifestResponse {
+    pub(super) generated_at: String,
+    pub(super) tracks: Vec<OfflineTrackManifestItem>,
+    pub(super) playlists: Vec<OfflinePlaylistManifestItem>,
+    pub(super) liked_track_ids: Vec<i64>,
+    pub(super) followed_artist_ids: Vec<i64>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub(super) struct OfflineTrackManifestItem {
+    pub(super) id: i64,
+    pub(super) updated_at: String,
+    pub(super) stream_url: String,
+    pub(super) audio_file_id: i64,
+    pub(super) audio_hash: String,
+    pub(super) audio_size_bytes: i64,
+    pub(super) audio_mime_type: String,
+    pub(super) audio_updated_at: String,
+    pub(super) cover_file_id: Option<i64>,
+    pub(super) cover_url: Option<String>,
+    pub(super) cover_hash: Option<String>,
+    pub(super) cover_updated_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub(super) struct OfflinePlaylistManifestItem {
+    pub(super) id: i64,
+    pub(super) title: String,
+    pub(super) description: Option<String>,
+    pub(super) updated_at: String,
+    pub(super) is_own: bool,
+    pub(super) owner_name: Option<String>,
+    pub(super) is_public: bool,
+    pub(super) is_saved: bool,
+    pub(super) kind: String,
+    pub(super) track_ids: Vec<i64>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
 pub(super) struct LastfmStatus {
     pub(super) configured: bool,
     pub(super) connected: bool,
