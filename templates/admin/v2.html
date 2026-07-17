@@ -2268,6 +2268,73 @@ tbody tr:hover {
                         <section class="panel">
                             <div class="panel-head">
                                 <div class="panel-title">
+                                    <strong>Federation</strong>
+                                    <span>Publish this library into the furumi P2P network</span>
+                                </div>
+                                <span class="badge" :class="federationStatus.node && federationStatus.node.running ? 'ok' : 'disabled'" x-text="federationStatus.node && federationStatus.node.running ? 'running' : 'stopped'"></span>
+                            </div>
+                            <div class="settings-grid">
+                                <div class="setting-toggle">
+                                    <label>
+                                        <span>Federation enabled</span>
+                                        <span class="source-pill" :class="sourceClass('federation_enabled')" x-text="settingSource('federation_enabled')"></span>
+                                    </label>
+                                    <div class="setting-toggle-row">
+                                        <span x-text="settingsDraft.federation_enabled ? 'Enabled' : 'Disabled'"></span>
+                                        <input type="checkbox" x-model="settingsDraft.federation_enabled" />
+                                    </div>
+                                    <div class="setting-help">Applies immediately on save — no restart needed. Peers can browse and stream every visible track.</div>
+                                </div>
+                                <div class="setting-field settings-wide">
+                                    <label>
+                                        <span>Network ID (shared secret)</span>
+                                        <span class="source-pill" :class="sourceClass('federation_network_id')" x-text="settingSource('federation_network_id')"></span>
+                                    </label>
+                                    <input x-model="settingsDraft.federation_network_id" placeholder="my-crew-music-7f3a" autocomplete="off" />
+                                    <div class="setting-help">Every peer using the same id finds the others automatically.</div>
+                                </div>
+                            </div>
+                            <div class="probe-body" x-show="federationStatus.node">
+                                <div class="probe-table" x-show="federationStatus.node && federationStatus.node.running">
+                                    <div class="probe-row"><span>Endpoint</span><strong x-text="fedShort(federationStatus.node && federationStatus.node.endpoint_id)"></strong></div>
+                                    <div class="probe-row"><span>Network</span><strong x-text="(federationStatus.node && federationStatus.node.network) || '-'"></strong></div>
+                                    <div class="probe-row"><span>Connected peers</span><strong x-text="federationStatus.node && federationStatus.node.connected_peers ? federationStatus.node.connected_peers.length : 0"></strong></div>
+                                    <div class="probe-row"><span>Known contacts</span><strong x-text="(federationStatus.node && federationStatus.node.known_contacts) ?? '-'"></strong></div>
+                                    <div class="probe-row"><span>Published items</span><strong x-text="(federationStatus.node && federationStatus.node.published_items) ?? '-'"></strong></div>
+                                    <div class="probe-row"><span>Last sync</span><strong x-text="federationStatus.last_sync || 'not yet'"></strong></div>
+                                </div>
+                                <p class="probe-intro muted" x-show="federationStatus.last_error" x-text="federationStatus.last_error"></p>
+                                <div class="toolbar" style="margin-top:14px; flex-wrap:wrap; gap:8px">
+                                    <button class="btn" type="button" @click="loadFederation()" :disabled="federationLoading">
+                                        <i data-lucide="refresh-cw"></i>
+                                        Refresh
+                                    </button>
+                                    <button class="btn" type="button" @click="fedSyncNow()" :disabled="federationLoading || !(federationStatus.node && federationStatus.node.running)">
+                                        <i data-lucide="upload-cloud"></i>
+                                        Publish now
+                                    </button>
+                                    <button class="btn" type="button" @click="fedShowTicket()" :disabled="federationLoading || !(federationStatus.node && federationStatus.node.running)">
+                                        <i data-lucide="ticket"></i>
+                                        Show ticket
+                                    </button>
+                                </div>
+                                <div class="setting-field settings-wide" x-show="federationTicket" style="margin-top:10px">
+                                    <label>Connection ticket (share with a peer)</label>
+                                    <textarea readonly rows="3" style="width:100%; font-family:monospace; font-size:11px" x-text="federationTicket"></textarea>
+                                </div>
+                                <div class="setting-field settings-wide" x-show="federationStatus.node && federationStatus.node.running" style="margin-top:10px">
+                                    <label>Connect to a peer by ticket</label>
+                                    <div style="display:flex; gap:8px">
+                                        <input x-model="fedConnectTicket" placeholder="fnet..." style="flex:1" autocomplete="off" />
+                                        <button class="btn" type="button" @click="fedConnect()" :disabled="federationLoading || !fedConnectTicket.trim()">Connect</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+
+                        <section class="panel">
+                            <div class="panel-head">
+                                <div class="panel-title">
                                     <strong>Agent Status</strong>
                                     <span x-text="settingsProbeSubtitle()"></span>
                                 </div>
@@ -2832,10 +2899,16 @@ function adminV2() {
             agent_llm_auth: '',
             agent_confidence_threshold: '',
             agent_context_limit: '',
-            agent_concurrency: ''
+            agent_concurrency: '',
+            federation_enabled: false,
+            federation_network_id: ''
         },
         settingsProbe: { status: 'idle', ok: false },
         settingsProbeLoading: false,
+        federationStatus: {},
+        federationLoading: false,
+        federationTicket: '',
+        fedConnectTicket: '',
         settingsSaving: false,
         routeReady: false,
         poller: null,
@@ -3115,6 +3188,7 @@ function adminV2() {
                     body: JSON.stringify(this.settingsDraft)
                 });
                 await this.loadSettings(false);
+                await this.loadFederation(false);
                 this.showToast('Settings saved');
             } catch (error) {
                 this.showToast(error.message);
@@ -3128,9 +3202,70 @@ function adminV2() {
             this.activeView = 'settings';
             this.setRoute('#settings');
             await this.loadSettings();
+            await this.loadFederation(false);
             if (!this.settingsProbe.status || this.settingsProbe.status === 'idle') {
                 await this.loadSettingsProbe(false);
             }
+        },
+
+        async loadFederation(showErrors = true) {
+            this.federationLoading = true;
+            try {
+                this.federationStatus = await this.request(`${this.apiBase}/federation`);
+            } catch (error) {
+                if (showErrors) this.showToast(error.message);
+            } finally {
+                this.federationLoading = false;
+                this.icons();
+            }
+        },
+
+        async fedSyncNow() {
+            this.federationLoading = true;
+            try {
+                this.federationStatus = await this.request(`${this.apiBase}/federation/sync`, { method: 'POST', body: '{}' });
+                this.showToast('Library published to the federation');
+            } catch (error) {
+                this.showToast(error.message);
+            } finally {
+                this.federationLoading = false;
+                this.icons();
+            }
+        },
+
+        async fedShowTicket() {
+            this.federationLoading = true;
+            try {
+                const data = await this.request(`${this.apiBase}/federation/ticket`);
+                this.federationTicket = data.ticket || '';
+            } catch (error) {
+                this.showToast(error.message);
+            } finally {
+                this.federationLoading = false;
+                this.icons();
+            }
+        },
+
+        async fedConnect() {
+            this.federationLoading = true;
+            try {
+                const data = await this.request(`${this.apiBase}/federation/connect`, {
+                    method: 'POST',
+                    body: JSON.stringify({ ticket: this.fedConnectTicket.trim() })
+                });
+                this.fedConnectTicket = '';
+                this.showToast(`Connected to ${(data.connected || '').slice(0, 12)}…`);
+                await this.loadFederation(false);
+            } catch (error) {
+                this.showToast(error.message);
+            } finally {
+                this.federationLoading = false;
+                this.icons();
+            }
+        },
+
+        fedShort(id) {
+            return id ? `${id.slice(0, 12)}…` : '-';
         },
 
         async loadSettingsProbe(showErrors = true) {

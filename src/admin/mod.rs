@@ -416,6 +416,38 @@ impl App for AdminApp {
                 "admin_v2_settings_probe",
             ),
             Route::with_handler_and_name(
+                "/v2/api/federation",
+                get(move |session: Session, db: Database| async move {
+                    v2::federation_status(session, db).await
+                }),
+                "admin_v2_federation_status",
+            ),
+            Route::with_handler_and_name(
+                "/v2/api/federation/sync",
+                cot::router::method::post(move |session: Session, db: Database| async move {
+                    v2::federation_sync(session, db).await
+                }),
+                "admin_v2_federation_sync",
+            ),
+            Route::with_handler_and_name(
+                "/v2/api/federation/ticket",
+                get(move |session: Session, db: Database| async move {
+                    v2::federation_ticket(session, db).await
+                }),
+                "admin_v2_federation_ticket",
+            ),
+            Route::with_handler_and_name(
+                "/v2/api/federation/connect",
+                cot::router::method::post(
+                    move |session: Session,
+                          db: Database,
+                          json: Json<v2::FederationConnectRequest>| async move {
+                        v2::federation_connect(session, db, json).await
+                    },
+                ),
+                "admin_v2_federation_connect",
+            ),
+            Route::with_handler_and_name(
                 "/v2/api/jobs/{name}/toggle",
                 cot::router::method::post({
                     let handle = Arc::clone(&self.scheduler_handle);

@@ -448,6 +448,10 @@ struct AdminSettingsValues {
     agent_confidence_threshold: String,
     agent_context_limit: String,
     agent_concurrency: String,
+    #[serde(default)]
+    federation_enabled: bool,
+    #[serde(default)]
+    federation_network_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -472,6 +476,8 @@ struct AdminSettingsSources {
     agent_confidence_threshold: &'static str,
     agent_context_limit: &'static str,
     agent_concurrency: &'static str,
+    federation_enabled: &'static str,
+    federation_network_id: &'static str,
 }
 
 #[derive(Debug, Deserialize)]
@@ -496,6 +502,10 @@ pub(super) struct UpdateSettingsRequest {
     agent_confidence_threshold: String,
     agent_context_limit: String,
     agent_concurrency: String,
+    #[serde(default)]
+    federation_enabled: bool,
+    #[serde(default)]
+    federation_network_id: String,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -978,6 +988,11 @@ pub async fn update_settings(
             "agent_concurrency",
             body.agent_concurrency.trim().to_string(),
         ),
+        ("federation_enabled", body.federation_enabled.to_string()),
+        (
+            "federation_network_id",
+            body.federation_network_id.trim().to_string(),
+        ),
     ];
     for (key, value) in fields {
         let mut entry = ConfigEntry::new(key.to_string(), value);
@@ -986,7 +1001,76 @@ pub async fn update_settings(
             .await
             .map_err(|e| cot::Error::internal(e.to_string()))?;
     }
+    // Federation applies on the fly: (re)start or stop the node to match
+    // the freshly saved settings — no server restart involved.
+    let (fresh, _) = AppConfig::load_with_db(&db).await;
+    tokio::spawn(async move {
+        crate::federation::handle().apply(&fresh).await;
+    });
     Json(serde_json::json!({ "ok": true })).into_response()
+}
+
+// ---------------------------------------------------------------------------
+// Federation (status + manual controls)
+// ---------------------------------------------------------------------------
+
+pub async fn federation_status(
+    session: Session,
+    db: Database,
+) -> cot::Result<cot::response::Response> {
+    if let Err(response) = require_admin_json(&session, &db).await {
+        return Ok(response);
+    }
+    Json(crate::federation::handle().status().await).into_response()
+}
+
+pub async fn federation_sync(
+    session: Session,
+    db: Database,
+) -> cot::Result<cot::response::Response> {
+    if let Err(response) = require_admin_json(&session, &db).await {
+        return Ok(response);
+    }
+    let fed = crate::federation::handle();
+    if let Err(err) = fed.sync_now().await {
+        return Ok(json_error(
+            StatusCode::BAD_REQUEST,
+            &format!("sync failed: {err:#}"),
+        ));
+    }
+    Json(fed.status().await).into_response()
+}
+
+pub async fn federation_ticket(
+    session: Session,
+    db: Database,
+) -> cot::Result<cot::response::Response> {
+    if let Err(response) = require_admin_json(&session, &db).await {
+        return Ok(response);
+    }
+    match crate::federation::handle().ticket().await {
+        Ok(ticket) => Json(serde_json::json!({ "ticket": ticket })).into_response(),
+        Err(err) => Ok(json_error(StatusCode::BAD_REQUEST, &format!("{err:#}"))),
+    }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(super) struct FederationConnectRequest {
+    ticket: String,
+}
+
+pub async fn federation_connect(
+    session: Session,
+    db: Database,
+    Json(body): Json<FederationConnectRequest>,
+) -> cot::Result<cot::response::Response> {
+    if let Err(response) = require_admin_json(&session, &db).await {
+        return Ok(response);
+    }
+    match crate::federation::handle().connect(&body.ticket).await {
+        Ok(peer) => Json(serde_json::json!({ "connected": peer })).into_response(),
+        Err(err) => Ok(json_error(StatusCode::BAD_REQUEST, &format!("{err:#}"))),
+    }
 }
 
 pub async fn settings_probe(
@@ -1057,6 +1141,8 @@ fn settings_dto(config: AppConfig, sources: ConfigSources) -> AdminSettingsDto {
             agent_confidence_threshold: config.agent_confidence_threshold.to_string(),
             agent_context_limit: config.agent_context_limit.to_string(),
             agent_concurrency: config.agent_concurrency.to_string(),
+            federation_enabled: config.federation_enabled,
+            federation_network_id: config.federation_network_id,
         },
         sources: AdminSettingsSources {
             auth_password_enabled: sources.auth_password_enabled.code(),
@@ -1079,6 +1165,8 @@ fn settings_dto(config: AppConfig, sources: ConfigSources) -> AdminSettingsDto {
             agent_confidence_threshold: sources.agent_confidence_threshold.code(),
             agent_context_limit: sources.agent_context_limit.code(),
             agent_concurrency: sources.agent_concurrency.code(),
+            federation_enabled: sources.federation_enabled.code(),
+            federation_network_id: sources.federation_network_id.code(),
         },
     }
 }

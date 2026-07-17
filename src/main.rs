@@ -12,6 +12,7 @@ mod music;
 mod oidc;
 mod player;
 mod scheduler;
+mod federation;
 mod torrents;
 mod user;
 
@@ -557,6 +558,13 @@ impl Project for FuruProject {
                     }
                 })
                 .await;
+        });
+
+        // Join the federation at boot when it was left enabled (the settings
+        // live in the config KV table; changes apply live from the admin).
+        let fed_config = Arc::clone(&self.app_config);
+        tokio::spawn(async move {
+            federation::handle().boot(&fed_config).await;
         });
 
         apps.register(cot::session::db::SessionApp::new());
