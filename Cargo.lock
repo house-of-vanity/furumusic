@@ -1859,6 +1859,7 @@ dependencies = [
  "md-5",
  "music-dht",
  "openidconnect",
+ "postcard",
  "reqwest 0.12.28",
  "schemars 0.9.0",
  "serde",

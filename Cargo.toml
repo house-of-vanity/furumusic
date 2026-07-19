@@ -1,6 +1,6 @@
 [package]
 name = "furumusic"
-version = "0.6.0-fd"
+version = "0.6.1-fd"
 edition = "2024"
 description = "Reusable web-app boilerplate: auth, OIDC/SSO, admin panel, user management, i18n, PostgreSQL"
 
@@ -31,6 +31,7 @@ anyhow = "1.0"
 tokio-cron-scheduler = "0.15"
 croner = "3"
 async-trait = "0.1"
+postcard = { version = "1", features = ["alloc"] }
 uuid = "1"
 librqbit = { version = "8.1.1", features = ["disable-upload"] }
 # P2P federation: publishes the library into a shared DHT and serves audio /

@@ -13,6 +13,7 @@
 //! starts, stops or re-joins the node without a server restart.
 
 mod serve;
+mod storage;
 
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
@@ -27,6 +28,7 @@ use sqlx::PgPool;
 use sqlx::Row as _;
 
 use crate::config::AppConfig;
+use storage::PostgresFederationStorage;
 
 pub use serve::{AUDIO_ALPN, CATALOG_ALPN};
 
@@ -40,7 +42,7 @@ struct Running {
 }
 
 pub struct Federation {
-    /// Directory for the peer identity and DHT replica state.
+    /// Transport data directory; server-side DHT state and identity live in PostgreSQL.
     data_dir: PathBuf,
     database_url: std::sync::Mutex<String>,
     pool: tokio::sync::OnceCell<PgPool>,
@@ -170,6 +172,9 @@ impl Federation {
             stop_running(guard.take()).await;
         }
 
+        let dht_storage = Arc::new(PostgresFederationStorage::new(pool.clone()).await?);
+        let secret_key = dht_storage.load_or_create_secret_key().await?;
+
         let config = MusicDhtConfig::builder()
             .data_dir(&self.data_dir)
             .network_id(NetworkId::from_name(&network_name))
@@ -179,9 +184,10 @@ impl Federation {
             .stream_protocol(CATALOG_ALPN)
             .build()
             .map_err(|err| anyhow::anyhow!("invalid federation config: {err}"))?;
-        let (service, mut events) = MusicDhtService::start(config)
-            .await
-            .map_err(|err| anyhow::anyhow!("failed to start the DHT node: {err}"))?;
+        let (service, mut events) =
+            MusicDhtService::start_with_storage_and_secret_key(config, dht_storage, secret_key)
+                .await
+                .map_err(|err| anyhow::anyhow!("failed to start the DHT node: {err}"))?;
         let service = Arc::new(service);
         tracing::info!(
             endpoint_id = %service.endpoint_id(),
@@ -276,14 +282,22 @@ impl Federation {
         match service.sync_library(specs).await {
             Ok(stats) => {
                 *lock(&self.last_sync) = Some(format!(
-                    "{} (+{} ~{} −{}, unchanged {})",
+                    "{} (+{} ~{} −{}, unchanged {}, failed {})",
                     now_iso(),
                     stats.added,
                     stats.updated,
                     stats.removed,
-                    stats.unchanged
+                    stats.unchanged,
+                    stats.failed
                 ));
-                self.set_error(None);
+                if stats.failed > 0 {
+                    self.set_error(Some(format!(
+                        "{} item(s) failed to publish in the last sync",
+                        stats.failed
+                    )));
+                } else {
+                    self.set_error(None);
+                }
             }
             Err(err) => {
                 tracing::warn!("federation sync failed: {err}");
