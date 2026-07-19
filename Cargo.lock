@@ -1717,7 +1717,7 @@ dependencies = [
 [[package]]
 name = "federation-net"
 version = "0.1.0"
-source = "git+https://gt.hexor.cy/ab/frid.git#06158b78a4b606761c06b78fd4ac520620f10d2b"
+source = "git+https://gt.hexor.cy/ab/frid.git#3f15e9aebd574f7dd922e623e724eb7fde741b59"
 dependencies = [
  "blake3",
  "data-encoding",
@@ -1844,7 +1844,7 @@ checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
 
 [[package]]
 name = "furumusic"
-version = "0.6.0-fd"
+version = "0.6.1-fd"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3621,8 +3621,9 @@ dependencies = [
 [[package]]
 name = "music-dht"
 version = "0.1.0"
-source = "git+https://gt.hexor.cy/ab/frid.git#06158b78a4b606761c06b78fd4ac520620f10d2b"
+source = "git+https://gt.hexor.cy/ab/frid.git#3f15e9aebd574f7dd922e623e724eb7fde741b59"
 dependencies = [
+ "async-trait",
  "blake3",
  "data-encoding",
  "federation-net",
