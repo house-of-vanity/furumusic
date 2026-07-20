@@ -46,6 +46,8 @@ pub struct Federation {
     /// Transport data directory; server-side DHT state and identity live in PostgreSQL.
     data_dir: PathBuf,
     database_url: std::sync::Mutex<String>,
+    storage_dir: std::sync::Mutex<String>,
+    content_cache: std::sync::Mutex<std::collections::HashMap<i64, (String, String)>>,
     pool: tokio::sync::OnceCell<PgPool>,
     running: tokio::sync::Mutex<Option<Running>>,
     last_sync: std::sync::Mutex<Option<String>>,
@@ -69,6 +71,8 @@ pub fn handle() -> Arc<Federation> {
         Arc::new(Federation {
             data_dir: PathBuf::from(crate::media_paths::resolve_config_path("federation")),
             database_url: std::sync::Mutex::new(String::new()),
+            storage_dir: std::sync::Mutex::new(String::new()),
+            content_cache: std::sync::Mutex::new(Default::default()),
             pool: tokio::sync::OnceCell::new(),
             running: tokio::sync::Mutex::new(None),
             last_sync: std::sync::Mutex::new(None),
@@ -149,6 +153,7 @@ impl Federation {
     /// node. Called at boot and every time the admin settings are saved.
     pub async fn apply(self: &Arc<Self>, config: &AppConfig) {
         *lock(&self.database_url) = config.database_url.clone();
+        *lock(&self.storage_dir) = config.agent_storage_dir.clone();
         let network = config.federation_network_id.trim().to_string();
         if config.federation_enabled && !network.is_empty() {
             if let Err(err) = self.start(network, config.agent_storage_dir.clone()).await {
@@ -362,6 +367,7 @@ impl Federation {
                 track_number: None,
                 disc_number: None,
                 duration_seconds: None,
+                content_id: None,
             });
         }
 
@@ -400,6 +406,7 @@ impl Federation {
                 track_number: None,
                 disc_number: None,
                 duration_seconds: None,
+                content_id: None,
             });
         }
 
@@ -426,16 +433,25 @@ impl Federation {
         }
         let tracks = sqlx::query(
             "SELECT t.id, t.title, COALESCE(t.year, r.year), t.duration_seconds,
-                    r.title, r.release_type, t.track_number, t.disc_number
+                    r.title, r.release_type, t.track_number, t.disc_number,
+                    t.audio_file_id, m.file_path, m.sha256_hash
              FROM furumusic__track t
              JOIN furumusic__release r ON r.id = t.release_id
+             JOIN furumusic__media_file m ON m.id = t.audio_file_id
              WHERE t.is_hidden = false AND r.is_hidden = false",
         )
         .fetch_all(&pool)
         .await?;
+        let storage_dir = lock(&self.storage_dir).clone();
         for row in &tracks {
             let id: i64 = row.get(0);
             let duration: f64 = row.get(3);
+            let media_file_id: i64 = row.get(8);
+            let file_path: String = row.get(9);
+            let sha256_hash: String = row.get(10);
+            let content_id = self
+                .content_id_for_media(media_file_id, sha256_hash, file_path, &storage_dir)
+                .await;
             specs.push(ItemSpec {
                 local_key: format!("track:{id}"),
                 kind: ItemKind::Track,
@@ -448,10 +464,33 @@ impl Federation {
                 track_number: row.get(6),
                 disc_number: row.get(7),
                 duration_seconds: (duration > 0.0).then_some(duration),
+                content_id,
             });
         }
 
         Ok(specs)
+    }
+
+    async fn content_id_for_media(
+        &self,
+        media_file_id: i64,
+        sha256_hash: String,
+        file_path: String,
+        storage_dir: &str,
+    ) -> Option<String> {
+        if let Some((cached_hash, content_id)) = lock(&self.content_cache).get(&media_file_id)
+            && cached_hash == &sha256_hash
+        {
+            return Some(content_id.clone());
+        }
+        let storage_dir = storage_dir.to_string();
+        let content_id =
+            tokio::task::spawn_blocking(move || audio_content_id(&storage_dir, &file_path))
+                .await
+                .ok()
+                .flatten()?;
+        lock(&self.content_cache).insert(media_file_id, (sha256_hash, content_id.clone()));
+        Some(content_id)
     }
 
     /// Live status for the admin page.
@@ -509,6 +548,17 @@ impl Federation {
             .map_err(|err| anyhow::anyhow!("connect failed: {err}"))?;
         Ok(peer.to_string())
     }
+}
+
+fn audio_content_id(storage_dir: &str, file_path: &str) -> Option<String> {
+    if storage_dir.trim().is_empty() {
+        return None;
+    }
+    let path = crate::media_paths::resolve_media_file_path(storage_dir, file_path);
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut hasher = blake3::Hasher::new();
+    std::io::copy(&mut file, &mut hasher).ok()?;
+    Some(format!("b3:{}", hasher.finalize().to_hex()))
 }
 
 async fn stop_running(running: Option<Running>) {
