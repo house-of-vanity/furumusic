@@ -150,7 +150,10 @@ async fn read_line<R: AsyncRead + Unpin>(reader: &mut R) -> Result<Vec<u8>> {
     }
 }
 
-async fn write_line<W: AsyncWriteExt + Unpin>(writer: &mut W, value: &impl Serialize) -> Result<()> {
+async fn write_line<W: AsyncWriteExt + Unpin>(
+    writer: &mut W,
+    value: &impl Serialize,
+) -> Result<()> {
     let mut line = serde_json::to_vec(value)?;
     line.push(b'\n');
     writer.write_all(&line).await?;
@@ -186,7 +189,10 @@ fn guess_mime(path: &Path) -> &'static str {
 }
 
 /// Reads an image media file from disk, bounded by [`MAX_IMAGE_BYTES`].
-async fn read_image(storage_dir: &str, media: Option<(String, String)>) -> Option<(Vec<u8>, String)> {
+async fn read_image(
+    storage_dir: &str,
+    media: Option<(String, String)>,
+) -> Option<(Vec<u8>, String)> {
     let (file_path, mime) = media?;
     let path = resolve_media_path(storage_dir, &file_path);
     let size = tokio::fs::metadata(&path).await.ok()?.len();
@@ -367,7 +373,9 @@ async fn serve_audio_one(
         Some(item_id) => match resolve_track_id(&pool, &own, item_id).await {
             Ok(Some(track_id)) => track_id,
             Ok(None) => return refuse_audio(stream, "track not found in the library").await,
-            Err(err) => return refuse_audio(stream, &format!("library lookup failed: {err:#}")).await,
+            Err(err) => {
+                return refuse_audio(stream, &format!("library lookup failed: {err:#}")).await;
+            }
         },
         None => return refuse_audio(stream, "malformed item_id").await,
     };
@@ -378,7 +386,9 @@ async fn serve_audio_one(
     let path = resolve_media_path(&storage_dir, &file_path);
     let mut file = match tokio::fs::File::open(&path).await {
         Ok(file) => file,
-        Err(err) => return refuse_audio(stream, &format!("audio file is not readable: {err}")).await,
+        Err(err) => {
+            return refuse_audio(stream, &format!("audio file is not readable: {err}")).await;
+        }
     };
     let total_size = file.metadata().await?.len();
     let offset = request.offset.min(total_size);
@@ -395,10 +405,17 @@ async fn serve_audio_one(
     };
     let (cover, artist_image) = if request.want_cover {
         (
-            read_image(&storage_dir, track_cover_file(&pool, track_id).await.ok().flatten()).await,
             read_image(
                 &storage_dir,
-                track_artist_image_file(&pool, track_id).await.ok().flatten(),
+                track_cover_file(&pool, track_id).await.ok().flatten(),
+            )
+            .await,
+            read_image(
+                &storage_dir,
+                track_artist_image_file(&pool, track_id)
+                    .await
+                    .ok()
+                    .flatten(),
             )
             .await,
         )
@@ -511,7 +528,10 @@ async fn serve_catalog_one(
                     artist: None,
                 },
             };
-            stream.send.write_all(&serde_json::to_vec(&response)?).await?;
+            stream
+                .send
+                .write_all(&serde_json::to_vec(&response)?)
+                .await?;
         }
         Some(want @ ("artist_image" | "release_cover")) => {
             let media = if want == "release_cover" {
@@ -549,7 +569,10 @@ async fn serve_catalog_one(
                 error: Some(format!("unknown request kind '{other}'")),
                 artist: None,
             };
-            stream.send.write_all(&serde_json::to_vec(&response)?).await?;
+            stream
+                .send
+                .write_all(&serde_json::to_vec(&response)?)
+                .await?;
         }
     }
     stream.send.finish()?;

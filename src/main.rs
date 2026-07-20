@@ -3,6 +3,7 @@ mod agent;
 mod api;
 mod auth;
 mod config;
+mod federation;
 mod i18n;
 mod jobs;
 mod lastfm;
@@ -12,7 +13,6 @@ mod music;
 mod oidc;
 mod player;
 mod scheduler;
-mod federation;
 mod torrents;
 mod user;
 

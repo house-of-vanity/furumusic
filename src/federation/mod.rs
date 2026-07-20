@@ -355,8 +355,12 @@ impl Federation {
                 kind: ItemKind::Artist,
                 name: row.get(1),
                 artist_names: Vec::new(),
+                featured_artist_names: Vec::new(),
                 year: None,
                 release_type: None,
+                release_title: None,
+                track_number: None,
+                disc_number: None,
                 duration_seconds: None,
             });
         }
@@ -389,29 +393,40 @@ impl Federation {
                 kind: ItemKind::Release,
                 name: row.get(1),
                 artist_names: artists_of_release.remove(&id).unwrap_or_default(),
+                featured_artist_names: Vec::new(),
                 year: row.get(2),
                 release_type: row.get(3),
+                release_title: None,
+                track_number: None,
+                disc_number: None,
                 duration_seconds: None,
             });
         }
 
         let track_artists = sqlx::query(
-            "SELECT ta.track_id, a.name FROM furumusic__track_artist ta
+            "SELECT ta.track_id, a.name, ta.role FROM furumusic__track_artist ta
              JOIN furumusic__artist a ON a.id = ta.artist_id
              WHERE ta.role IN ('main', 'featuring')
-             ORDER BY ta.track_id, ta.position",
+             ORDER BY ta.track_id,
+                      CASE ta.role WHEN 'main' THEN 0 ELSE 1 END,
+                      ta.position",
         )
         .fetch_all(&pool)
         .await?;
         let mut artists_of_track: std::collections::HashMap<i64, Vec<String>> = Default::default();
+        let mut featured_of_track: std::collections::HashMap<i64, Vec<String>> = Default::default();
         for row in &track_artists {
-            artists_of_track
-                .entry(row.get(0))
-                .or_default()
-                .push(row.get(1));
+            let id: i64 = row.get(0);
+            let name: String = row.get(1);
+            if row.get::<String, _>(2) == "featuring" {
+                featured_of_track.entry(id).or_default().push(name);
+            } else {
+                artists_of_track.entry(id).or_default().push(name);
+            }
         }
         let tracks = sqlx::query(
-            "SELECT t.id, t.title, COALESCE(t.year, r.year), t.duration_seconds
+            "SELECT t.id, t.title, COALESCE(t.year, r.year), t.duration_seconds,
+                    r.title, r.release_type, t.track_number, t.disc_number
              FROM furumusic__track t
              JOIN furumusic__release r ON r.id = t.release_id
              WHERE t.is_hidden = false AND r.is_hidden = false",
@@ -426,8 +441,12 @@ impl Federation {
                 kind: ItemKind::Track,
                 name: row.get(1),
                 artist_names: artists_of_track.remove(&id).unwrap_or_default(),
+                featured_artist_names: featured_of_track.remove(&id).unwrap_or_default(),
                 year: row.get(2),
-                release_type: None,
+                release_type: row.get(5),
+                release_title: Some(row.get(4)),
+                track_number: row.get(6),
+                disc_number: row.get(7),
                 duration_seconds: (duration > 0.0).then_some(duration),
             });
         }
