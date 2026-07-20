@@ -21,7 +21,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use music_dht::{
-    ItemKind, ItemSpec, MusicDhtConfig, MusicDhtService, NetworkId, PeerTicket, RendezvousConfig,
+    ItemKind, ItemSpec, MusicDhtConfig, MusicDhtService, NetworkId, PeerTicket, PublishStats,
+    RendezvousConfig, SyncStats,
 };
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -136,8 +137,7 @@ impl Federation {
                 }
                 "federation_network_id" => effective.federation_network_id = value,
                 "agent_storage_dir" => {
-                    effective.agent_storage_dir =
-                        crate::media_paths::resolve_config_path(&value);
+                    effective.agent_storage_dir = crate::media_paths::resolve_config_path(&value);
                 }
                 _ => {}
             }
@@ -208,7 +208,7 @@ impl Federation {
             let mut interval = tokio::time::interval(SYNC_INTERVAL);
             loop {
                 interval.tick().await;
-                sync_self.sync_once(&sync_service).await;
+                let _ = sync_self.sync_once(&sync_service).await;
             }
         });
         // Serve audio and catalog requests from other peers.
@@ -260,36 +260,39 @@ impl Federation {
     async fn spawn_sync_soon(self: &Arc<Self>) {
         if let Ok(service) = self.service().await {
             let fed = Arc::clone(self);
-            tokio::spawn(async move { fed.sync_once(&service).await });
+            tokio::spawn(async move {
+                let _ = fed.sync_once(&service).await;
+            });
         }
     }
 
     pub async fn sync_now(self: &Arc<Self>) -> Result<()> {
         let service = self.service().await?;
-        self.sync_once(&service).await;
+        let sync_stats = self.sync_once(&service).await?;
+        let publish_stats = match service.republish().await {
+            Ok(stats) => stats,
+            Err(err) => {
+                tracing::warn!("federation republish failed: {err}");
+                self.set_error(Some(format!("republish failed: {err}")));
+                anyhow::bail!("republish failed: {err}");
+            }
+        };
+        self.record_publish_success(sync_stats, publish_stats);
         Ok(())
     }
 
-    async fn sync_once(&self, service: &MusicDhtService) {
+    async fn sync_once(&self, service: &MusicDhtService) -> Result<SyncStats> {
         let specs = match self.collect_specs().await {
             Ok(specs) => specs,
             Err(err) => {
                 tracing::warn!("federation sync: library read failed: {err:#}");
                 self.set_error(Some(format!("library read failed: {err}")));
-                return;
+                anyhow::bail!("library read failed: {err}");
             }
         };
         match service.sync_library(specs).await {
             Ok(stats) => {
-                *lock(&self.last_sync) = Some(format!(
-                    "{} (+{} ~{} −{}, unchanged {}, failed {})",
-                    now_iso(),
-                    stats.added,
-                    stats.updated,
-                    stats.removed,
-                    stats.unchanged,
-                    stats.failed
-                ));
+                self.record_sync_success(stats);
                 if stats.failed > 0 {
                     self.set_error(Some(format!(
                         "{} item(s) failed to publish in the last sync",
@@ -298,12 +301,42 @@ impl Federation {
                 } else {
                     self.set_error(None);
                 }
+                Ok(stats)
             }
             Err(err) => {
                 tracing::warn!("federation sync failed: {err}");
                 self.set_error(Some(format!("sync failed: {err}")));
+                Err(anyhow::anyhow!("sync failed: {err}"))
             }
         }
+    }
+
+    fn record_sync_success(&self, stats: SyncStats) {
+        *lock(&self.last_sync) = Some(format!(
+            "{} (+{} ~{} −{}, unchanged {}, failed {})",
+            now_iso(),
+            stats.added,
+            stats.updated,
+            stats.removed,
+            stats.unchanged,
+            stats.failed
+        ));
+    }
+
+    fn record_publish_success(&self, sync_stats: SyncStats, publish_stats: PublishStats) {
+        *lock(&self.last_sync) = Some(format!(
+            "{} (+{} ~{} −{}, unchanged {}, failed {}; republished {} records, {} keys, remote nodes {})",
+            now_iso(),
+            sync_stats.added,
+            sync_stats.updated,
+            sync_stats.removed,
+            sync_stats.unchanged,
+            sync_stats.failed,
+            publish_stats.records,
+            publish_stats.keys,
+            publish_stats.remote_nodes,
+        ));
+        self.set_error(None);
     }
 
     /// Everything the regular player shows, as DHT item specs: non-hidden
@@ -312,10 +345,9 @@ impl Federation {
         let pool = self.pool().await?;
         let mut specs = Vec::new();
 
-        let artists =
-            sqlx::query("SELECT id, name FROM furumusic__artist WHERE is_hidden = false")
-                .fetch_all(&pool)
-                .await?;
+        let artists = sqlx::query("SELECT id, name FROM furumusic__artist WHERE is_hidden = false")
+            .fetch_all(&pool)
+            .await?;
         for row in &artists {
             let id: i64 = row.get(0);
             specs.push(ItemSpec {
