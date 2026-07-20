@@ -522,7 +522,7 @@ async fn serve_catalog_one(
 
     match request.want.as_deref() {
         None | Some("catalog") => {
-            let response = match build_catalog(&pool, &own, &storage_dir, &request.artist).await {
+            let response = match build_catalog(&pool, &own, &request.artist).await {
                 Ok(response) => response,
                 Err(err) => CatalogResponse {
                     ok: false,
@@ -582,12 +582,7 @@ async fn serve_catalog_one(
     Ok(())
 }
 
-async fn build_catalog(
-    pool: &PgPool,
-    own: &EndpointId,
-    storage_dir: &str,
-    artist: &str,
-) -> Result<CatalogResponse> {
+async fn build_catalog(pool: &PgPool, own: &EndpointId, artist: &str) -> Result<CatalogResponse> {
     let Some(artist_row) = sqlx::query(
         "SELECT id, name FROM furumusic__artist
          WHERE LOWER(name) = LOWER($1) AND is_hidden = false
@@ -620,9 +615,11 @@ async fn build_catalog(
         let release_id: i64 = release_row.get(0);
         let track_rows = sqlx::query(
             "SELECT t.id, t.title, t.track_number, t.disc_number, t.duration_seconds,
-                    m.file_path
+                    c.content_id
              FROM furumusic__track t
              JOIN furumusic__media_file m ON m.id = t.audio_file_id
+             LEFT JOIN furumusic__federation_content_id_cache c
+                    ON c.media_file_id = m.id AND c.sha256_hash = m.sha256_hash
              WHERE t.release_id = $1 AND t.is_hidden = false
              ORDER BY t.disc_number NULLS FIRST, t.track_number NULLS LAST, t.title",
         )
@@ -633,14 +630,12 @@ async fn build_catalog(
         for row in track_rows {
             let track_id: i64 = row.get(0);
             let duration: f64 = row.get(4);
-            let file_path: String = row.get(5);
-            let content_id = catalog_content_id(storage_dir, file_path).await;
             tracks.push(CatalogTrack {
                 title: row.get(1),
                 track_number: row.get(2),
                 disc_number: row.get(3),
                 duration_seconds: (duration > 0.0).then_some(duration),
-                content_id,
+                content_id: row.get(5),
                 item_id: item_id_of(own, track_id),
             });
         }
@@ -660,14 +655,6 @@ async fn build_catalog(
             releases,
         }),
     })
-}
-
-async fn catalog_content_id(storage_dir: &str, file_path: String) -> Option<String> {
-    let storage_dir = storage_dir.to_string();
-    tokio::task::spawn_blocking(move || super::audio_content_id(&storage_dir, &file_path))
-        .await
-        .ok()
-        .flatten()
 }
 
 async fn artist_image_by_name(pool: &PgPool, artist: &str) -> Result<Option<(String, String)>> {

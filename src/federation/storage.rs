@@ -44,6 +44,14 @@ const SCHEMA: &[&str] = &[
         ticket        TEXT NOT NULL,
         last_seen_ms  BIGINT NOT NULL
     )",
+    "CREATE TABLE IF NOT EXISTS furumusic__federation_content_id_cache (
+        media_file_id  BIGINT PRIMARY KEY,
+        sha256_hash    TEXT NOT NULL,
+        content_id     TEXT NOT NULL,
+        updated_at     TEXT NOT NULL
+    )",
+    "CREATE INDEX IF NOT EXISTS idx_furumusic_federation_content_id_cache_content_id
+        ON furumusic__federation_content_id_cache(content_id)",
 ];
 
 #[derive(Debug, Clone)]

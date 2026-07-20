@@ -36,14 +36,17 @@ pub use serve::{AUDIO_ALPN, CATALOG_ALPN};
 
 /// How often the published library is re-synchronized with the database.
 const SYNC_INTERVAL: Duration = Duration::from_secs(60);
-/// Content IDs are file hashes and can be expensive to warm for large
-/// libraries. Keep DHT publishing responsive and let later syncs fill them in.
-const MAX_CONTENT_HASH_JOBS_PER_SYNC: usize = 512;
 
 struct Running {
     service: Arc<MusicDhtService>,
     network_name: String,
     tasks: Vec<tokio::task::JoinHandle<()>>,
+}
+
+struct ContentHashJob {
+    media_file_id: i64,
+    sha256_hash: String,
+    file_path: String,
 }
 
 pub struct Federation {
@@ -440,31 +443,36 @@ impl Federation {
         let tracks = sqlx::query(
             "SELECT t.id, t.title, COALESCE(t.year, r.year), t.duration_seconds,
                     r.title, r.release_type, t.track_number, t.disc_number,
-                    t.audio_file_id, m.file_path, m.sha256_hash
+                    t.audio_file_id, m.file_path, m.sha256_hash, c.content_id
              FROM furumusic__track t
              JOIN furumusic__release r ON r.id = t.release_id
              JOIN furumusic__media_file m ON m.id = t.audio_file_id
+             LEFT JOIN furumusic__federation_content_id_cache c
+                    ON c.media_file_id = m.id AND c.sha256_hash = m.sha256_hash
              WHERE t.is_hidden = false AND r.is_hidden = false",
         )
         .fetch_all(&pool)
         .await?;
         let storage_dir = lock(&self.storage_dir).clone();
-        let mut hash_jobs_scheduled = 0usize;
+        let mut content_hash_jobs = Vec::new();
         for row in &tracks {
             let id: i64 = row.get(0);
             let duration: f64 = row.get(3);
             let media_file_id: i64 = row.get(8);
             let file_path: String = row.get(9);
             let sha256_hash: String = row.get(10);
-            let (content_id, scheduled_hash) = self.content_id_for_media(
-                media_file_id,
-                sha256_hash,
-                file_path,
-                &storage_dir,
-                hash_jobs_scheduled < MAX_CONTENT_HASH_JOBS_PER_SYNC,
-            );
-            if scheduled_hash {
-                hash_jobs_scheduled += 1;
+            let cached_content_id: Option<String> = row.get(11);
+            let content_id = cached_content_id
+                .or_else(|| self.cached_content_id_for_media(media_file_id, &sha256_hash));
+            if content_id.is_none()
+                && !storage_dir.trim().is_empty()
+                && self.mark_content_hash_pending(media_file_id)
+            {
+                content_hash_jobs.push(ContentHashJob {
+                    media_file_id,
+                    sha256_hash,
+                    file_path,
+                });
             }
             specs.push(ItemSpec {
                 local_key: format!("track:{id}"),
@@ -481,52 +489,67 @@ impl Federation {
                 content_id,
             });
         }
+        self.spawn_content_warmer(pool.clone(), storage_dir, content_hash_jobs);
 
         Ok(specs)
     }
 
-    fn content_id_for_media(
-        self: &Arc<Self>,
-        media_file_id: i64,
-        sha256_hash: String,
-        file_path: String,
-        storage_dir: &str,
-        schedule_missing: bool,
-    ) -> (Option<String>, bool) {
-        if storage_dir.trim().is_empty() {
-            return (None, false);
-        }
+    fn cached_content_id_for_media(&self, media_file_id: i64, sha256_hash: &str) -> Option<String> {
         if let Some((cached_hash, content_id)) = lock(&self.content_cache).get(&media_file_id)
-            && cached_hash == &sha256_hash
+            && cached_hash == sha256_hash
         {
-            return (Some(content_id.clone()), false);
+            return Some(content_id.clone());
         }
-        if !schedule_missing {
-            return (None, false);
-        }
+        None
+    }
 
-        {
-            let mut pending = lock(&self.content_pending);
-            if !pending.insert(media_file_id) {
-                return (None, false);
-            }
-        }
+    fn mark_content_hash_pending(&self, media_file_id: i64) -> bool {
+        lock(&self.content_pending).insert(media_file_id)
+    }
 
-        let storage_dir = storage_dir.to_string();
+    fn spawn_content_warmer(
+        self: &Arc<Self>,
+        pool: PgPool,
+        storage_dir: String,
+        jobs: Vec<ContentHashJob>,
+    ) {
+        if jobs.is_empty() {
+            return;
+        }
         let fed = Arc::clone(self);
         tokio::spawn(async move {
-            let content_id =
-                tokio::task::spawn_blocking(move || audio_content_id(&storage_dir, &file_path))
-                    .await
-                    .ok()
-                    .flatten();
-            lock(&fed.content_pending).remove(&media_file_id);
-            if let Some(content_id) = content_id {
-                lock(&fed.content_cache).insert(media_file_id, (sha256_hash, content_id));
+            let total = jobs.len();
+            let mut stored = 0usize;
+            for job in jobs {
+                let job_storage_dir = storage_dir.clone();
+                let job_file_path = job.file_path.clone();
+                let content_id = tokio::task::spawn_blocking(move || {
+                    audio_content_id(&job_storage_dir, &job_file_path)
+                })
+                .await
+                .ok()
+                .flatten();
+                lock(&fed.content_pending).remove(&job.media_file_id);
+                if let Some(content_id) = content_id {
+                    lock(&fed.content_cache).insert(
+                        job.media_file_id,
+                        (job.sha256_hash.clone(), content_id.clone()),
+                    );
+                    if let Err(err) =
+                        persist_content_id(&pool, job.media_file_id, &job.sha256_hash, &content_id)
+                            .await
+                    {
+                        tracing::warn!(
+                            media_file_id = job.media_file_id,
+                            "federation content-id cache write failed: {err:#}"
+                        );
+                    } else {
+                        stored += 1;
+                    }
+                }
             }
+            tracing::info!(total, stored, "federation content-id cache warm finished");
         });
-
-        (None, true)
     }
 
     /// Live status for the admin page.
@@ -584,6 +607,30 @@ impl Federation {
             .map_err(|err| anyhow::anyhow!("connect failed: {err}"))?;
         Ok(peer.to_string())
     }
+}
+
+async fn persist_content_id(
+    pool: &PgPool,
+    media_file_id: i64,
+    sha256_hash: &str,
+    content_id: &str,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO furumusic__federation_content_id_cache
+         (media_file_id, sha256_hash, content_id, updated_at)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (media_file_id) DO UPDATE SET
+            sha256_hash = EXCLUDED.sha256_hash,
+            content_id = EXCLUDED.content_id,
+            updated_at = EXCLUDED.updated_at",
+    )
+    .bind(media_file_id)
+    .bind(sha256_hash)
+    .bind(content_id)
+    .bind(now_iso())
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 fn audio_content_id(storage_dir: &str, file_path: &str) -> Option<String> {
