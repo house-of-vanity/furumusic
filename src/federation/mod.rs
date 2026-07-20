@@ -15,6 +15,7 @@
 mod serve;
 mod storage;
 
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -35,6 +36,9 @@ pub use serve::{AUDIO_ALPN, CATALOG_ALPN};
 
 /// How often the published library is re-synchronized with the database.
 const SYNC_INTERVAL: Duration = Duration::from_secs(60);
+/// Content IDs are file hashes and can be expensive to warm for large
+/// libraries. Keep DHT publishing responsive and let later syncs fill them in.
+const MAX_CONTENT_HASH_JOBS_PER_SYNC: usize = 512;
 
 struct Running {
     service: Arc<MusicDhtService>,
@@ -47,7 +51,8 @@ pub struct Federation {
     data_dir: PathBuf,
     database_url: std::sync::Mutex<String>,
     storage_dir: std::sync::Mutex<String>,
-    content_cache: std::sync::Mutex<std::collections::HashMap<i64, (String, String)>>,
+    content_cache: std::sync::Mutex<HashMap<i64, (String, String)>>,
+    content_pending: std::sync::Mutex<HashSet<i64>>,
     pool: tokio::sync::OnceCell<PgPool>,
     running: tokio::sync::Mutex<Option<Running>>,
     last_sync: std::sync::Mutex<Option<String>>,
@@ -73,6 +78,7 @@ pub fn handle() -> Arc<Federation> {
             database_url: std::sync::Mutex::new(String::new()),
             storage_dir: std::sync::Mutex::new(String::new()),
             content_cache: std::sync::Mutex::new(Default::default()),
+            content_pending: std::sync::Mutex::new(Default::default()),
             pool: tokio::sync::OnceCell::new(),
             running: tokio::sync::Mutex::new(None),
             last_sync: std::sync::Mutex::new(None),
@@ -286,7 +292,7 @@ impl Federation {
         Ok(())
     }
 
-    async fn sync_once(&self, service: &MusicDhtService) -> Result<SyncStats> {
+    async fn sync_once(self: &Arc<Self>, service: &MusicDhtService) -> Result<SyncStats> {
         let specs = match self.collect_specs().await {
             Ok(specs) => specs,
             Err(err) => {
@@ -346,7 +352,7 @@ impl Federation {
 
     /// Everything the regular player shows, as DHT item specs: non-hidden
     /// artists, releases and tracks (a track also hides with its release).
-    async fn collect_specs(&self) -> Result<Vec<ItemSpec>> {
+    async fn collect_specs(self: &Arc<Self>) -> Result<Vec<ItemSpec>> {
         let pool = self.pool().await?;
         let mut specs = Vec::new();
 
@@ -443,15 +449,23 @@ impl Federation {
         .fetch_all(&pool)
         .await?;
         let storage_dir = lock(&self.storage_dir).clone();
+        let mut hash_jobs_scheduled = 0usize;
         for row in &tracks {
             let id: i64 = row.get(0);
             let duration: f64 = row.get(3);
             let media_file_id: i64 = row.get(8);
             let file_path: String = row.get(9);
             let sha256_hash: String = row.get(10);
-            let content_id = self
-                .content_id_for_media(media_file_id, sha256_hash, file_path, &storage_dir)
-                .await;
+            let (content_id, scheduled_hash) = self.content_id_for_media(
+                media_file_id,
+                sha256_hash,
+                file_path,
+                &storage_dir,
+                hash_jobs_scheduled < MAX_CONTENT_HASH_JOBS_PER_SYNC,
+            );
+            if scheduled_hash {
+                hash_jobs_scheduled += 1;
+            }
             specs.push(ItemSpec {
                 local_key: format!("track:{id}"),
                 kind: ItemKind::Track,
@@ -471,26 +485,48 @@ impl Federation {
         Ok(specs)
     }
 
-    async fn content_id_for_media(
-        &self,
+    fn content_id_for_media(
+        self: &Arc<Self>,
         media_file_id: i64,
         sha256_hash: String,
         file_path: String,
         storage_dir: &str,
-    ) -> Option<String> {
+        schedule_missing: bool,
+    ) -> (Option<String>, bool) {
+        if storage_dir.trim().is_empty() {
+            return (None, false);
+        }
         if let Some((cached_hash, content_id)) = lock(&self.content_cache).get(&media_file_id)
             && cached_hash == &sha256_hash
         {
-            return Some(content_id.clone());
+            return (Some(content_id.clone()), false);
         }
+        if !schedule_missing {
+            return (None, false);
+        }
+
+        {
+            let mut pending = lock(&self.content_pending);
+            if !pending.insert(media_file_id) {
+                return (None, false);
+            }
+        }
+
         let storage_dir = storage_dir.to_string();
-        let content_id =
-            tokio::task::spawn_blocking(move || audio_content_id(&storage_dir, &file_path))
-                .await
-                .ok()
-                .flatten()?;
-        lock(&self.content_cache).insert(media_file_id, (sha256_hash, content_id.clone()));
-        Some(content_id)
+        let fed = Arc::clone(self);
+        tokio::spawn(async move {
+            let content_id =
+                tokio::task::spawn_blocking(move || audio_content_id(&storage_dir, &file_path))
+                    .await
+                    .ok()
+                    .flatten();
+            lock(&fed.content_pending).remove(&media_file_id);
+            if let Some(content_id) = content_id {
+                lock(&fed.content_cache).insert(media_file_id, (sha256_hash, content_id));
+            }
+        });
+
+        (None, true)
     }
 
     /// Live status for the admin page.
