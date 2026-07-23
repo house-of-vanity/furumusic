@@ -95,6 +95,7 @@ pub(super) struct PlaylistInfoRow {
 
 #[derive(sqlx::FromRow)]
 pub(super) struct PlaylistTrackRow {
+    pub(super) playlist_track_id: Option<i64>,
     pub(super) id: i64,
     pub(super) title: String,
     pub(super) track_number: Option<i32>,

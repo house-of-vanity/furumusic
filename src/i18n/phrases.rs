@@ -309,6 +309,7 @@ translations! {
     player_cancel:           "Cancel"                          , "Отмена";
     player_create:           "Create"                          , "Создать";
     player_save:             "Save"                            , "Сохранить";
+    player_done:             "Done"                            , "Готово";
     player_delete:           "Delete"                          , "Удалить";
     player_delete_playlist_confirm: "Delete this playlist?"     , "Удалить этот плейлист?";
     player_rename:           "Rename"                          , "Переименовать";

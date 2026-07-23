@@ -2745,6 +2745,7 @@ document.addEventListener('alpine:init', () => {
 
         async openPlaylist(id, options = {}) {
             this._beginNavigation('#playlist/' + id, options);
+            Alpine.store('playlists')?.stopEdit?.();
             this.view = 'playlist_detail';
             this.currentPlaylist = null;
             try {
@@ -2756,6 +2757,7 @@ document.addEventListener('alpine:init', () => {
         },
 
         showSharedPlaylist(share, options = {}) {
+            Alpine.store('playlists')?.stopEdit?.();
             this._saveScrollPosition(this._activeHash);
             this.searchQuery = '';
             this.searchResults = null;
@@ -4301,6 +4303,11 @@ document.addEventListener('alpine:init', () => {
         list: [],
         modal: null,   // { mode: 'create'|'rename', title: '', id?: number }
         picker: null,  // { trackIds: [1,2,3] }
+        editingPlaylistId: null,
+        _dragIdx: null,
+        _dragOverIdx: null,
+        _pointerDragMove: null,
+        _pointerDragEnd: null,
 
         init() {
             this.reload();
@@ -4331,6 +4338,214 @@ document.addEventListener('alpine:init', () => {
 
         displayTitle(pl) {
             return pl?.kind === 'likes' ? T.likesPlaylist : (pl?.title || '');
+        },
+
+        currentPlaylist() {
+            return Alpine.store('library')?.currentPlaylist || null;
+        },
+
+        canEditCurrent() {
+            const playlist = this.currentPlaylist();
+            return !!playlist && playlist.kind === 'user' && playlist.is_own && Number(playlist.id) > 0;
+        },
+
+        isEditingCurrent() {
+            const playlist = this.currentPlaylist();
+            return this.canEditCurrent() && Number(this.editingPlaylistId) === Number(playlist.id);
+        },
+
+        toggleEditCurrent() {
+            if (this.isEditingCurrent()) {
+                this.stopEdit();
+                return;
+            }
+            if (!this.canEditCurrent()) return;
+            this.editingPlaylistId = Number(this.currentPlaylist().id);
+        },
+
+        stopEdit() {
+            this._endPointerReorder(false);
+            this.endDrag();
+            this.editingPlaylistId = null;
+        },
+
+        _updateListTrackCount(playlistId, count) {
+            const id = Number(playlistId);
+            this.list = this.list.map(pl => (
+                Number(pl.id) === id ? { ...pl, track_count: count } : pl
+            ));
+        },
+
+        _playlistTrackIds(tracks) {
+            return (tracks || []).map(track => Number(track?.playlist_track_id || 0)).filter(Boolean);
+        },
+
+        async removeCurrentTrack(track, idx) {
+            if (!this.isEditingCurrent() || !track) return;
+            const playlist = this.currentPlaylist();
+            const playlistId = Number(playlist.id);
+            const playlistTrackId = Number(track.playlist_track_id || 0);
+            const previous = (playlist.tracks || []).slice();
+            if (!playlistTrackId) return;
+
+            playlist.tracks = previous.filter(item => Number(item.playlist_track_id || 0) !== playlistTrackId);
+            this._updateListTrackCount(playlistId, playlist.tracks.length);
+
+            try {
+                const res = await fetch(`/api/player/playlists/${playlistId}/tracks`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ playlist_track_id: playlistTrackId }),
+                });
+                if (!res.ok) throw new Error('remove failed');
+                await this.reload();
+            } catch (err) {
+                if (Number(this.currentPlaylist()?.id) === playlistId) {
+                    this.currentPlaylist().tracks = previous;
+                    this._updateListTrackCount(playlistId, previous.length);
+                }
+                console.warn(err);
+            }
+        },
+
+        startDrag(event, idx) {
+            const tracks = this.currentPlaylist()?.tracks || [];
+            if (!this.isEditingCurrent() || idx < 0 || idx >= tracks.length || !tracks[idx]?.playlist_track_id) {
+                return false;
+            }
+            this._dragIdx = idx;
+            this._dragOverIdx = idx;
+            if (event?.dataTransfer) {
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('text/plain', String(tracks[idx].playlist_track_id));
+            }
+            return true;
+        },
+
+        dragOver(event, idx) {
+            if (!this.isEditingCurrent() || this._dragIdx === null) return;
+            const tracks = this.currentPlaylist()?.tracks || [];
+            if (idx < 0 || idx >= tracks.length) return;
+            this._dragOverIdx = idx;
+            if (event?.dataTransfer) event.dataTransfer.dropEffect = 'move';
+            document.querySelectorAll('.playlist-track-row.drag-over').forEach(el => el.classList.remove('drag-over'));
+            if (idx !== this._dragIdx) event.currentTarget.classList.add('drag-over');
+        },
+
+        dropOn(idx) {
+            const fromIdx = this._dragIdx;
+            this.endDrag();
+            if (!Number.isInteger(fromIdx) || fromIdx === idx) return;
+            this.moveCurrentTrack(fromIdx, idx);
+        },
+
+        endDrag() {
+            document.querySelectorAll('.playlist-track-row.drag-over').forEach(el => el.classList.remove('drag-over'));
+            this._dragIdx = null;
+            this._dragOverIdx = null;
+        },
+
+        async moveCurrentTrack(fromIdx, toIdx) {
+            if (!this.isEditingCurrent()) return;
+            const playlist = this.currentPlaylist();
+            const playlistId = Number(playlist.id);
+            const previous = (playlist.tracks || []).slice();
+            if (fromIdx < 0 || fromIdx >= previous.length || toIdx < 0 || toIdx >= previous.length) return;
+            const next = previous.slice();
+            const [track] = next.splice(fromIdx, 1);
+            next.splice(toIdx, 0, track);
+            playlist.tracks = next;
+
+            const playlistTrackIds = this._playlistTrackIds(next);
+            if (playlistTrackIds.length !== next.length) {
+                playlist.tracks = previous;
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/player/playlists/${playlistId}/tracks`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ playlist_track_ids: playlistTrackIds }),
+                });
+                if (!res.ok) throw new Error('reorder failed');
+                await this.reload();
+            } catch (err) {
+                if (Number(this.currentPlaylist()?.id) === playlistId) {
+                    this.currentPlaylist().tracks = previous;
+                }
+                console.warn(err);
+            }
+        },
+
+        startPointerReorder(event, idx) {
+            if (event.pointerType === 'mouse') return;
+            if (event.button && event.button !== 0) return;
+            const tracks = this.currentPlaylist()?.tracks || [];
+            if (!this.isEditingCurrent() || idx < 0 || idx >= tracks.length || !tracks[idx]?.playlist_track_id) return;
+            event.preventDefault();
+            this._endPointerReorder(false);
+            this._dragIdx = idx;
+            this._dragOverIdx = idx;
+            const handle = event.currentTarget;
+            try {
+                handle?.setPointerCapture?.(event.pointerId);
+            } catch (_) {}
+
+            this._pointerDragMove = (moveEvent) => {
+                moveEvent.preventDefault();
+                this._autoScrollDuringReorder(moveEvent.clientY);
+                const target = document
+                    .elementFromPoint(moveEvent.clientX, moveEvent.clientY)
+                    ?.closest?.('.playlist-track-row[data-playlist-index]');
+                const targetIdx = Number(target?.dataset?.playlistIndex);
+                const currentTracks = this.currentPlaylist()?.tracks || [];
+                if (!Number.isInteger(targetIdx) || targetIdx < 0 || targetIdx >= currentTracks.length) return;
+                this._dragOverIdx = targetIdx;
+                document.querySelectorAll('.playlist-track-row.drag-over').forEach(el => el.classList.remove('drag-over'));
+                if (targetIdx !== this._dragIdx) target.classList.add('drag-over');
+            };
+
+            this._pointerDragEnd = (endEvent) => {
+                try {
+                    if (handle?.hasPointerCapture?.(endEvent.pointerId)) handle.releasePointerCapture(endEvent.pointerId);
+                } catch (_) {}
+                this._endPointerReorder(true);
+            };
+
+            window.addEventListener('pointermove', this._pointerDragMove, { passive: false });
+            window.addEventListener('pointerup', this._pointerDragEnd, { passive: false });
+            window.addEventListener('pointercancel', this._pointerDragEnd, { passive: false });
+        },
+
+        _autoScrollDuringReorder(clientY) {
+            const scroller = document.getElementById('center-scroll');
+            if (!scroller) return;
+            const rect = scroller.getBoundingClientRect();
+            const edge = 52;
+            if (clientY < rect.top + edge) {
+                scroller.scrollTop -= Math.ceil((rect.top + edge - clientY) / 4);
+            } else if (clientY > rect.bottom - edge) {
+                scroller.scrollTop += Math.ceil((clientY - (rect.bottom - edge)) / 4);
+            }
+        },
+
+        _endPointerReorder(commit) {
+            if (this._pointerDragMove) window.removeEventListener('pointermove', this._pointerDragMove);
+            if (this._pointerDragEnd) {
+                window.removeEventListener('pointerup', this._pointerDragEnd);
+                window.removeEventListener('pointercancel', this._pointerDragEnd);
+            }
+            document.querySelectorAll('.playlist-track-row.drag-over').forEach(el => el.classList.remove('drag-over'));
+            const fromIdx = this._dragIdx;
+            const toIdx = this._dragOverIdx;
+            this._pointerDragMove = null;
+            this._pointerDragEnd = null;
+            this._dragIdx = null;
+            this._dragOverIdx = null;
+            if (commit && Number.isInteger(fromIdx) && Number.isInteger(toIdx) && fromIdx !== toIdx) {
+                this.moveCurrentTrack(fromIdx, toIdx);
+            }
         },
 
         showCreate() {

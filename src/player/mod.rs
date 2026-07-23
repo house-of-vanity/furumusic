@@ -3414,6 +3414,7 @@ async fn artist_detail_handler(
     let top_tracks = sqlx::query_as::<_, PlaylistTrackRow>(
         r#"SELECT * FROM (
                SELECT DISTINCT ON (lower(t.title::text))
+                      NULL::bigint AS playlist_track_id,
                       t.id, t.title::text as title, t.track_number, t.disc_number,
                       t.duration_seconds, t.cover_file_id,
                       r.cover_file_id as release_cover_file_id,
@@ -3515,7 +3516,8 @@ async fn release_detail_handler(
     .map_err(|e| cot::Error::internal(e.to_string()))?;
 
     let tracks = sqlx::query_as::<_, PlaylistTrackRow>(
-        r#"SELECT t.id, t.title::text as title, t.track_number, t.disc_number,
+        r#"SELECT NULL::bigint AS playlist_track_id,
+                  t.id, t.title::text as title, t.track_number, t.disc_number,
                   t.duration_seconds, t.cover_file_id,
                   r.cover_file_id as release_cover_file_id,
                   r.id as release_id,
@@ -3687,7 +3689,8 @@ async fn playlist_detail_handler(
     };
 
     let tracks = sqlx::query_as::<_, PlaylistTrackRow>(
-        r#"SELECT t.id, t.title::text as title, t.track_number, t.disc_number,
+        r#"SELECT pt.id AS playlist_track_id,
+                  t.id, t.title::text as title, t.track_number, t.disc_number,
                   t.duration_seconds, t.cover_file_id,
                   r.cover_file_id as release_cover_file_id,
                   r.id as release_id,
@@ -3715,7 +3718,7 @@ async fn playlist_detail_handler(
     .await
     .map_err(|e| cot::Error::internal(e.to_string()))?;
 
-    let track_items = build_track_items(tracks, pool).await?;
+    let track_items = build_playlist_track_items(tracks, pool).await?;
 
     Json(PlaylistDetail {
         id: info.id,
@@ -3813,13 +3816,34 @@ async fn build_track_items(
         .collect())
 }
 
+async fn build_playlist_track_items(
+    tracks: Vec<PlaylistTrackRow>,
+    pool: &sqlx::PgPool,
+) -> cot::Result<Vec<PlaylistTrackItem>> {
+    let playlist_track_ids = tracks
+        .iter()
+        .map(|track| track.playlist_track_id)
+        .collect::<Vec<_>>();
+    let track_items = build_track_items(tracks, pool).await?;
+
+    Ok(track_items
+        .into_iter()
+        .zip(playlist_track_ids)
+        .map(|(track, playlist_track_id)| PlaylistTrackItem {
+            playlist_track_id,
+            track,
+        })
+        .collect())
+}
+
 async fn load_track_items_by_ids(pool: &sqlx::PgPool, ids: &[i64]) -> cot::Result<Vec<TrackItem>> {
     if ids.is_empty() {
         return Ok(Vec::new());
     }
 
     let tracks = sqlx::query_as::<_, PlaylistTrackRow>(
-        r#"SELECT t.id, t.title::text as title, t.track_number, t.disc_number,
+        r#"SELECT NULL::bigint AS playlist_track_id,
+                  t.id, t.title::text as title, t.track_number, t.disc_number,
                   t.duration_seconds, t.cover_file_id,
                   r.cover_file_id as release_cover_file_id,
                   r.id as release_id,
@@ -3976,7 +4000,8 @@ async fn likes_playlist_handler(
     pool: &sqlx::PgPool,
 ) -> cot::Result<cot::response::Response> {
     let tracks = sqlx::query_as::<_, PlaylistTrackRow>(
-        r#"SELECT t.id, t.title::text as title, t.track_number, t.disc_number,
+        r#"SELECT NULL::bigint AS playlist_track_id,
+                  t.id, t.title::text as title, t.track_number, t.disc_number,
                   t.duration_seconds, t.cover_file_id,
                   r.cover_file_id as release_cover_file_id,
                   r.id as release_id,
@@ -4004,7 +4029,14 @@ async fn likes_playlist_handler(
     .await
     .map_err(|e| cot::Error::internal(e.to_string()))?;
 
-    let track_items = build_track_items(tracks, pool).await?;
+    let track_items = build_track_items(tracks, pool)
+        .await?
+        .into_iter()
+        .map(|track| PlaylistTrackItem {
+            playlist_track_id: None,
+            track,
+        })
+        .collect();
 
     Json(PlaylistDetail {
         id: -1,
@@ -5610,6 +5642,110 @@ async fn add_tracks_to_playlist_handler(
 }
 
 // ---------------------------------------------------------------------------
+// PUT /api/player/playlists/{id}/tracks  — reorder playlist tracks
+// ---------------------------------------------------------------------------
+
+async fn reorder_playlist_tracks_handler(
+    auth_ctx: auth::AuthContext,
+    session: Session,
+    db: Database,
+    pool: &sqlx::PgPool,
+    path: Path<PathId>,
+    Json(body): Json<ReorderPlaylistRequest>,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    let playlist_id = path.0.id;
+    let owner: Option<(i64,)> =
+        sqlx::query_as("SELECT owner_id FROM furumusic__playlist WHERE id = $1")
+            .bind(playlist_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let Some(owner) = owner else {
+        return Ok(json_error(StatusCode::NOT_FOUND, "playlist not found"));
+    };
+    if owner.0 != user.id {
+        return Ok(json_error(StatusCode::FORBIDDEN, "not your playlist"));
+    }
+
+    let requested_ids = body
+        .playlist_track_ids
+        .into_iter()
+        .filter(|id| *id > 0)
+        .collect::<Vec<_>>();
+    let unique_requested = requested_ids.iter().copied().collect::<HashSet<_>>();
+    if unique_requested.len() != requested_ids.len() {
+        return Ok(json_error(
+            StatusCode::BAD_REQUEST,
+            "duplicate playlist track ids",
+        ));
+    }
+
+    let visible_ids = sqlx::query_scalar::<_, i64>(
+        r#"SELECT pt.id
+           FROM furumusic__playlist_track pt
+           JOIN furumusic__track t ON t.id = pt.track_id
+           WHERE pt.playlist_id = $1 AND t.is_hidden = false
+           ORDER BY pt.position"#,
+    )
+    .bind(playlist_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    let visible_set = visible_ids.iter().copied().collect::<HashSet<_>>();
+    if visible_set != unique_requested {
+        return Ok(json_error(
+            StatusCode::BAD_REQUEST,
+            "playlist track ids do not match this playlist",
+        ));
+    }
+
+    let hidden_ids = sqlx::query_scalar::<_, i64>(
+        r#"SELECT pt.id
+           FROM furumusic__playlist_track pt
+           JOIN furumusic__track t ON t.id = pt.track_id
+           WHERE pt.playlist_id = $1 AND t.is_hidden = true
+           ORDER BY pt.position"#,
+    )
+    .bind(playlist_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    let mut ordered_ids = requested_ids;
+    ordered_ids.extend(hidden_ids);
+    if !ordered_ids.is_empty() {
+        sqlx::query(
+            r#"WITH ordered AS (
+                 SELECT id, ord::integer - 1 AS position
+                   FROM unnest($1::bigint[]) WITH ORDINALITY AS u(id, ord)
+               )
+               UPDATE furumusic__playlist_track pt
+                  SET position = ordered.position
+                 FROM ordered
+                WHERE pt.id = ordered.id AND pt.playlist_id = $2"#,
+        )
+        .bind(&ordered_ids)
+        .bind(playlist_id)
+        .execute(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    }
+
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    sqlx::query("UPDATE furumusic__playlist SET updated_at = $1 WHERE id = $2")
+        .bind(&now)
+        .bind(playlist_id)
+        .execute(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    Json(serde_json::json!({"ok": true})).into_response()
+}
+
+// ---------------------------------------------------------------------------
 // DELETE /api/player/playlists/{id}/tracks  — remove a track from playlist
 // ---------------------------------------------------------------------------
 
@@ -5638,12 +5774,29 @@ async fn remove_track_from_playlist_handler(
         return Ok(json_error(StatusCode::FORBIDDEN, "not your playlist"));
     }
 
-    sqlx::query("DELETE FROM furumusic__playlist_track WHERE playlist_id = $1 AND track_id = $2")
-        .bind(playlist_id)
-        .bind(body.track_id)
-        .execute(pool)
-        .await
-        .map_err(|e| cot::Error::internal(e.to_string()))?;
+    match (body.playlist_track_id, body.track_id) {
+        (Some(playlist_track_id), _) => {
+            sqlx::query("DELETE FROM furumusic__playlist_track WHERE playlist_id = $1 AND id = $2")
+                .bind(playlist_id)
+                .bind(playlist_track_id)
+                .execute(pool)
+                .await
+                .map_err(|e| cot::Error::internal(e.to_string()))?;
+        }
+        (None, Some(track_id)) => {
+            sqlx::query(
+                "DELETE FROM furumusic__playlist_track WHERE playlist_id = $1 AND track_id = $2",
+            )
+            .bind(playlist_id)
+            .bind(track_id)
+            .execute(pool)
+            .await
+            .map_err(|e| cot::Error::internal(e.to_string()))?;
+        }
+        (None, None) => {
+            return Ok(json_error(StatusCode::BAD_REQUEST, "missing track id"));
+        }
+    }
 
     // Re-number positions
     sqlx::query(
@@ -5659,6 +5812,14 @@ async fn remove_track_from_playlist_handler(
     .execute(pool)
     .await
     .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    sqlx::query("UPDATE furumusic__playlist SET updated_at = $1 WHERE id = $2")
+        .bind(&now)
+        .bind(playlist_id)
+        .execute(pool)
+        .await
+        .map_err(|e| cot::Error::internal(e.to_string()))?;
 
     Json(serde_json::json!({"ok": true})).into_response()
 }
@@ -7612,6 +7773,33 @@ impl App for PlayerApp {
                                 })
                                 .await;
                             add_tracks_to_playlist_handler(
+                                auth_ctx, session, db, pg_pool, path, json,
+                            )
+                            .await
+                        }
+                    }
+                })
+                .put({
+                    let pool = Arc::clone(&pool);
+                    let pool_config = Arc::clone(&pool_config);
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          path: Path<PathId>,
+                          json: Json<ReorderPlaylistRequest>| {
+                        let pool = Arc::clone(&pool);
+                        let pool_config = Arc::clone(&pool_config);
+                        async move {
+                            let pg_pool = pool
+                                .get_or_init(|| async {
+                                    sqlx::postgres::PgPoolOptions::new()
+                                        .max_connections(5)
+                                        .connect(&pool_config.database_url)
+                                        .await
+                                        .expect("player pool")
+                                })
+                                .await;
+                            reorder_playlist_tracks_handler(
                                 auth_ctx, session, db, pg_pool, path, json,
                             )
                             .await

@@ -951,7 +951,23 @@
                         <span>/</span>
                         <span x-text="$store.playlists.displayTitle($store.library.currentPlaylist)"></span>
                     </div>
-                    <h1 class="section-title" x-text="$store.playlists.displayTitle($store.library.currentPlaylist)"></h1>
+                    <div class="playlist-detail-heading">
+                        <h1 class="section-title" x-text="$store.playlists.displayTitle($store.library.currentPlaylist)"></h1>
+                        <button class="release-action-btn secondary playlist-edit-toggle"
+                                x-show="$store.playlists.canEditCurrent()"
+                                x-cloak
+                                @click="$store.playlists.toggleEditCurrent()"
+                                :title="$store.playlists.isEditingCurrent() ? '{{ t.player_done }}' : '{{ t.player_edit }}'">
+                            <svg x-show="!$store.playlists.isEditingCurrent()" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+                                <path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                            </svg>
+                            <svg x-show="$store.playlists.isEditingCurrent()" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M20 6L9 17l-5-5"/>
+                            </svg>
+                            <span x-text="$store.playlists.isEditingCurrent() ? '{{ t.player_done }}' : '{{ t.player_edit }}'"></span>
+                        </button>
+                    </div>
                     <div class="playlist-detail-meta"
                          x-show="$store.library.currentPlaylist.owner_name || $store.library.currentPlaylist.is_public">
                         <span x-show="$store.library.currentPlaylist.owner_name"
@@ -963,27 +979,61 @@
                     <template x-if="$store.library.currentPlaylist.description">
                         <p style="color:var(--text-subdued);margin-bottom:16px" x-text="$store.library.currentPlaylist.description"></p>
                     </template>
-                    <div class="track-list-header">
+                    <div class="track-list-header playlist-track-list-header"
+                         :class="{ editing: $store.playlists.isEditingCurrent() }">
+                        <span class="playlist-edit-cell"
+                              x-show="$store.playlists.isEditingCurrent()"
+                              x-cloak></span>
                         <span>#</span>
                         <span>{{ t.player_title }}</span>
                         <span></span>
                         <span></span>
                         <span style="text-align:right">{{ t.player_duration }}</span>
                     </div>
-                    <template x-for="(track, idx) in $store.library.currentPlaylist.tracks" :key="track.id">
-                        <div class="track-row"
-                             :class="{ playing: $store.player.currentTrack && $store.player.currentTrack.id === track.id }"
-                             @dblclick="$store.queue.playRelease($store.library.currentPlaylist.tracks, idx)">
+                    <template x-for="(track, idx) in $store.library.currentPlaylist.tracks" :key="track.playlist_track_id || (track.id + '-' + idx)">
+                        <div class="track-row playlist-track-row"
+                             :data-playlist-index="idx"
+                             :class="{ playing: $store.player.currentTrack && $store.player.currentTrack.id === track.id, editing: $store.playlists.isEditingCurrent(), dragging: $store.playlists._dragIdx === idx }"
+                             :draggable="$store.playlists.isEditingCurrent() && !!track.playlist_track_id"
+                             @dblclick="if (!$store.playlists.isEditingCurrent()) $store.queue.playRelease($store.library.currentPlaylist.tracks, idx)"
+                             @dragstart="if (!$store.playlists.startDrag($event, idx)) $event.preventDefault()"
+                             @dragend="$store.playlists.endDrag()"
+                             @dragover.prevent="$store.playlists.dragOver($event, idx)"
+                             @dragleave="$event.currentTarget.classList.remove('drag-over')"
+                             @drop.prevent="$event.currentTarget.classList.remove('drag-over'); $store.playlists.dropOn(idx)">
+                            <button class="playlist-track-remove"
+                                    x-show="$store.playlists.isEditingCurrent()"
+                                    x-cloak
+                                    @click.stop="$store.playlists.removeCurrentTrack(track, idx)"
+                                    title="{{ t.player_remove }}"
+                                    aria-label="{{ t.player_remove }}">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="18" y1="6" x2="6" y2="18"/>
+                                    <line x1="6" y1="6" x2="18" y2="18"/>
+                                </svg>
+                            </button>
                             <span class="track-num" x-text="idx + 1"></span>
-                            <div class="track-info">
-                                <div class="track-title" x-text="track.title"></div>
-                                <div class="track-artists-inline">
-                                    <template x-for="(artist, artistIdx) in $store.library.trackArtistLinks(track)" :key="artist.label + '-' + artist.id + '-' + artistIdx">
-                                        <span>
-                                            <template x-if="artistIdx > 0"><span>, </span></template>
-                                            <a class="artist-link" @click.stop="$store.library.openArtist(artist.id)" x-text="artist.label"></a>
-                                        </span>
-                                    </template>
+                            <div class="track-info playlist-track-info">
+                                <button class="playlist-drag-handle"
+                                        x-show="$store.playlists.isEditingCurrent() && !!track.playlist_track_id"
+                                        x-cloak
+                                        @mousedown.stop
+                                        @click.stop
+                                        @pointerdown.stop="$store.playlists.startPointerReorder($event, idx)"
+                                        title="{{ t.player_edit }}"
+                                        aria-label="{{ t.player_edit }}">
+                                    <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>
+                                </button>
+                                <div class="playlist-track-copy">
+                                    <div class="track-title" x-text="track.title"></div>
+                                    <div class="track-artists-inline">
+                                        <template x-for="(artist, artistIdx) in $store.library.trackArtistLinks(track)" :key="artist.label + '-' + artist.id + '-' + artistIdx">
+                                            <span>
+                                                <template x-if="artistIdx > 0"><span>, </span></template>
+                                                <a class="artist-link" @click.stop="$store.library.openArtist(artist.id)" x-text="artist.label"></a>
+                                            </span>
+                                        </template>
+                                    </div>
                                 </div>
                             </div>
                             <span></span>

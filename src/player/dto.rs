@@ -75,6 +75,13 @@ pub(super) struct TrackItem {
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
+pub(super) struct PlaylistTrackItem {
+    pub(super) playlist_track_id: Option<i64>,
+    #[serde(flatten)]
+    pub(super) track: TrackItem,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
 pub(super) struct ArtistAppearanceTrack {
     pub(super) id: i64,
     pub(super) title: String,
@@ -286,7 +293,7 @@ pub(super) struct PlaylistDetail {
     pub(super) is_public: bool,
     pub(super) is_saved: bool,
     pub(super) kind: String,
-    pub(super) tracks: Vec<TrackItem>,
+    pub(super) tracks: Vec<PlaylistTrackItem>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]

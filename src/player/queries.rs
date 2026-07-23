@@ -42,7 +42,13 @@ pub(super) struct AddTracksRequest {
 
 #[derive(Debug, Deserialize)]
 pub(super) struct RemoveTrackRequest {
-    pub(super) track_id: i64,
+    pub(super) track_id: Option<i64>,
+    pub(super) playlist_track_id: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct ReorderPlaylistRequest {
+    pub(super) playlist_track_ids: Vec<i64>,
 }
 
 #[derive(Debug, Deserialize)]
