@@ -165,52 +165,21 @@ impl MusicDhtStorage for PostgresFederationStorage {
     }
 
     async fn store_dht_record(&self, key: DhtKey, record: StoredRecord) -> music_dht::Result<bool> {
-        let existing = sqlx::query(
-            "SELECT revision, deleted, expires_at_ms
-             FROM furumusic__federation_dht_record
-             WHERE dht_key = $1 AND item_id = $2 AND owner_peer_id = $3",
-        )
-        .bind(key.as_bytes().as_slice())
-        .bind(record.item.id.as_bytes().as_slice())
-        .bind(record.item.owner.to_string())
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(db_error)?
-        .map(|row| {
-            (
-                row.get::<i64, _>(0) as u64,
-                row.get::<bool, _>(1),
-                row.get::<i64, _>(2) as u64,
-            )
-        });
+        let mut conn = self.pool.acquire().await.map_err(db_error)?;
+        store_record_in_conn(&mut conn, &key, &record).await
+    }
 
-        match decide_store(existing, &record) {
-            StoreDecision::Ignore => return Ok(false),
-            StoreDecision::Write | StoreDecision::RefreshExpiry(_) => {}
+    async fn store_dht_records(
+        &self,
+        entries: Vec<(DhtKey, StoredRecord)>,
+    ) -> music_dht::Result<Vec<bool>> {
+        let mut tx = self.pool.begin().await.map_err(db_error)?;
+        let mut stored = Vec::with_capacity(entries.len());
+        for (key, record) in &entries {
+            stored.push(store_record_in_conn(&mut tx, key, record).await?);
         }
-
-        let payload = postcard::to_stdvec(&record).map_err(db_error)?;
-        sqlx::query(
-            "INSERT INTO furumusic__federation_dht_record
-             (dht_key, item_id, owner_peer_id, payload, revision, deleted, expires_at_ms)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
-             ON CONFLICT (dht_key, item_id, owner_peer_id) DO UPDATE SET
-                payload = EXCLUDED.payload,
-                revision = EXCLUDED.revision,
-                deleted = EXCLUDED.deleted,
-                expires_at_ms = EXCLUDED.expires_at_ms",
-        )
-        .bind(key.as_bytes().as_slice())
-        .bind(record.item.id.as_bytes().as_slice())
-        .bind(record.item.owner.to_string())
-        .bind(payload)
-        .bind(record.item.revision as i64)
-        .bind(record.item.deleted)
-        .bind(record.expires_at_ms as i64)
-        .execute(&self.pool)
-        .await
-        .map_err(db_error)?;
-        Ok(true)
+        tx.commit().await.map_err(db_error)?;
+        Ok(stored)
     }
 
     async fn dht_records_by_key(
@@ -317,6 +286,62 @@ fn secret_from_bytes(bytes: Vec<u8>) -> music_dht::Result<SecretKey> {
         .try_into()
         .map_err(|_| MusicDhtError::Database("stored federation identity is corrupted".into()))?;
     Ok(SecretKey::from_bytes(&bytes))
+}
+
+/// Applies one validated record following the revision/tombstone rules.
+/// Returns `true` if the record was written or refreshed. Runs against a
+/// pooled connection or an open transaction.
+async fn store_record_in_conn(
+    conn: &mut sqlx::PgConnection,
+    key: &DhtKey,
+    record: &StoredRecord,
+) -> music_dht::Result<bool> {
+    let existing = sqlx::query(
+        "SELECT revision, deleted, expires_at_ms
+         FROM furumusic__federation_dht_record
+         WHERE dht_key = $1 AND item_id = $2 AND owner_peer_id = $3",
+    )
+    .bind(key.as_bytes().as_slice())
+    .bind(record.item.id.as_bytes().as_slice())
+    .bind(record.item.owner.to_string())
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(db_error)?
+    .map(|row| {
+        (
+            row.get::<i64, _>(0) as u64,
+            row.get::<bool, _>(1),
+            row.get::<i64, _>(2) as u64,
+        )
+    });
+
+    match decide_store(existing, record) {
+        StoreDecision::Ignore => return Ok(false),
+        StoreDecision::Write | StoreDecision::RefreshExpiry(_) => {}
+    }
+
+    let payload = postcard::to_stdvec(record).map_err(db_error)?;
+    sqlx::query(
+        "INSERT INTO furumusic__federation_dht_record
+         (dht_key, item_id, owner_peer_id, payload, revision, deleted, expires_at_ms)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (dht_key, item_id, owner_peer_id) DO UPDATE SET
+            payload = EXCLUDED.payload,
+            revision = EXCLUDED.revision,
+            deleted = EXCLUDED.deleted,
+            expires_at_ms = EXCLUDED.expires_at_ms",
+    )
+    .bind(key.as_bytes().as_slice())
+    .bind(record.item.id.as_bytes().as_slice())
+    .bind(record.item.owner.to_string())
+    .bind(payload)
+    .bind(record.item.revision as i64)
+    .bind(record.item.deleted)
+    .bind(record.expires_at_ms as i64)
+    .execute(&mut *conn)
+    .await
+    .map_err(db_error)?;
+    Ok(true)
 }
 
 fn db_error(err: impl std::fmt::Display) -> MusicDhtError {
