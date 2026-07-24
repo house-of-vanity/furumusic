@@ -748,13 +748,18 @@ pub async fn record_track_like(
     liked: bool,
 ) -> Result<()> {
     if let Some(content_id) = track_content_id(pool, track_id).await? {
+        let fed = if liked {
+            synced_fed_track_for_track(pool, track_id, &content_id).await?
+        } else {
+            None
+        };
         record_local_op(
             pool,
             user_id,
             SyncOpPayload::TrackLikeSet {
                 content_id,
                 liked,
-                fed: None,
+                fed,
             },
         )
         .await?;
@@ -830,7 +835,8 @@ pub async fn record_playlist_tracks_added(
     let title = playlist_title(pool, playlist_id).await?.unwrap_or_default();
     let sync_id = ensure_local_playlist_sync_id(pool, user_id, playlist_id, &title).await?;
     let rows = playlist_track_content_positions(pool, playlist_id, track_ids).await?;
-    for (content_id, position) in rows {
+    for (track_id, content_id, position) in rows {
+        let fed = synced_fed_track_for_track(pool, track_id, &content_id).await?;
         record_local_op(
             pool,
             user_id,
@@ -838,7 +844,7 @@ pub async fn record_playlist_tracks_added(
                 playlist_id: sync_id.clone(),
                 content_id,
                 position,
-                fed: None,
+                fed,
             },
         )
         .await?;
@@ -1481,10 +1487,34 @@ async fn maybe_seed_local_user_state(pool: &sqlx::PgPool, user_id: i64) -> Resul
     let Some(last_seeded_at_ms) = last_seeded_at_ms else {
         return Ok(());
     };
-    if now_ms().saturating_sub(last_seeded_at_ms) < LOCAL_SEED_RECHECK_MS {
+    if now_ms().saturating_sub(last_seeded_at_ms) < LOCAL_SEED_RECHECK_MS
+        && !local_seed_needs_metadata_backfill(pool, user_id).await?
+    {
         return Ok(());
     }
     seed_local_user_state(pool, user_id).await
+}
+
+async fn local_seed_needs_metadata_backfill(pool: &sqlx::PgPool, user_id: i64) -> Result<bool> {
+    sqlx::query_scalar(
+        "SELECT EXISTS (
+            SELECT 1 FROM furumusic__fed_state_like
+            WHERE user_id = $1
+              AND liked = true
+              AND fed_json IS NULL
+              AND local_track_id IS NOT NULL
+         ) OR EXISTS (
+            SELECT 1 FROM furumusic__fed_state_playlist_item
+            WHERE user_id = $1
+              AND present = true
+              AND fed_json IS NULL
+              AND local_track_id IS NOT NULL
+         )",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .map_err(Into::into)
 }
 
 async fn seed_local_user_state(pool: &sqlx::PgPool, user_id: i64) -> Result<()> {
@@ -1507,17 +1537,24 @@ async fn seed_local_user_state(pool: &sqlx::PgPool, user_id: i64) -> Result<()> 
             continue;
         };
         let track_id: i64 = row.get("track_id");
+        let fed_json = synced_fed_track_for_track(pool, track_id, &content_id)
+            .await?
+            .map(serde_json::to_value)
+            .transpose()?;
         sqlx::query(
             "INSERT INTO furumusic__fed_state_like
                 (user_id, content_id, liked, hlc_ms, op_id, local_track_id, fed_json)
-             VALUES ($1, $2, true, $3, $4, $5, NULL)
-             ON CONFLICT (user_id, content_id) DO NOTHING",
+             VALUES ($1, $2, true, $3, $4, $5, $6)
+             ON CONFLICT (user_id, content_id) DO UPDATE SET
+                local_track_id = COALESCE(furumusic__fed_state_like.local_track_id, EXCLUDED.local_track_id),
+                fed_json = COALESCE(furumusic__fed_state_like.fed_json, EXCLUDED.fed_json)",
         )
         .bind(user_id)
         .bind(&content_id)
         .bind(now)
         .bind(format!("local_seed:like:{track_id}"))
         .bind(track_id)
+        .bind(fed_json)
         .execute(pool)
         .await?;
     }
@@ -1555,12 +1592,18 @@ async fn seed_local_user_state(pool: &sqlx::PgPool, user_id: i64) -> Result<()> 
             };
             let track_id: i64 = item.get("track_id");
             let position: i32 = item.get("position");
+            let fed_json = synced_fed_track_for_track(pool, track_id, &content_id)
+                .await?
+                .map(serde_json::to_value)
+                .transpose()?;
             sqlx::query(
                 "INSERT INTO furumusic__fed_state_playlist_item
                     (user_id, playlist_id, content_id, present, position, hlc_ms, op_id,
                      local_track_id, fed_json)
-                 VALUES ($1, $2, $3, true, $4, $5, $6, $7, NULL)
-                 ON CONFLICT (user_id, playlist_id, content_id) DO NOTHING",
+                 VALUES ($1, $2, $3, true, $4, $5, $6, $7, $8)
+                 ON CONFLICT (user_id, playlist_id, content_id) DO UPDATE SET
+                    local_track_id = COALESCE(furumusic__fed_state_playlist_item.local_track_id, EXCLUDED.local_track_id),
+                    fed_json = COALESCE(furumusic__fed_state_playlist_item.fed_json, EXCLUDED.fed_json)",
             )
             .bind(user_id)
             .bind(&sync_id)
@@ -1569,6 +1612,7 @@ async fn seed_local_user_state(pool: &sqlx::PgPool, user_id: i64) -> Result<()> 
             .bind(now)
             .bind(format!("local_seed:playlist_item:{playlist_id}:{track_id}"))
             .bind(track_id)
+            .bind(fed_json)
             .execute(pool)
             .await?;
         }
@@ -3279,6 +3323,21 @@ async fn track_artist_json(
         .collect())
 }
 
+async fn track_artist_names(pool: &sqlx::PgPool, track_id: i64, role: &str) -> Result<Vec<String>> {
+    let rows = sqlx::query(
+        "SELECT a.name::text AS name
+         FROM furumusic__track_artist ta
+         JOIN furumusic__artist a ON a.id = ta.artist_id
+         WHERE ta.track_id = $1 AND ta.role = $2
+         ORDER BY ta.position",
+    )
+    .bind(track_id)
+    .bind(role)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(|row| row.get("name")).collect())
+}
+
 fn placeholder_playback_track(
     track: &PlaybackTrack,
     index: usize,
@@ -3390,6 +3449,45 @@ async fn track_content_id(pool: &sqlx::PgPool, track_id: i64) -> Result<Option<S
     .fetch_optional(pool)
     .await?;
     Ok(value.and_then(|value| music_dht::normalize_content_id(&value)))
+}
+
+async fn synced_fed_track_for_track(
+    pool: &sqlx::PgPool,
+    track_id: i64,
+    content_id: &str,
+) -> Result<Option<SyncedFedTrack>> {
+    let Some(content_id) = music_dht::normalize_content_id(content_id) else {
+        return Ok(None);
+    };
+    let row = sqlx::query(
+        "SELECT t.title::text AS title, t.track_number, t.disc_number,
+                t.duration_seconds, r.title::text AS release_title, r.year AS release_year
+         FROM furumusic__track t
+         JOIN furumusic__release r ON r.id = t.release_id
+         WHERE t.id = $1",
+    )
+    .bind(track_id)
+    .fetch_optional(pool)
+    .await?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let duration = row.get::<f64, _>("duration_seconds");
+    Ok(Some(SyncedFedTrack {
+        item_id: format!("web:{track_id}"),
+        owner: "WEB".to_string(),
+        title: row.get("title"),
+        artist_names: track_artist_names(pool, track_id, "main").await?,
+        featured_artist_names: track_artist_names(pool, track_id, "featuring").await?,
+        year: row.get("release_year"),
+        duration_seconds: duration
+            .is_finite()
+            .then(|| duration.round().max(0.0) as i64),
+        content_id,
+        release_title: row.get("release_title"),
+        track_number: row.get("track_number"),
+        disc_number: row.get("disc_number"),
+    }))
 }
 
 async fn ensure_materialized_playlist(
@@ -3582,9 +3680,9 @@ async fn playlist_track_content_positions(
     pool: &sqlx::PgPool,
     playlist_id: i64,
     track_ids: &[i64],
-) -> Result<Vec<(String, i64)>> {
+) -> Result<Vec<(i64, String, i64)>> {
     let rows = sqlx::query(
-        "SELECT c.content_id, pt.position
+        "SELECT pt.track_id, c.content_id, pt.position
          FROM furumusic__playlist_track pt
          JOIN furumusic__track t ON t.id = pt.track_id
          JOIN furumusic__media_file m ON m.id = t.audio_file_id
@@ -3600,9 +3698,10 @@ async fn playlist_track_content_positions(
     Ok(rows
         .into_iter()
         .filter_map(|row| {
+            let track_id: i64 = row.get("track_id");
             let content_id: String = row.get("content_id");
             music_dht::normalize_content_id(&content_id)
-                .map(|content_id| (content_id, row.get::<i32, _>("position") as i64))
+                .map(|content_id| (track_id, content_id, row.get::<i32, _>("position") as i64))
         })
         .collect())
 }
