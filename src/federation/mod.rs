@@ -12,6 +12,7 @@
 //! `federation_network_id`) and apply on the fly — saving the settings
 //! starts, stops or re-joins the node without a server restart.
 
+pub mod devices;
 mod serve;
 mod storage;
 
@@ -196,6 +197,7 @@ impl Federation {
             .rendezvous(RendezvousConfig::default())
             .stream_protocol(AUDIO_ALPN)
             .stream_protocol(CATALOG_ALPN)
+            .stream_protocol(devices::SYNC_ALPN)
             .build()
             .map_err(|err| anyhow::anyhow!("invalid federation config: {err}"))?;
         let (service, mut events) =
@@ -240,15 +242,34 @@ impl Federation {
             .map_err(|err| anyhow::anyhow!("failed to take the catalog acceptor: {err}"))?;
         let catalog_task = tokio::spawn(serve::serve_catalog(
             catalog_acceptor,
-            pool,
+            pool.clone(),
             storage_dir,
             service.endpoint_id(),
         ));
+        let device_acceptor = service
+            .stream_acceptor(devices::SYNC_ALPN)
+            .map_err(|err| anyhow::anyhow!("failed to take the device-sync acceptor: {err}"))?;
+        let device_hub = crate::player::PlayerDeviceHub::shared();
+        let device_task = tokio::spawn(devices::serve_peers(
+            device_acceptor,
+            pool.clone(),
+            Arc::clone(&service),
+            Arc::clone(&device_hub),
+        ));
+        let device_sync_task =
+            tokio::spawn(devices::sync_loop(pool, Arc::clone(&service), device_hub));
 
         *guard = Some(Running {
             service,
             network_name,
-            tasks: vec![event_task, sync_task, audio_task, catalog_task],
+            tasks: vec![
+                event_task,
+                sync_task,
+                audio_task,
+                catalog_task,
+                device_task,
+                device_sync_task,
+            ],
         });
         self.set_error(None);
         drop(guard);
@@ -606,6 +627,118 @@ impl Federation {
             .await
             .map_err(|err| anyhow::anyhow!("connect failed: {err}"))?;
         Ok(peer.to_string())
+    }
+
+    pub async fn fed_device_status(
+        &self,
+        user_id: i64,
+        user_name: &str,
+    ) -> Result<devices::FedDeviceStatus> {
+        let pool = self.pool().await?;
+        devices::status(&pool, user_id, user_name).await
+    }
+
+    pub async fn fed_device_invite(&self, user_id: i64, user_name: &str) -> Result<String> {
+        let service = self.service().await?;
+        let pool = self.pool().await?;
+        devices::create_invite(&pool, service, user_id, user_name).await
+    }
+
+    pub async fn fed_device_connect(
+        &self,
+        user_id: i64,
+        user_name: &str,
+        invite: &str,
+    ) -> Result<String> {
+        let network_id = devices::invite_network_id(invite)?;
+        {
+            let guard = self.running.lock().await;
+            let Some(running) = guard.as_ref() else {
+                anyhow::bail!("federation is not running");
+            };
+            let expected = NetworkId::from_name(&running.network_name);
+            anyhow::ensure!(
+                network_id == expected,
+                "device invite belongs to a different federation network"
+            );
+        }
+        let service = self.service().await?;
+        let pool = self.pool().await?;
+        devices::connect_invite(
+            &pool,
+            service,
+            crate::player::PlayerDeviceHub::shared(),
+            user_id,
+            user_name,
+            invite,
+        )
+        .await
+    }
+
+    pub async fn fed_device_answer_pairing(
+        &self,
+        user_id: i64,
+        request_id: &str,
+        accept: bool,
+        use_requester_group: bool,
+    ) -> Result<()> {
+        let pool = self.pool().await?;
+        devices::answer_pairing(&pool, user_id, request_id, accept, use_requester_group).await
+    }
+
+    pub async fn fed_device_revoke(&self, user_id: i64, device_id: &str) -> Result<()> {
+        let pool = self.pool().await?;
+        devices::revoke_device(&pool, user_id, device_id).await
+    }
+
+    pub async fn fed_device_sync_now(&self, user_id: i64) -> Result<()> {
+        let service = self.service().await?;
+        let pool = self.pool().await?;
+        devices::sync_once(
+            &pool,
+            service,
+            crate::player::PlayerDeviceHub::shared(),
+            user_id,
+        )
+        .await
+    }
+
+    pub async fn fed_device_web_command(
+        &self,
+        user_id: i64,
+        target_device_id: &str,
+        command: &str,
+        payload: serde_json::Value,
+        current_state: Option<serde_json::Value>,
+    ) -> Result<serde_json::Value> {
+        let pool = self.pool().await?;
+        devices::record_web_playback_command(
+            &pool,
+            user_id,
+            target_device_id,
+            command,
+            payload,
+            current_state,
+        )
+        .await
+    }
+
+    pub async fn fed_device_web_active_transfer(
+        &self,
+        user_id: i64,
+        target_device_id: &str,
+        previous_device_id: Option<&str>,
+        state: serde_json::Value,
+    ) -> Result<()> {
+        let pool = self.pool().await?;
+        devices::record_web_active_transfer(
+            &pool,
+            user_id,
+            target_device_id,
+            previous_device_id,
+            state,
+        )
+        .await
     }
 }
 

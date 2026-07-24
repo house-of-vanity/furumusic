@@ -1951,6 +1951,278 @@ pub mod db_migrations {
             &[Operation::custom(create_playlist_share_links).build()];
     }
 
+    #[cot::db::migrations::migration_op]
+    async fn create_fed_device_sync(ctx: migrations::MigrationContext<'_>) -> cot::db::Result<()> {
+        ctx.db
+            .raw(
+                "CREATE TABLE IF NOT EXISTS furumusic__federation_content_id_cache (
+                    media_file_id BIGINT PRIMARY KEY,
+                    sha256_hash TEXT NOT NULL,
+                    content_id TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE INDEX IF NOT EXISTS idx_furumusic_federation_content_id_cache_content_id
+                   ON furumusic__federation_content_id_cache (content_id)",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE TABLE IF NOT EXISTS furumusic__fed_device_identity (
+                    user_id BIGINT PRIMARY KEY,
+                    device_id TEXT NOT NULL UNIQUE,
+                    group_id TEXT NOT NULL,
+                    device_name TEXT NOT NULL,
+                    local_seq BIGINT NOT NULL DEFAULT 0,
+                    last_hlc_ms BIGINT NOT NULL DEFAULT 0,
+                    local_seeded_at_ms BIGINT NOT NULL DEFAULT 0,
+                    last_sync TEXT,
+                    last_error TEXT
+                )",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE TABLE IF NOT EXISTS furumusic__fed_device (
+                    user_id BIGINT NOT NULL,
+                    device_id TEXT NOT NULL,
+                    name TEXT NOT NULL DEFAULT '',
+                    client_version TEXT NOT NULL DEFAULT '',
+                    protocol_version INTEGER NOT NULL DEFAULT 1,
+                    endpoint_id TEXT NOT NULL DEFAULT '',
+                    endpoint_ticket TEXT NOT NULL DEFAULT '',
+                    trusted_at_ms BIGINT,
+                    last_seen_ms BIGINT,
+                    revoked_at_ms BIGINT,
+                    revoked_by TEXT,
+                    revoke_cutoff_seq BIGINT,
+                    PRIMARY KEY (user_id, device_id)
+                )",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_fed_device_single_user
+                   ON furumusic__fed_device (device_id)
+                 WHERE trusted_at_ms IS NOT NULL",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE TABLE IF NOT EXISTS furumusic__fed_device_invite (
+                    invite_id TEXT PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    secret_hash TEXT NOT NULL,
+                    expires_at_ms BIGINT NOT NULL,
+                    created_at_ms BIGINT NOT NULL,
+                    used_at_ms BIGINT
+                )",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE TABLE IF NOT EXISTS furumusic__fed_pending_pairing (
+                    request_id TEXT PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    device_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    client_version TEXT NOT NULL,
+                    endpoint_id TEXT NOT NULL,
+                    endpoint_ticket TEXT NOT NULL,
+                    invite_id TEXT NOT NULL,
+                    created_at_ms BIGINT NOT NULL,
+                    answered_at_ms BIGINT,
+                    status TEXT NOT NULL,
+                    requester_group_id TEXT,
+                    requester_group_active_devices BIGINT NOT NULL DEFAULT 1,
+                    requester_group_devices_json TEXT NOT NULL DEFAULT '[]',
+                    use_requester_group BOOLEAN NOT NULL DEFAULT false
+                )",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE INDEX IF NOT EXISTS idx_fed_pending_pairing_user_status
+                   ON furumusic__fed_pending_pairing (user_id, status, created_at_ms DESC)",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE TABLE IF NOT EXISTS furumusic__fed_sync_ops (
+                    user_id BIGINT NOT NULL,
+                    op_id TEXT NOT NULL,
+                    origin_device_id TEXT NOT NULL,
+                    seq BIGINT NOT NULL,
+                    kind TEXT NOT NULL,
+                    payload_json JSONB NOT NULL,
+                    hlc_ms BIGINT NOT NULL,
+                    received_at_ms BIGINT NOT NULL,
+                    tombstone BOOLEAN NOT NULL DEFAULT false,
+                    PRIMARY KEY (user_id, op_id)
+                )",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE INDEX IF NOT EXISTS idx_fed_sync_ops_origin_seq
+                   ON furumusic__fed_sync_ops (user_id, origin_device_id, seq)",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE INDEX IF NOT EXISTS idx_fed_sync_ops_tombstone
+                   ON furumusic__fed_sync_ops (user_id, tombstone)",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE TABLE IF NOT EXISTS furumusic__fed_sync_vector (
+                    user_id BIGINT NOT NULL,
+                    device_id TEXT NOT NULL,
+                    max_seq BIGINT NOT NULL,
+                    PRIMARY KEY (user_id, device_id)
+                )",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE TABLE IF NOT EXISTS furumusic__fed_peer_ack (
+                    user_id BIGINT NOT NULL,
+                    peer_device_id TEXT NOT NULL,
+                    origin_device_id TEXT NOT NULL,
+                    max_seq BIGINT NOT NULL,
+                    updated_at_ms BIGINT NOT NULL,
+                    PRIMARY KEY (user_id, peer_device_id, origin_device_id)
+                )",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE TABLE IF NOT EXISTS furumusic__fed_state_like (
+                    user_id BIGINT NOT NULL,
+                    content_id TEXT NOT NULL,
+                    liked BOOLEAN NOT NULL,
+                    hlc_ms BIGINT NOT NULL,
+                    op_id TEXT NOT NULL,
+                    local_track_id BIGINT,
+                    fed_json JSONB,
+                    PRIMARY KEY (user_id, content_id)
+                )",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE TABLE IF NOT EXISTS furumusic__fed_state_playlist (
+                    user_id BIGINT NOT NULL,
+                    playlist_id TEXT NOT NULL,
+                    local_playlist_id BIGINT,
+                    title TEXT NOT NULL,
+                    deleted BOOLEAN NOT NULL DEFAULT false,
+                    hlc_ms BIGINT NOT NULL,
+                    op_id TEXT NOT NULL,
+                    PRIMARY KEY (user_id, playlist_id)
+                )",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_fed_state_playlist_local
+                   ON furumusic__fed_state_playlist (user_id, local_playlist_id)
+                 WHERE local_playlist_id IS NOT NULL",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE TABLE IF NOT EXISTS furumusic__fed_state_playlist_item (
+                    user_id BIGINT NOT NULL,
+                    playlist_id TEXT NOT NULL,
+                    content_id TEXT NOT NULL,
+                    present BOOLEAN NOT NULL DEFAULT true,
+                    position BIGINT NOT NULL DEFAULT 0,
+                    hlc_ms BIGINT NOT NULL,
+                    op_id TEXT NOT NULL,
+                    local_track_id BIGINT,
+                    fed_json JSONB,
+                    PRIMARY KEY (user_id, playlist_id, content_id)
+                )",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE INDEX IF NOT EXISTS idx_fed_state_playlist_item_playlist
+                   ON furumusic__fed_state_playlist_item
+                      (user_id, playlist_id, present, position)",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE TABLE IF NOT EXISTS furumusic__fed_playback_applied (
+                    user_id BIGINT NOT NULL,
+                    op_id TEXT NOT NULL,
+                    applied_at_ms BIGINT NOT NULL,
+                    PRIMARY KEY (user_id, op_id)
+                )",
+            )
+            .await?;
+        Ok(())
+    }
+
+    #[derive(Debug, Copy, Clone)]
+    pub struct M0038CreateFedDeviceSync;
+
+    impl migrations::Migration for M0038CreateFedDeviceSync {
+        const APP_NAME: &'static str = "furumusic";
+        const MIGRATION_NAME: &'static str = "m_0038_create_fed_device_sync";
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
+                "furumusic",
+                "m_0037_create_playlist_share_links",
+            )];
+        const OPERATIONS: &'static [Operation] =
+            &[Operation::custom(create_fed_device_sync).build()];
+    }
+
+    #[cot::db::migrations::migration_op]
+    async fn ensure_federation_content_id_cache(
+        ctx: migrations::MigrationContext<'_>,
+    ) -> cot::db::Result<()> {
+        ctx.db
+            .raw(
+                "CREATE TABLE IF NOT EXISTS furumusic__federation_content_id_cache (
+                    media_file_id BIGINT PRIMARY KEY,
+                    sha256_hash TEXT NOT NULL,
+                    content_id TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )",
+            )
+            .await?;
+        ctx.db
+            .raw(
+                "CREATE INDEX IF NOT EXISTS idx_furumusic_federation_content_id_cache_content_id
+                   ON furumusic__federation_content_id_cache (content_id)",
+            )
+            .await?;
+        Ok(())
+    }
+
+    #[derive(Debug, Copy, Clone)]
+    pub struct M0039EnsureFederationContentIdCache;
+
+    impl migrations::Migration for M0039EnsureFederationContentIdCache {
+        const APP_NAME: &'static str = "furumusic";
+        const MIGRATION_NAME: &'static str = "m_0039_ensure_federation_content_id_cache";
+        const DEPENDENCIES: &'static [migrations::MigrationDependency] =
+            &[migrations::MigrationDependency::migration(
+                "furumusic",
+                "m_0038_create_fed_device_sync",
+            )];
+        const OPERATIONS: &'static [Operation] =
+            &[Operation::custom(ensure_federation_content_id_cache).build()];
+    }
+
     pub const MIGRATIONS: &[&SyncDynMigration] = &[
         &M0006CreateMediaFile,
         &M0007CreateArtist,
@@ -1979,5 +2251,7 @@ pub mod db_migrations {
         &M0035CreateEntityGenreTags,
         &M0036CreateExternalMetadataIds,
         &M0037CreatePlaylistShareLinks,
+        &M0038CreateFedDeviceSync,
+        &M0039EnsureFederationContentIdCache,
     ];
 }

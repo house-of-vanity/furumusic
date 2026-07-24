@@ -272,6 +272,24 @@ pub(super) struct PlayerDevicesResponse {
     pub(super) playback_state: Option<PlayerDevicePlaybackStateDto>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(super) struct FedDeviceConnectRequest {
+    pub(super) invite: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(super) struct FedDevicePairingAnswerRequest {
+    pub(super) request_id: String,
+    pub(super) accept: bool,
+    #[serde(default)]
+    pub(super) use_requester_group: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(super) struct FedDeviceRevokeRequest {
+    pub(super) device_id: String,
+}
+
 #[derive(Debug, Serialize, JsonSchema)]
 pub(super) struct PlayerDevicePollResponse {
     pub(super) device_id: String,

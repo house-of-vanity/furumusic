@@ -1856,9 +1856,9 @@ button.user-stat:hover {
     position: absolute;
     right: 0;
     bottom: 38px;
-    width: 260px;
+    width: 320px;
     max-width: calc(100vw - 24px);
-    max-height: min(320px, calc(100dvh - var(--player-bar-space) - 24px));
+    max-height: min(440px, calc(100dvh - var(--player-bar-space) - 24px));
     overflow-y: auto;
     padding: 6px;
     border: 1px solid var(--border-color);
@@ -1953,6 +1953,142 @@ button.user-stat:hover {
     font-weight: 700;
     letter-spacing: 0;
     text-transform: uppercase;
+}
+
+.fed-section-label {
+    margin-top: 4px;
+    color: #b8d6ff;
+}
+
+.fed-device-panel {
+    margin: 2px 2px 6px;
+    padding: 8px;
+    border: 1px solid rgba(82,145,255,0.18);
+    border-radius: 6px;
+    background: rgba(82,145,255,0.045);
+    display: grid;
+    gap: 7px;
+}
+
+.fed-device-status,
+.fed-device-error,
+.fed-pairing-note {
+    color: var(--text-subdued);
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+.fed-device-error {
+    color: #ffb2b2;
+}
+
+.fed-device-row {
+    min-height: 32px;
+    display: grid;
+    grid-template-columns: 9px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+}
+
+.fed-device-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: #73d795;
+}
+
+.fed-device-dot.self {
+    background: #ffd166;
+}
+
+.fed-device-main {
+    min-width: 0;
+    display: grid;
+    gap: 1px;
+}
+
+.fed-device-name,
+.fed-pairing-title {
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 750;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.fed-device-meta,
+.fed-pairing-meta {
+    color: var(--text-subdued);
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.fed-pairing-card {
+    padding: 7px;
+    border-radius: 5px;
+    background: rgba(255,255,255,0.04);
+    display: grid;
+    gap: 5px;
+}
+
+.fed-device-actions,
+.fed-connect-row {
+    display: flex;
+    gap: 6px;
+    min-width: 0;
+}
+
+.fed-connect-row .fed-device-input {
+    flex: 1;
+}
+
+.fed-action-btn,
+.fed-revoke-btn {
+    height: 28px;
+    border: 0;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.08);
+    color: var(--text-secondary);
+    padding: 0 8px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.fed-action-btn:hover,
+.fed-revoke-btn:hover {
+    background: rgba(255,255,255,0.13);
+    color: var(--text-primary);
+}
+
+.fed-action-btn.primary {
+    background: rgba(82,145,255,0.16);
+    color: #c9dcff;
+}
+
+.fed-action-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.fed-revoke-btn {
+    background: rgba(255,96,96,0.1);
+    color: #ffb2b2;
+}
+
+.fed-device-input {
+    width: 100%;
+    min-width: 0;
+    height: 30px;
+    border: 1px solid rgba(82,145,255,0.2);
+    border-radius: 4px;
+    background: rgba(0,0,0,0.18);
+    color: var(--text-primary);
+    padding: 0 8px;
+    font-size: 12px;
 }
 
 .jam-section-label,

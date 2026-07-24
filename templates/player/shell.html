@@ -1335,6 +1335,67 @@
                             </span>
                         </button>
                     </template>
+                    <div class="device-section-label fed-section-label">Fed Clients</div>
+                    <div class="fed-device-panel">
+                        <div class="fed-device-status" x-text="$store.devices.fedSummary()"></div>
+                        <template x-if="$store.devices.fedError">
+                            <div class="fed-device-error" x-text="$store.devices.fedError"></div>
+                        </template>
+                        <template x-for="request in $store.devices.fedPending()" :key="request.request_id">
+                            <div class="fed-pairing-card">
+                                <div class="fed-pairing-title" x-text="request.name || request.device_id"></div>
+                                <div class="fed-pairing-meta"
+                                     x-text="request.requester_group_id ? 'Already in another sync group' : (request.client_version || 'waiting for approval')"></div>
+                                <template x-if="request.requester_group_id">
+                                    <div class="fed-pairing-note">Recommended keeps the existing group intact.</div>
+                                </template>
+                                <div class="fed-device-actions">
+                                    <button class="fed-action-btn primary"
+                                            @click="$store.devices.answerFedPairing(request, true, !!request.requester_group_id)"
+                                            x-text="request.requester_group_id ? 'Recommended' : 'Approve'"></button>
+                                    <button class="fed-action-btn"
+                                            @click="$store.devices.answerFedPairing(request, false, false)">Cancel</button>
+                                </div>
+                            </div>
+                        </template>
+                        <template x-for="device in $store.devices.fedDevices()" :key="device.device_id">
+                            <div class="fed-device-row" :class="{ self: device.is_self }">
+                                <span class="fed-device-dot" :class="{ self: device.is_self }"></span>
+                                <span class="fed-device-main">
+                                    <span class="fed-device-name" x-text="device.name || device.device_id"></span>
+                                    <span class="fed-device-meta"
+                                          x-text="(device.is_self ? 'WEB' : (device.client_version || 'unknown'))"></span>
+                                </span>
+                                <button class="fed-revoke-btn"
+                                        x-show="!device.is_self"
+                                        @click="$store.devices.revokeFedDevice(device)">Revoke</button>
+                            </div>
+                        </template>
+                        <div class="fed-device-actions">
+                            <button class="fed-action-btn primary"
+                                    :disabled="$store.devices.fedBusy"
+                                    @click="$store.devices.generateFedInvite()">Invite</button>
+                            <button class="fed-action-btn"
+                                    :disabled="$store.devices.fedBusy"
+                                    @click="$store.devices.syncFedDevices()">Sync</button>
+                        </div>
+                        <template x-if="$store.devices.fedInvite">
+                            <input class="fed-device-input"
+                                   readonly
+                                   :value="$store.devices.fedInvite"
+                                   @focus="$event.target.select()">
+                        </template>
+                        <div class="fed-connect-row">
+                            <input class="fed-device-input"
+                                   type="text"
+                                   placeholder="Paste frid:// invite"
+                                   x-model="$store.devices.fedInviteInput"
+                                   @keydown.enter.prevent="$store.devices.connectFedInvite()">
+                            <button class="fed-action-btn"
+                                    :disabled="$store.devices.fedBusy || !$store.devices.fedInviteInput.trim()"
+                                    @click="$store.devices.connectFedInvite()">Connect</button>
+                        </div>
+                    </div>
                     <template x-if="$store.devices.jams.length > 0">
                         <div class="device-section-label jam-section-label">Jams</div>
                     </template>

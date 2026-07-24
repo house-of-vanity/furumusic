@@ -1251,7 +1251,12 @@ document.addEventListener('alpine:init', () => {
                         queue.currentIndex = Math.max(0, Math.min(Number(payload.index || 0), queue.tracks.length - 1));
                     }
                     const track = payload.track || queue.tracks[queue.currentIndex];
-                    if (track) this._playLocal(track, payload);
+                    if (track?.unavailable || (track && !track.stream_url)) {
+                        this._applyRemotePlaybackState({ ...payload, track, paused: true });
+                        this._pauseLocal();
+                    } else if (track) {
+                        this._playLocal(track, payload);
+                    }
                 } else if (command.command === 'pause') {
                     this.pause();
                 } else if (command.command === 'resume') {
@@ -1496,12 +1501,18 @@ document.addEventListener('alpine:init', () => {
         jamSelectedUsers: [],
         jamSearching: false,
         jamLocalPlayback: false,
+        fed: null,
+        fedInvite: '',
+        fedInviteInput: '',
+        fedBusy: false,
+        fedError: '',
         remoteHintVisible: false,
         remoteHintDeviceName: '',
         _remoteHintShown: false,
         _remoteHintTimer: null,
         _pollTimer: null,
         _jamSearchTimer: null,
+        _fedRefreshTick: 0,
         _stateRefreshTick: 0,
         _lastPlaybackState: null,
 
@@ -1509,9 +1520,13 @@ document.addEventListener('alpine:init', () => {
             this.id = this._ensureId();
             this.currentJamId = sessionStorage.getItem('furu_player_jam_id') || null;
             this.heartbeat();
+            this.loadFedDevices();
             this._pollTimer = setInterval(() => this.poll(), 500);
             document.addEventListener('visibilitychange', () => {
-                if (!document.hidden) this.poll();
+                if (!document.hidden) {
+                    this.poll();
+                    this.loadFedDevices();
+                }
             });
         },
 
@@ -1561,6 +1576,9 @@ document.addEventListener('alpine:init', () => {
                 const data = await res.json();
                 if (data.playback_state) this._lastPlaybackState = data.playback_state;
                 this._apply(data);
+                if (this.open || (++this._fedRefreshTick % 10 === 0)) {
+                    this.loadFedDevices();
+                }
 
                 const player = Alpine.store('player');
                 if (player && Array.isArray(data.commands)) {
@@ -1730,7 +1748,142 @@ document.addEventListener('alpine:init', () => {
         toggle() {
             this.dismissRemoteHint();
             this.open = !this.open;
-            if (this.open) this.poll();
+            if (this.open) {
+                this.poll();
+                this.loadFedDevices();
+            }
+        },
+
+        fedDevices() {
+            return (this.fed?.devices || []).filter(device => !device.revoked);
+        },
+
+        fedPending() {
+            return this.fed?.pending || [];
+        },
+
+        fedSummary() {
+            if (!this.fed) return 'Fed sync unavailable';
+            const outbox = Number(this.fed.outbox_ops || 0);
+            const unresolved = Number(this.fed.unresolved_items || 0);
+            return `${this.fed.active_devices || 0} linked · ${outbox} queued · ${unresolved} unresolved`;
+        },
+
+        async loadFedDevices() {
+            try {
+                const res = await fetch('/api/player/fed-devices');
+                if (!res.ok) {
+                    this.fedError = await this._errorText(res);
+                    return;
+                }
+                this.fed = await res.json();
+                this.fedError = '';
+            } catch (err) {
+                this.fedError = String(err?.message || err || 'Fed sync unavailable');
+            }
+        },
+
+        async generateFedInvite() {
+            if (this.fedBusy) return;
+            this.fedBusy = true;
+            try {
+                const res = await fetch('/api/player/fed-devices/invite', { method: 'POST' });
+                if (!res.ok) throw new Error(await this._errorText(res));
+                const data = await res.json();
+                this.fedInvite = data.invite || '';
+                if (this.fedInvite && navigator.clipboard?.writeText) {
+                    navigator.clipboard.writeText(this.fedInvite).catch(() => {});
+                }
+                await this.loadFedDevices();
+            } catch (err) {
+                this.fedError = String(err?.message || err || 'Invite failed');
+            } finally {
+                this.fedBusy = false;
+            }
+        },
+
+        async connectFedInvite() {
+            const invite = this.fedInviteInput.trim();
+            if (!invite || this.fedBusy) return;
+            this.fedBusy = true;
+            try {
+                const res = await fetch('/api/player/fed-devices/connect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ invite }),
+                });
+                if (!res.ok) throw new Error(await this._errorText(res));
+                this.fedInviteInput = '';
+                await this.loadFedDevices();
+            } catch (err) {
+                this.fedError = String(err?.message || err || 'Connect failed');
+            } finally {
+                this.fedBusy = false;
+            }
+        },
+
+        async answerFedPairing(request, accept, useRequesterGroup = false) {
+            if (!request?.request_id || this.fedBusy) return;
+            this.fedBusy = true;
+            try {
+                const res = await fetch('/api/player/fed-devices/pairing', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        request_id: request.request_id,
+                        accept,
+                        use_requester_group: useRequesterGroup,
+                    }),
+                });
+                if (!res.ok) throw new Error(await this._errorText(res));
+                await this.loadFedDevices();
+            } catch (err) {
+                this.fedError = String(err?.message || err || 'Pairing failed');
+            } finally {
+                this.fedBusy = false;
+            }
+        },
+
+        async revokeFedDevice(device) {
+            if (!device?.device_id || device.is_self || this.fedBusy) return;
+            if (!window.confirm(`Revoke ${device.name || device.device_id}?`)) return;
+            this.fedBusy = true;
+            try {
+                const res = await fetch('/api/player/fed-devices/revoke', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ device_id: device.device_id }),
+                });
+                if (!res.ok) throw new Error(await this._errorText(res));
+                await this.loadFedDevices();
+            } catch (err) {
+                this.fedError = String(err?.message || err || 'Revoke failed');
+            } finally {
+                this.fedBusy = false;
+            }
+        },
+
+        async syncFedDevices() {
+            if (this.fedBusy) return;
+            this.fedBusy = true;
+            try {
+                const res = await fetch('/api/player/fed-devices/sync', { method: 'POST' });
+                if (!res.ok) throw new Error(await this._errorText(res));
+                await this.loadFedDevices();
+            } catch (err) {
+                this.fedError = String(err?.message || err || 'Sync failed');
+            } finally {
+                this.fedBusy = false;
+            }
+        },
+
+        async _errorText(res) {
+            try {
+                const data = await res.json();
+                return data.error || res.statusText || 'Request failed';
+            } catch {
+                return res.statusText || 'Request failed';
+            }
         },
 
         async select(deviceId) {

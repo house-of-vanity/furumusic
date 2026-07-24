@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use cot::db::Database;
 use cot::http::StatusCode;
@@ -59,6 +59,7 @@ const PLAYER_JAM_MAX_INVITEES: usize = 25;
 const PLAYER_RADIO_TRACK_LIMIT: usize = 40;
 const PLAYER_RADIO_CANDIDATE_LIMIT: i64 = 220;
 const PLAYER_RADIO_RELEASE_SEED_TRACKS: i64 = 4;
+const FED_DEVICE_PREFIX: &str = "fed:";
 
 #[derive(Debug, Clone)]
 struct PlayerDevice {
@@ -108,11 +109,136 @@ struct PlayerDeviceHubState {
 }
 
 #[derive(Debug, Default)]
-struct PlayerDeviceHub {
+pub(crate) struct PlayerDeviceHub {
     state: Mutex<PlayerDeviceHubState>,
 }
 
 impl PlayerDeviceHub {
+    pub(crate) fn shared() -> Arc<Self> {
+        static HUB: OnceLock<Arc<PlayerDeviceHub>> = OnceLock::new();
+        Arc::clone(HUB.get_or_init(|| Arc::new(PlayerDeviceHub::default())))
+    }
+
+    pub(crate) fn enqueue_fed_command(
+        &self,
+        user_id: i64,
+        command: &str,
+        payload: serde_json::Value,
+    ) -> Result<(), &'static str> {
+        let now = current_millis();
+        let mut state = self.state.lock().expect("player device hub lock");
+        self.prune_locked(&mut state, now);
+        let devices = state
+            .devices_by_user
+            .get(&user_id)
+            .ok_or("no browser playback device")?;
+        let target = state
+            .active_device_by_user
+            .get(&user_id)
+            .filter(|id| !is_fed_virtual_device_id(id))
+            .filter(|id| devices.contains_key(*id))
+            .cloned()
+            .or_else(|| {
+                devices
+                    .values()
+                    .filter(|device| !is_fed_virtual_device_id(&device.id))
+                    .max_by_key(|device| device.last_seen_ms)
+                    .map(|device| device.id.clone())
+            })
+            .ok_or("no browser playback device")?;
+        state.active_device_by_user.insert(user_id, target.clone());
+        self.enqueue_command_locked(&mut state, user_id, &target, command, payload, now);
+        Ok(())
+    }
+
+    pub(crate) fn current_playback_state_json(&self, user_id: i64) -> Option<serde_json::Value> {
+        let state = self.state.lock().expect("player device hub lock");
+        if state
+            .active_device_by_user
+            .get(&user_id)
+            .is_some_and(|id| is_fed_virtual_device_id(id))
+        {
+            return None;
+        }
+        state
+            .playback_state_by_user
+            .get(&user_id)
+            .and_then(|playback| serde_json::to_value(playback).ok())
+    }
+
+    pub(crate) fn playback_state_json_for_commands(
+        &self,
+        user_id: i64,
+    ) -> Option<serde_json::Value> {
+        let now = current_millis();
+        let state = self.state.lock().expect("player device hub lock");
+        state
+            .playback_state_by_user
+            .get(&user_id)
+            .cloned()
+            .map(|playback| playback_state_at(playback, now))
+            .and_then(|playback| serde_json::to_value(playback).ok())
+    }
+
+    pub(crate) fn active_device_id_for_commands(&self, user_id: i64) -> Option<String> {
+        let state = self.state.lock().expect("player device hub lock");
+        state.active_device_by_user.get(&user_id).cloned()
+    }
+
+    pub(crate) fn fed_device_name_for_commands(
+        &self,
+        user_id: i64,
+        fed_device_id: &str,
+    ) -> Option<String> {
+        let virtual_id = fed_virtual_device_id(fed_device_id);
+        let state = self.state.lock().expect("player device hub lock");
+        state
+            .devices_by_user
+            .get(&user_id)
+            .and_then(|devices| devices.get(&virtual_id))
+            .map(|device| device.name.clone())
+    }
+
+    pub(crate) fn apply_fed_playback_state_json(
+        &self,
+        user_id: i64,
+        fed_device_id: &str,
+        fed_device_name: &str,
+        active: bool,
+        payload: serde_json::Value,
+    ) -> Result<(), &'static str> {
+        let mut playback_state: PlayerDevicePlaybackStateDto =
+            serde_json::from_value(payload).map_err(|_| "invalid playback state")?;
+        let now = current_millis();
+        playback_state.updated_at_ms = now;
+        let virtual_id = fed_virtual_device_id(fed_device_id);
+        let mut state = self.state.lock().expect("player device hub lock");
+        self.prune_locked(&mut state, now);
+        state.devices_by_user.entry(user_id).or_default().insert(
+            virtual_id.clone(),
+            PlayerDevice {
+                id: virtual_id.clone(),
+                name: fed_device_name.to_string(),
+                kind: "fed".to_string(),
+                last_seen_ms: now,
+            },
+        );
+        let should_update_playback = active
+            || state
+                .active_device_by_user
+                .get(&user_id)
+                .is_some_and(|active_id| active_id == &virtual_id);
+        if active {
+            state
+                .active_device_by_user
+                .insert(user_id, virtual_id.clone());
+        }
+        if should_update_playback {
+            state.playback_state_by_user.insert(user_id, playback_state);
+        }
+        Ok(())
+    }
+
     fn heartbeat(
         &self,
         user_id: i64,
@@ -194,7 +320,9 @@ impl PlayerDeviceHub {
                 state
                     .playback_state_by_user
                     .insert(user_id, transfer_state.clone());
-                if let Ok(payload) = serde_json::to_value(transfer_state) {
+                if !is_fed_virtual_device_id(target_device_id)
+                    && let Ok(payload) = serde_json::to_value(transfer_state)
+                {
                     self.enqueue_command_locked(
                         &mut state,
                         user_id,
@@ -772,6 +900,18 @@ fn current_millis() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
+fn fed_virtual_device_id(device_id: &str) -> String {
+    format!("{FED_DEVICE_PREFIX}{device_id}")
+}
+
+fn is_fed_virtual_device_id(device_id: &str) -> bool {
+    device_id.starts_with(FED_DEVICE_PREFIX)
+}
+
+fn fed_device_id_from_virtual(device_id: &str) -> Option<&str> {
+    device_id.strip_prefix(FED_DEVICE_PREFIX)
+}
+
 fn playback_state_at(
     mut playback_state: PlayerDevicePlaybackStateDto,
     now: i64,
@@ -796,7 +936,7 @@ fn normalize_device_id(raw: &str) -> Option<String> {
     }
     if !trimmed
         .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == ':')
     {
         return None;
     }
@@ -948,6 +1088,14 @@ mod device_tests {
             "Browser on Android"
         );
         assert_eq!(device_kind_from_user_agent(user_agent), "phone");
+    }
+
+    #[test]
+    fn accepts_virtual_fed_device_ids() {
+        assert_eq!(
+            normalize_device_id("fed:dev_e5ffc3b65642770c26c53ecf"),
+            Some("fed:dev_e5ffc3b65642770c26c53ecf".to_string())
+        );
     }
 }
 
@@ -4533,6 +4681,7 @@ async fn devices_select_handler(
         .as_deref()
         .and_then(normalize_device_id)
         .unwrap_or_else(|| target_device_id.clone());
+    let previous_active_id = hub.active_device_id_for_commands(user.id);
 
     let Some(response) = hub.select(user.id, &current_device_id, &target_device_id) else {
         return Ok(json_error(
@@ -4540,6 +4689,28 @@ async fn devices_select_handler(
             "target device is offline",
         ));
     };
+    if let Some(fed_device_id) = fed_device_id_from_virtual(&target_device_id) {
+        let Some(playback_state) = response.playback_state.clone() else {
+            return Ok(json_error(
+                StatusCode::BAD_REQUEST,
+                "no playback state to transfer",
+            ));
+        };
+        let state = match serde_json::to_value(playback_state) {
+            Ok(state) => state,
+            Err(err) => return Ok(json_error(StatusCode::BAD_REQUEST, &format!("{err}"))),
+        };
+        let previous_fed_device_id = previous_active_id
+            .as_deref()
+            .and_then(fed_device_id_from_virtual)
+            .filter(|previous| *previous != fed_device_id);
+        if let Err(err) = crate::federation::handle()
+            .fed_device_web_active_transfer(user.id, fed_device_id, previous_fed_device_id, state)
+            .await
+        {
+            return Ok(json_error(StatusCode::BAD_REQUEST, &format!("{err}")));
+        }
+    }
     Json(response).into_response()
 }
 
@@ -4584,6 +4755,33 @@ async fn devices_command_handler(
         stamp_jam_queue_tracks(&mut payload, user.id, &user.name);
     }
 
+    if jam_id.is_none()
+        && let Some(fed_device_id) = target_device_id
+            .as_deref()
+            .and_then(fed_device_id_from_virtual)
+    {
+        let current_state = hub.playback_state_json_for_commands(user.id);
+        match crate::federation::handle()
+            .fed_device_web_command(user.id, fed_device_id, command, payload, current_state)
+            .await
+        {
+            Ok(next_state) => {
+                let name = hub
+                    .fed_device_name_for_commands(user.id, fed_device_id)
+                    .unwrap_or_else(|| fed_device_id.to_string());
+                let _ = hub.apply_fed_playback_state_json(
+                    user.id,
+                    fed_device_id,
+                    &name,
+                    true,
+                    next_state,
+                );
+                return Json(serde_json::json!({"ok": true})).into_response();
+            }
+            Err(err) => return Ok(json_error(StatusCode::BAD_REQUEST, &format!("{err}"))),
+        }
+    }
+
     match hub.enqueue_command(
         user.id,
         target_device_id.as_deref(),
@@ -4593,6 +4791,116 @@ async fn devices_command_handler(
     ) {
         Ok(()) => Json(serde_json::json!({"ok": true})).into_response(),
         Err(message) => Ok(json_error(StatusCode::BAD_REQUEST, message)),
+    }
+}
+
+async fn fed_devices_status_handler(
+    auth_ctx: auth::AuthContext,
+    session: Session,
+    db: Database,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    match crate::federation::handle()
+        .fed_device_status(user.id, &user.name)
+        .await
+    {
+        Ok(status) => Json(status).into_response(),
+        Err(err) => Ok(json_error(StatusCode::BAD_REQUEST, &format!("{err}"))),
+    }
+}
+
+async fn fed_devices_invite_handler(
+    auth_ctx: auth::AuthContext,
+    session: Session,
+    db: Database,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    match crate::federation::handle()
+        .fed_device_invite(user.id, &user.name)
+        .await
+    {
+        Ok(invite) => Json(serde_json::json!({ "invite": invite })).into_response(),
+        Err(err) => Ok(json_error(StatusCode::BAD_REQUEST, &format!("{err}"))),
+    }
+}
+
+async fn fed_devices_connect_handler(
+    auth_ctx: auth::AuthContext,
+    session: Session,
+    db: Database,
+    Json(dto): Json<FedDeviceConnectRequest>,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    match crate::federation::handle()
+        .fed_device_connect(user.id, &user.name, dto.invite.trim())
+        .await
+    {
+        Ok(message) => Json(serde_json::json!({ "ok": true, "message": message })).into_response(),
+        Err(err) => Ok(json_error(StatusCode::BAD_REQUEST, &format!("{err}"))),
+    }
+}
+
+async fn fed_devices_pairing_handler(
+    auth_ctx: auth::AuthContext,
+    session: Session,
+    db: Database,
+    Json(dto): Json<FedDevicePairingAnswerRequest>,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    match crate::federation::handle()
+        .fed_device_answer_pairing(
+            user.id,
+            dto.request_id.trim(),
+            dto.accept,
+            dto.use_requester_group,
+        )
+        .await
+    {
+        Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Err(err) => Ok(json_error(StatusCode::BAD_REQUEST, &format!("{err}"))),
+    }
+}
+
+async fn fed_devices_revoke_handler(
+    auth_ctx: auth::AuthContext,
+    session: Session,
+    db: Database,
+    Json(dto): Json<FedDeviceRevokeRequest>,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    match crate::federation::handle()
+        .fed_device_revoke(user.id, dto.device_id.trim())
+        .await
+    {
+        Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Err(err) => Ok(json_error(StatusCode::BAD_REQUEST, &format!("{err}"))),
+    }
+}
+
+async fn fed_devices_sync_handler(
+    auth_ctx: auth::AuthContext,
+    session: Session,
+    db: Database,
+) -> cot::Result<cot::response::Response> {
+    let Some(user) = auth::get_request_user(&auth_ctx, &session, &db).await else {
+        return Ok(json_error(StatusCode::UNAUTHORIZED, "not authenticated"));
+    };
+    match crate::federation::handle()
+        .fed_device_sync_now(user.id)
+        .await
+    {
+        Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Err(err) => Ok(json_error(StatusCode::BAD_REQUEST, &format!("{err}"))),
     }
 }
 
@@ -4614,6 +4922,103 @@ fn stamp_jam_queue_tracks(payload: &mut serde_json::Value, user_id: i64, user_na
         track_object.insert(
             "added_by_user_name".to_string(),
             serde_json::Value::String(user_name.to_string()),
+        );
+    }
+}
+
+async fn record_fed_track_like(pool: &sqlx::PgPool, user_id: i64, track_id: i64, liked: bool) {
+    if let Err(err) =
+        crate::federation::devices::record_track_like(pool, user_id, track_id, liked).await
+    {
+        tracing::warn!(
+            track_id,
+            liked,
+            "fed device like op was not recorded: {err:#}"
+        );
+    }
+}
+
+async fn record_fed_playlist_created(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+    playlist_id: i64,
+    title: &str,
+) {
+    if let Err(err) =
+        crate::federation::devices::record_playlist_created(pool, user_id, playlist_id, title).await
+    {
+        tracing::warn!(
+            playlist_id,
+            "fed device playlist create op was not recorded: {err:#}"
+        );
+    }
+}
+
+async fn record_fed_playlist_renamed(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+    playlist_id: i64,
+    title: &str,
+) {
+    if let Err(err) =
+        crate::federation::devices::record_playlist_renamed(pool, user_id, playlist_id, title).await
+    {
+        tracing::warn!(
+            playlist_id,
+            "fed device playlist rename op was not recorded: {err:#}"
+        );
+    }
+}
+
+async fn record_fed_playlist_deleted(pool: &sqlx::PgPool, user_id: i64, playlist_id: i64) {
+    if let Err(err) =
+        crate::federation::devices::record_playlist_deleted(pool, user_id, playlist_id).await
+    {
+        tracing::warn!(
+            playlist_id,
+            "fed device playlist delete op was not recorded: {err:#}"
+        );
+    }
+}
+
+async fn record_fed_playlist_tracks_added(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+    playlist_id: i64,
+    track_ids: &[i64],
+) {
+    if let Err(err) = crate::federation::devices::record_playlist_tracks_added(
+        pool,
+        user_id,
+        playlist_id,
+        track_ids,
+    )
+    .await
+    {
+        tracing::warn!(
+            playlist_id,
+            "fed device playlist add op was not recorded: {err:#}"
+        );
+    }
+}
+
+async fn record_fed_playlist_tracks_removed(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+    playlist_id: i64,
+    content_ids: &[String],
+) {
+    if let Err(err) = crate::federation::devices::record_playlist_tracks_removed(
+        pool,
+        user_id,
+        playlist_id,
+        content_ids,
+    )
+    .await
+    {
+        tracing::warn!(
+            playlist_id,
+            "fed device playlist remove op was not recorded: {err:#}"
         );
     }
 }
@@ -5460,6 +5865,8 @@ async fn create_playlist_handler(
     .await
     .map_err(|e| cot::Error::internal(e.to_string()))?;
 
+    record_fed_playlist_created(pool, user.id, row.0, &title).await;
+
     Json(PlaylistCard {
         id: row.0,
         title,
@@ -5513,6 +5920,7 @@ async fn update_playlist_handler(
                 .execute(pool)
                 .await
                 .map_err(|e| cot::Error::internal(e.to_string()))?;
+            record_fed_playlist_renamed(pool, user.id, playlist_id, t).await;
         }
     }
     if let Some(desc) = &body.description {
@@ -5556,6 +5964,7 @@ async fn delete_playlist_handler(
     if owner.0 != user.id {
         return Ok(json_error(StatusCode::FORBIDDEN, "not your playlist"));
     }
+    record_fed_playlist_deleted(pool, user.id, playlist_id).await;
     sqlx::query("DELETE FROM furumusic__playlist_track WHERE playlist_id = $1")
         .bind(playlist_id)
         .execute(pool)
@@ -5637,6 +6046,8 @@ async fn add_tracks_to_playlist_handler(
         .execute(pool)
         .await
         .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    record_fed_playlist_tracks_added(pool, user.id, playlist_id, &body.track_ids).await;
 
     Json(serde_json::json!({"ok": true})).into_response()
 }
@@ -5742,6 +6153,19 @@ async fn reorder_playlist_tracks_handler(
         .await
         .map_err(|e| cot::Error::internal(e.to_string()))?;
 
+    let reordered_track_ids = sqlx::query_scalar::<_, i64>(
+        r#"SELECT pt.track_id
+           FROM furumusic__playlist_track pt
+           JOIN furumusic__track t ON t.id = pt.track_id
+           WHERE pt.playlist_id = $1 AND t.is_hidden = false
+           ORDER BY pt.position"#,
+    )
+    .bind(playlist_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| cot::Error::internal(e.to_string()))?;
+    record_fed_playlist_tracks_added(pool, user.id, playlist_id, &reordered_track_ids).await;
+
     Json(serde_json::json!({"ok": true})).into_response()
 }
 
@@ -5773,6 +6197,23 @@ async fn remove_track_from_playlist_handler(
     if owner.0 != user.id {
         return Ok(json_error(StatusCode::FORBIDDEN, "not your playlist"));
     }
+    let removed_content_ids = match crate::federation::devices::playlist_content_ids_for_removal(
+        pool,
+        playlist_id,
+        body.playlist_track_id,
+        body.track_id,
+    )
+    .await
+    {
+        Ok(ids) => ids,
+        Err(err) => {
+            tracing::warn!(
+                playlist_id,
+                "fed device playlist removal lookup failed: {err:#}"
+            );
+            Vec::new()
+        }
+    };
 
     match (body.playlist_track_id, body.track_id) {
         (Some(playlist_track_id), _) => {
@@ -5821,6 +6262,8 @@ async fn remove_track_from_playlist_handler(
         .await
         .map_err(|e| cot::Error::internal(e.to_string()))?;
 
+    record_fed_playlist_tracks_removed(pool, user.id, playlist_id, &removed_content_ids).await;
+
     Json(serde_json::json!({"ok": true})).into_response()
 }
 
@@ -5855,6 +6298,7 @@ async fn toggle_like_track_handler(
             .execute(pool)
             .await
             .map_err(|e| cot::Error::internal(e.to_string()))?;
+        record_fed_track_like(pool, user.id, track_id, false).await;
         Json(LikeStatus { liked: false }).into_response()
     } else {
         let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
@@ -5867,6 +6311,7 @@ async fn toggle_like_track_handler(
         .execute(pool)
         .await
         .map_err(|e| cot::Error::internal(e.to_string()))?;
+        record_fed_track_like(pool, user.id, track_id, true).await;
         Json(LikeStatus { liked: true }).into_response()
     }
 }
@@ -5887,15 +6332,16 @@ async fn like_release_handler(
     };
     let release_id = path.0.id;
     let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
-
-    // Check if ALL tracks in this release are already liked
-    let total: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM furumusic__track WHERE release_id = $1 AND is_hidden = false",
+    let track_ids = sqlx::query_scalar::<_, i64>(
+        "SELECT id FROM furumusic__track WHERE release_id = $1 AND is_hidden = false",
     )
     .bind(release_id)
-    .fetch_one(pool)
+    .fetch_all(pool)
     .await
     .map_err(|e| cot::Error::internal(e.to_string()))?;
+
+    // Check if ALL tracks in this release are already liked
+    let total = track_ids.len() as i64;
 
     let liked_count: (i64,) = sqlx::query_as(
         r#"SELECT COUNT(*) FROM furumusic__user_liked_track ult
@@ -5908,7 +6354,7 @@ async fn like_release_handler(
     .await
     .map_err(|e| cot::Error::internal(e.to_string()))?;
 
-    if liked_count.0 >= total.0 && total.0 > 0 {
+    if liked_count.0 >= total && total > 0 {
         // Unlike all tracks in release
         sqlx::query(
             r#"DELETE FROM furumusic__user_liked_track
@@ -5921,6 +6367,9 @@ async fn like_release_handler(
         .execute(pool)
         .await
         .map_err(|e| cot::Error::internal(e.to_string()))?;
+        for track_id in &track_ids {
+            record_fed_track_like(pool, user.id, *track_id, false).await;
+        }
         Json(LikeStatus { liked: false }).into_response()
     } else {
         // Like all tracks in release (skip already liked)
@@ -5940,6 +6389,9 @@ async fn like_release_handler(
         .execute(pool)
         .await
         .map_err(|e| cot::Error::internal(e.to_string()))?;
+        for track_id in &track_ids {
+            record_fed_track_like(pool, user.id, *track_id, true).await;
+        }
         Json(LikeStatus { liked: true }).into_response()
     }
 }
@@ -6600,7 +7052,7 @@ impl PlayerApp {
         Self {
             config,
             scheduler_handle,
-            device_hub: Arc::new(PlayerDeviceHub::default()),
+            device_hub: PlayerDeviceHub::shared(),
         }
     }
 }
@@ -8144,6 +8596,70 @@ impl App for PlayerApp {
                     }
                 }),
                 "player_devices_command",
+            ),
+            // -- Federated TUI clients --
+            Route::with_handler_and_name(
+                "/fed-devices",
+                get(
+                    move |auth_ctx: auth::AuthContext, session: Session, db: Database| async move {
+                        fed_devices_status_handler(auth_ctx, session, db).await
+                    },
+                ),
+                "player_fed_devices",
+            ),
+            Route::with_handler_and_name(
+                "/fed-devices/invite",
+                post(
+                    move |auth_ctx: auth::AuthContext, session: Session, db: Database| async move {
+                        fed_devices_invite_handler(auth_ctx, session, db).await
+                    },
+                ),
+                "player_fed_devices_invite",
+            ),
+            Route::with_handler_and_name(
+                "/fed-devices/connect",
+                post(
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          json: Json<FedDeviceConnectRequest>| async move {
+                        fed_devices_connect_handler(auth_ctx, session, db, json).await
+                    },
+                ),
+                "player_fed_devices_connect",
+            ),
+            Route::with_handler_and_name(
+                "/fed-devices/pairing",
+                post(
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          json: Json<FedDevicePairingAnswerRequest>| async move {
+                        fed_devices_pairing_handler(auth_ctx, session, db, json).await
+                    },
+                ),
+                "player_fed_devices_pairing",
+            ),
+            Route::with_handler_and_name(
+                "/fed-devices/revoke",
+                post(
+                    move |auth_ctx: auth::AuthContext,
+                          session: Session,
+                          db: Database,
+                          json: Json<FedDeviceRevokeRequest>| async move {
+                        fed_devices_revoke_handler(auth_ctx, session, db, json).await
+                    },
+                ),
+                "player_fed_devices_revoke",
+            ),
+            Route::with_handler_and_name(
+                "/fed-devices/sync",
+                post(
+                    move |auth_ctx: auth::AuthContext, session: Session, db: Database| async move {
+                        fed_devices_sync_handler(auth_ctx, session, db).await
+                    },
+                ),
+                "player_fed_devices_sync",
             ),
             Route::with_handler_and_name(
                 "/jams/users",
