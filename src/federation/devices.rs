@@ -27,6 +27,7 @@ const PAIRING_WAIT_MS: i64 = 5 * 60 * 1000;
 const PAIRING_RETRY_DELAY: Duration = Duration::from_secs(1);
 const RESPONSE_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 const DEVICE_SYNC_INTERVAL: Duration = Duration::from_secs(2);
+const LOCAL_SEED_RECHECK_MS: i64 = 60 * 1000;
 const MAX_LINE: usize = 8 * 1024 * 1024;
 const MAX_OPS_PER_BATCH: i64 = 1000;
 
@@ -596,6 +597,7 @@ pub async fn revoke_device(pool: &sqlx::PgPool, user_id: i64, device_id: &str) -
 
 pub async fn status(pool: &sqlx::PgPool, user_id: i64, user_name: &str) -> Result<FedDeviceStatus> {
     let identity = ensure_identity(pool, user_id, user_name).await?;
+    maybe_seed_local_user_state(pool, user_id).await?;
     let active_devices: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM furumusic__fed_device
          WHERE user_id = $1 AND trusted_at_ms IS NOT NULL AND revoked_at_ms IS NULL",
@@ -1467,6 +1469,24 @@ async fn ensure_identity(pool: &sqlx::PgPool, user_id: i64, user_name: &str) -> 
     })
 }
 
+async fn maybe_seed_local_user_state(pool: &sqlx::PgPool, user_id: i64) -> Result<()> {
+    let last_seeded_at_ms: Option<i64> = sqlx::query_scalar(
+        "SELECT local_seeded_at_ms
+         FROM furumusic__fed_device_identity
+         WHERE user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+    let Some(last_seeded_at_ms) = last_seeded_at_ms else {
+        return Ok(());
+    };
+    if now_ms().saturating_sub(last_seeded_at_ms) < LOCAL_SEED_RECHECK_MS {
+        return Ok(());
+    }
+    seed_local_user_state(pool, user_id).await
+}
+
 async fn seed_local_user_state(pool: &sqlx::PgPool, user_id: i64) -> Result<()> {
     let now = now_ms();
     let like_rows = sqlx::query(
@@ -1512,22 +1532,8 @@ async fn seed_local_user_state(pool: &sqlx::PgPool, user_id: i64) -> Result<()> 
     .await?;
     for playlist in playlists {
         let playlist_id: i64 = playlist.get("id");
-        let sync_id = format!("webpl_{user_id}_{playlist_id}");
         let title: String = playlist.get("title");
-        sqlx::query(
-            "INSERT INTO furumusic__fed_state_playlist
-                (user_id, playlist_id, local_playlist_id, title, deleted, hlc_ms, op_id)
-             VALUES ($1, $2, $3, $4, false, $5, $6)
-             ON CONFLICT (user_id, playlist_id) DO NOTHING",
-        )
-        .bind(user_id)
-        .bind(&sync_id)
-        .bind(playlist_id)
-        .bind(&title)
-        .bind(now)
-        .bind(format!("local_seed:playlist:{playlist_id}"))
-        .execute(pool)
-        .await?;
+        let sync_id = ensure_seed_playlist_sync_id(pool, user_id, playlist_id, &title, now).await?;
 
         let items = sqlx::query(
             "SELECT pt.track_id, pt.position, c.content_id
@@ -1593,17 +1599,16 @@ async fn seed_local_user_state(pool: &sqlx::PgPool, user_id: i64) -> Result<()> 
     .bind(user_id)
     .fetch_one(pool)
     .await?;
-    if missing_likes + missing_playlist_items == 0 {
-        sqlx::query(
-            "UPDATE furumusic__fed_device_identity
-             SET local_seeded_at_ms = $2
-             WHERE user_id = $1 AND local_seeded_at_ms = 0",
-        )
-        .bind(user_id)
-        .bind(now)
-        .execute(pool)
-        .await?;
-    } else {
+    sqlx::query(
+        "UPDATE furumusic__fed_device_identity
+         SET local_seeded_at_ms = $2
+         WHERE user_id = $1",
+    )
+    .bind(user_id)
+    .bind(now)
+    .execute(pool)
+    .await?;
+    if missing_likes + missing_playlist_items != 0 {
         tracing::debug!(
             user_id,
             missing_likes,
@@ -3414,17 +3419,36 @@ async fn ensure_materialized_playlist(
     .bind(&now)
     .fetch_one(pool)
     .await?;
+    upsert_materialized_playlist_link(pool, user_id, playlist_sync_id, id, title).await?;
+    Ok(id)
+}
+
+async fn upsert_materialized_playlist_link(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+    playlist_sync_id: &str,
+    local_playlist_id: i64,
+    title: &str,
+) -> Result<()> {
     sqlx::query(
-        "UPDATE furumusic__fed_state_playlist
-         SET local_playlist_id = $3
-         WHERE user_id = $1 AND playlist_id = $2",
+        "INSERT INTO furumusic__fed_state_playlist
+            (user_id, playlist_id, local_playlist_id, title, deleted, hlc_ms, op_id)
+         VALUES ($1, $2, $3, $4, false, 0, $5)
+         ON CONFLICT (user_id, playlist_id) DO UPDATE SET
+            local_playlist_id = COALESCE(furumusic__fed_state_playlist.local_playlist_id, EXCLUDED.local_playlist_id),
+            title = CASE
+                WHEN furumusic__fed_state_playlist.hlc_ms = 0 THEN EXCLUDED.title
+                ELSE furumusic__fed_state_playlist.title
+            END",
     )
     .bind(user_id)
     .bind(playlist_sync_id)
-    .bind(id)
+    .bind(local_playlist_id)
+    .bind(title)
+    .bind(format!("local_materialized:{local_playlist_id}"))
     .execute(pool)
     .await?;
-    Ok(id)
+    Ok(())
 }
 
 async fn ensure_playlist_for_item(
@@ -3447,6 +3471,40 @@ async fn ensure_playlist_for_item(
     .filter(|title| !title.trim().is_empty())
     .unwrap_or_else(|| "Synced playlist".to_string());
     ensure_materialized_playlist(pool, user_id, playlist_sync_id, None, &title).await
+}
+
+async fn ensure_seed_playlist_sync_id(
+    pool: &sqlx::PgPool,
+    user_id: i64,
+    playlist_id: i64,
+    title: &str,
+    hlc_ms: i64,
+) -> Result<String> {
+    if let Some(sync_id) = local_playlist_sync_id(pool, user_id, playlist_id).await? {
+        return Ok(sync_id);
+    }
+    let sync_id = format!("webpl_{user_id}_{playlist_id}");
+    sqlx::query(
+        "INSERT INTO furumusic__fed_state_playlist
+            (user_id, playlist_id, local_playlist_id, title, deleted, hlc_ms, op_id)
+         VALUES ($1, $2, $3, $4, false, $5, $6)
+         ON CONFLICT (user_id, playlist_id) DO UPDATE SET
+            local_playlist_id = COALESCE(furumusic__fed_state_playlist.local_playlist_id, EXCLUDED.local_playlist_id),
+            title = CASE
+                WHEN furumusic__fed_state_playlist.hlc_ms = 0 THEN EXCLUDED.title
+                ELSE furumusic__fed_state_playlist.title
+            END,
+            deleted = false",
+    )
+    .bind(user_id)
+    .bind(&sync_id)
+    .bind(playlist_id)
+    .bind(title)
+    .bind(hlc_ms)
+    .bind(format!("local_seed:playlist:{playlist_id}"))
+    .execute(pool)
+    .await?;
+    Ok(sync_id)
 }
 
 async fn ensure_local_playlist_sync_id(
@@ -3707,6 +3765,7 @@ async fn ops_for_peer(
 }
 
 async fn snapshot(pool: &sqlx::PgPool, user_id: i64) -> Result<SyncSnapshot> {
+    maybe_seed_local_user_state(pool, user_id).await?;
     let like_rows = sqlx::query(
         "SELECT content_id, liked, hlc_ms, op_id, fed_json
          FROM furumusic__fed_state_like
